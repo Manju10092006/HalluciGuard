@@ -1,7 +1,9 @@
 from typing import Any, Dict, Optional
 import torch
-from transformers import pipeline, AutoModelForSequenceClassification, AutoTokenizer
+from transformers import pipeline
 from sentence_transformers import SentenceTransformer, CrossEncoder
+
+from config.settings import get_settings
 
 class ModelManager:
     _instance: Optional['ModelManager'] = None
@@ -20,27 +22,36 @@ class ModelManager:
         return "cuda" if torch.cuda.is_available() else "cpu"
 
     def load_nli_model(self) -> Any:
-        model_name = "microsoft/deberta-v3-base-mnli"
+        model_name = get_settings().nli_model
         if model_name not in self._models:
-            self._models[model_name] = pipeline("text-classification", model=model_name, device=0 if self.device == "cuda" else -1)
+            self._models[model_name] = pipeline(
+                "text-classification",
+                model=model_name,
+                top_k=None,
+                device=0 if self.device == "cuda" else -1,
+            )
         return self._models[model_name]
 
     def load_reranker_model(self) -> Any:
-        model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        model_name = get_settings().reranker_model
         if model_name not in self._models:
             self._models[model_name] = CrossEncoder(model_name, device=self.device)
         return self._models[model_name]
 
     def load_embedding_model(self) -> Any:
-        model_name = "all-MiniLM-L6-v2"
+        model_name = get_settings().embedding_model
         if model_name not in self._models:
             self._models[model_name] = SentenceTransformer(model_name, device=self.device)
         return self._models[model_name]
 
     def load_zero_shot_model(self) -> Any:
-        model_name = "facebook/bart-large-mnli"
+        model_name = get_settings().zero_shot_model
         if model_name not in self._models:
-            self._models[model_name] = pipeline("zero-shot-classification", model=model_name, device=0 if self.device == "cuda" else -1)
+            self._models[model_name] = pipeline(
+                "zero-shot-classification",
+                model=model_name,
+                device=0 if self.device == "cuda" else -1,
+            )
         return self._models[model_name]
 
     def unload_all(self) -> None:
@@ -50,10 +61,10 @@ class ModelManager:
 
     def status(self) -> Dict[str, str]:
         all_expected_models = [
-            "microsoft/deberta-v3-base-mnli",
-            "cross-encoder/ms-marco-MiniLM-L-6-v2",
-            "all-MiniLM-L6-v2",
-            "facebook/bart-large-mnli"
+            get_settings().nli_model,
+            get_settings().reranker_model,
+            get_settings().embedding_model,
+            get_settings().zero_shot_model,
         ]
         return {
             m: "loaded" if m in self._models else "not_loaded"

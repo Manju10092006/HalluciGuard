@@ -1,25 +1,26 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import List
 
-import httpx
-
+from config.settings import get_settings
 from schemas.models import Passage, AdapterMetadata
+from utils.async_executor import gather_results
+from utils.http_client import ResilientHttpClient, get_client
 
 logger = logging.getLogger(__name__)
 
 class HealthcareAdapter:
     def __init__(self) -> None:
         self.name = "healthcare"
+        self.openfda_key = get_settings().openfda_key
 
     @property
     def metadata(self) -> AdapterMetadata:
         return AdapterMetadata(
             name=self.name,
             version="1.0.0",
-            supported_domains=["pubmed", "openfda", "clinicaltrials"],
+            supported_domains=["pubmed", "pubmed_central", "openfda", "clinicaltrials"],
             supports_live_search=True,
             cacheable=True,
             priority=10,
@@ -28,43 +29,49 @@ class HealthcareAdapter:
         )
 
     def credibility_of(self, source_id: str) -> float:
+        if source_id.startswith("openfda"): return 0.98
+        if source_id.startswith("pubmed") or source_id.startswith("pmc"): return 0.97
+        if source_id.startswith("clinicaltrials"): return 0.95
         return 0.95
 
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
-            async with httpx.AsyncClient() as client:
-                results = await asyncio.gather(
-                    self._search_pubmed(client, query, k),
-                    self._search_openfda(client, query, k),
-                    self._search_clinicaltrials(client, query, k),
-                    return_exceptions=True
-                )
+            client = get_client()
+            results = await gather_results([
+                self._search_pubmed(client, query, k),
+                self._search_pubmed_central(client, query, k),
+                self._search_openfda(client, query, k),
+                self._search_clinicaltrials(client, query, k),
+            ])
                 
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"Healthcare source search error: {result}")
-                    elif isinstance(result, list):
-                        passages.extend(result)
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Healthcare source search error: {result}")
+                elif isinstance(result, list):
+                    passages.extend(result)
         except Exception as e:
             logger.error(f"Failed healthcare search: {e}")
             
         return sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k] if passages else passages
 
-    async def _search_pubmed(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_pubmed(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            search_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmode=json&retmax={k}"
-            search_res = await client.get(search_url, timeout=10.0)
-            search_res.raise_for_status()
+            search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            params = {"db": "pubmed", "term": query, "retmode": "json", "retmax": k}
+            search_res = await client.get(search_url, adapter_name=self.name, params=params)
             
             ids = search_res.json().get("esearchresult", {}).get("idlist", [])
             if not ids:
                 return []
                 
             ids_str = ",".join(ids)
-            summary_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={ids_str}&retmode=json"
-            summary_res = await client.get(summary_url, timeout=10.0)
-            summary_res.raise_for_status()
+            summary_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+            summary_res = await client.get(
+                summary_url,
+                adapter_name=self.name,
+                params={"db": "pubmed", "id": ids_str, "retmode": "json"},
+            )
             
             result = summary_res.json().get("result", {})
             passages = []
@@ -87,11 +94,57 @@ class HealthcareAdapter:
             logger.error(f"PubMed search error: {e}")
             return []
 
-    async def _search_openfda(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_pubmed_central(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            url = f"https://api.fda.gov/drug/label.json?search={query}&limit={k}"
-            res = await client.get(url, timeout=10.0)
-            res.raise_for_status()
+            search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            search_res = await client.get(
+                search_url,
+                adapter_name=self.name,
+                params={"db": "pmc", "term": query, "retmode": "json", "retmax": k},
+            )
+
+            ids = search_res.json().get("esearchresult", {}).get("idlist", [])
+            if not ids:
+                return []
+
+            summary_res = await client.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                adapter_name=self.name,
+                params={"db": "pmc", "id": ",".join(ids), "retmode": "json"},
+            )
+
+            result = summary_res.json().get("result", {})
+            passages = []
+            for pmc_uid in ids:
+                item = result.get(pmc_uid, {})
+                if not item:
+                    continue
+                title = item.get("title", f"PubMed Central Article {pmc_uid}")
+                pub_date = item.get("pubdate", "2024")
+                passages.append(Passage(
+                    title=title,
+                    source="pubmed_central",
+                    url=f"https://pmc.ncbi.nlm.nih.gov/articles/PMC{pmc_uid}/",
+                    publication_date=pub_date,
+                    snippet=f"{title}. Full-text biomedical article indexed in PubMed Central ({pub_date}). PMCID: PMC{pmc_uid}.",
+                    source_id=f"pmc_{pmc_uid}",
+                    relevance_score=0.91
+                ))
+            return passages
+        except Exception as e:
+            logger.error(f"PubMed Central search error: {e}")
+            return []
+
+    async def _search_openfda(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
+        try:
+            params = {"search": query, "limit": k}
+            if self.openfda_key:
+                params["api_key"] = self.openfda_key
+            res = await client.get(
+                "https://api.fda.gov/drug/label.json",
+                adapter_name=self.name,
+                params=params,
+            )
             
             data = res.json().get("results", [])
             passages = []
@@ -114,11 +167,13 @@ class HealthcareAdapter:
             logger.error(f"OpenFDA search error: {e}")
             return []
 
-    async def _search_clinicaltrials(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_clinicaltrials(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            url = f"https://clinicaltrials.gov/api/v2/studies?query.term={query}&pageSize={k}&format=json"
-            res = await client.get(url, timeout=10.0)
-            res.raise_for_status()
+            res = await client.get(
+                "https://clinicaltrials.gov/api/v2/studies",
+                adapter_name=self.name,
+                params={"query.term": query, "pageSize": k, "format": "json"},
+            )
             
             data = res.json().get("studies", [])
             passages = []

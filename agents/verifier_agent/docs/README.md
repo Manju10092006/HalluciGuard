@@ -42,12 +42,13 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 ## Domain Adapter Coverage
 | Domain | Status | Sources |
 |---|---|---|
-| Healthcare | Fully Implemented | PubMed, ClinicalTrials |
-| Cybersecurity | Fully Implemented | NVD, MITRE |
-| AI Research | Fully Implemented | arXiv |
-| Finance | Stub | - |
-| General | Fully Implemented | Wikipedia |
-*(Total: 5 fully implemented, 18 stubs)*
+| Healthcare | Fully Implemented | PubMed, PubMed Central, openFDA, ClinicalTrials.gov API v2 |
+| Cybersecurity | Fully Implemented | NVD CVE API 2.0, MITRE ATT&CK STIX, CISA KEV |
+| Finance | Fully Implemented | SEC EDGAR Search, World Bank API, Alpha Vantage |
+| AI Research | Fully Implemented | arXiv API, Semantic Scholar Graph API, Crossref REST API |
+| Legal General | Fully Implemented | CourtListener API, Wikipedia REST API |
+| General | Fully Implemented | Wikipedia REST API |
+*(Total: 6 fully implemented, 18 registered stubs)*
 
 ## Testing Guide
 Run the test suite using pytest:

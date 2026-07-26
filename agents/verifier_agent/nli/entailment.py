@@ -3,6 +3,7 @@ import logging
 from typing import List, Dict, Any
 
 from schemas.models import EntailmentLabel
+from models.model_manager import get_model_manager
 
 class NLIEngine:
     """Natural Language Inference engine for entailment classification."""
@@ -17,13 +18,7 @@ class NLIEngine:
             return
             
         try:
-            from transformers import pipeline
-            self.pipeline = pipeline('zero-shot-classification', model=self.model_name)
-            # Actually, standard NLI uses text-classification. 
-            # If using zero-shot, we can provide candidate labels.
-            # However, for MNLI models, standard text-classification pipeline is usually better.
-            # Assuming standard text classification.
-            self.pipeline = pipeline('text-classification', model=self.model_name, return_all_scores=True)
+            self.pipeline = get_model_manager().load_nli_model()
         except ImportError:
             logging.warning("transformers not installed. NLIEngine falling back.")
             self._is_available = False
@@ -53,10 +48,9 @@ class NLIEngine:
             }
             
         try:
-            # For MNLI models, input format is typically [CLS] premise [SEP] hypothesis [SEP]
-            # When using text-classification pipeline, we can pass it as a dict or a string.
-            # Here we format it directly.
             result = self.pipeline({'text': evidence, 'text_pair': claim})
+            if result and isinstance(result[0], list):
+                result = result[0]
             
             # Format results
             scores = {}
@@ -103,4 +97,33 @@ class NLIEngine:
         """
         Classify multiple evidences against a single claim.
         """
-        return [self.classify(claim, ev) for ev in evidences]
+        self._load_model()
+        if not self._is_available:
+            return [self.classify(claim, ev) for ev in evidences]
+
+        try:
+            batch = [{'text': ev, 'text_pair': claim} for ev in evidences]
+            raw_results = self.pipeline(batch)
+            outputs: List[Dict[str, Any]] = []
+            for result in raw_results:
+                rows = result if result and isinstance(result[0], dict) else result[0]
+                scores = {item['label'].lower(): item['score'] for item in rows}
+                entailment = scores.get('entailment', scores.get('label_0', 0.0))
+                neutral = scores.get('neutral', scores.get('label_1', 0.0))
+                contradiction = scores.get('contradiction', scores.get('label_2', 0.0))
+                max_score = max(entailment, neutral, contradiction)
+                label = (
+                    EntailmentLabel.ENTAILMENT if max_score == entailment
+                    else EntailmentLabel.CONTRADICTION if max_score == contradiction
+                    else EntailmentLabel.NEUTRAL
+                )
+                outputs.append({
+                    'label': label,
+                    'entailment_score': entailment,
+                    'contradiction_score': contradiction,
+                    'neutral_score': neutral
+                })
+            return outputs
+        except Exception as e:
+            logging.warning(f"Error during batched NLI classification: {e}. Falling back.")
+            return [self.classify(claim, ev) for ev in evidences]
