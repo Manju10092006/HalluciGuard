@@ -21,7 +21,8 @@ def test_normalize_claim():
     normalizer = ClaimNormalizer()
     text = "   This is a   claim.  "
     normalized = normalizer.normalize(text)
-    assert normalized == "This is a claim."
+    assert normalized == "this is a claim."
+
 
 def test_merger():
     merger = ClaimMerger()

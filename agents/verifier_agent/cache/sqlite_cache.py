@@ -8,9 +8,10 @@ import logging
 class SqliteCache:
     """SQLite-based cache for query results."""
 
-    def __init__(self, db_path: str, ttl_seconds: int = 86400) -> None:
+    def __init__(self, db_path: str = "verification_cache.db", ttl_seconds: int = 86400) -> None:
         self.db_path = db_path
         self.ttl_seconds = ttl_seconds
+
         
     async def init_db(self) -> None:
         """Initialize the database table if it doesn't exist."""

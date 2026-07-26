@@ -5,13 +5,13 @@ from schemas.models import EntailmentLabel
 class ConflictResolver:
     """Resolves conflicts between contradictory evidence."""
 
-    def resolve(self, evidence_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def resolve(self, evidence_items: List[Any]) -> Dict[str, Any]:
         """
         Analyze conflicting evidence and provide a resolution.
-        
+
         Args:
-            evidence_items: List of formatted evidence items (dictionaries or objects).
-            
+            evidence_items: List of formatted evidence items (dictionaries or EvidenceItem objects).
+
         Returns:
             Dict containing resolution_type, explanation, confidence_adjustment.
         """
@@ -24,15 +24,18 @@ class ConflictResolver:
 
         support_weight = 0.0
         contradict_weight = 0.0
-        
+
         for item in evidence_items:
-            # Assuming item is a dictionary here
-            label = item.get('entailment_label')
-            credibility = item.get('source_credibility', 0.5)
-            
-            if label == EntailmentLabel.SUPPORTS:
+            if isinstance(item, dict):
+                label = item.get('entailment_label')
+                credibility = item.get('credibility_score', item.get('source_credibility', 0.5))
+            else:
+                label = getattr(item, 'entailment_label', None)
+                credibility = getattr(item, 'credibility_score', 0.5)
+
+            if label in (EntailmentLabel.ENTAILMENT, 'entailment', 'supports'):
                 support_weight += credibility
-            elif label == EntailmentLabel.CONTRADICTS:
+            elif label in (EntailmentLabel.CONTRADICTION, 'contradiction', 'contradicts'):
                 contradict_weight += credibility
 
         if contradict_weight == 0 and support_weight > 0:
@@ -41,7 +44,7 @@ class ConflictResolver:
                 'explanation': 'All evidence uniformly supports the claim.',
                 'confidence_adjustment': 0.0
             }
-            
+
         if support_weight == 0 and contradict_weight > 0:
             return {
                 'resolution_type': 'unanimous_contradiction',
@@ -55,7 +58,7 @@ class ConflictResolver:
                 'explanation': 'Supporting evidence significantly outweighs contradicting evidence.',
                 'confidence_adjustment': 0.0
             }
-            
+
         if contradict_weight > (2 * support_weight):
             return {
                 'resolution_type': 'majority_contradiction',

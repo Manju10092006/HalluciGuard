@@ -1,24 +1,29 @@
 from __future__ import annotations
+import logging
+from pathlib import Path
 from typing import Dict
 from datetime import datetime
 
+import yaml
+
 class SourceReliabilityManager:
-    """Manages source credibility scores."""
+    """Manages source credibility scores loaded from config/credibility.yaml."""
 
     def __init__(self) -> None:
-        # In a real scenario, this would load from config/credibility.yaml
-        self.credibility_db: Dict[str, Dict[str, float]] = {
-            'healthcare': {
-                'pubmed': 0.95,
-                'cdc': 0.98,
-                'openfda': 0.95
-            },
-            'finance': {
-                'sec': 0.98,
-                'bloomberg': 0.90
-            }
-        }
+        self.credibility_db: Dict[str, Dict[str, float]] = {}
         self.default_credibility = 0.5
+        self._load_config()
+
+    def _load_config(self) -> None:
+        config_path = Path(__file__).parent.parent / "config" / "credibility.yaml"
+        if not config_path.exists():
+            logging.warning(f"Credibility config not found at {config_path}")
+            return
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                self.credibility_db = yaml.safe_load(f) or {}
+        except Exception as e:
+            logging.warning(f"Failed to load credibility config {config_path}: {e}")
 
     def get_credibility(self, domain: str, source_id: str) -> float:
         """Get the credibility score for a source in a given domain."""
@@ -42,9 +47,7 @@ class SourceReliabilityManager:
         Formula: max(0.5, 1.0 - (years_since_publication * 0.1))
         """
         try:
-            # Handle standard ISO format or YYYY-MM-DD
-            # Truncate to 10 chars to safely parse YYYY-MM-DD
-            date_str = publication_date[:10]
+            date_str = str(publication_date)[:10]
             pub_date = datetime.strptime(date_str, '%Y-%m-%d')
             age_in_years = (datetime.now() - pub_date).days / 365.25
             return max(0.5, 1.0 - (age_in_years * 0.1))

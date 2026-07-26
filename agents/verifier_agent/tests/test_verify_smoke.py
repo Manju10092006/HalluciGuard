@@ -6,38 +6,42 @@ from api.main import app
 @pytest.fixture
 def sample_payload():
     return {
+        "query_id": "test_query_001",
         "domain": "healthcare",
         "suspicious_claims": [
             {
                 "claim_id": "claim_1",
-                "claim_text": "XYZ drug completely cures diabetes"
+                "text": "XYZ drug completely cures diabetes"
             }
         ]
     }
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_verify_basic(sample_payload):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post("/verify", json=sample_payload)
     assert response.status_code == 200
     data = response.json()
-    assert "request_id" in data
+    assert "query_id" in data
     assert data["domain"] == "healthcare"
-    assert "reports" in data
-    assert isinstance(data["reports"], list)
+    assert "claim_evidence" in data
+    assert isinstance(data["claim_evidence"], list)
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_verify_response_contract(sample_payload):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post("/verify", json=sample_payload)
     assert response.status_code == 200
     data = response.json()
-    assert "request_id" in data
+    assert "query_id" in data
     assert "domain" in data
-    assert "reports" in data
-    assert "metrics" in data
-    
-@pytest.mark.asyncio
+    assert "domain_validated" in data
+    assert "claim_evidence" in data
+    assert "overall_evidence_confidence" in data
+    assert "latency_ms" in data
+    assert "pipeline_stages" in data
+
+@pytest.mark.anyio
 async def test_verify_caching(sample_payload):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # First request
@@ -48,5 +52,4 @@ async def test_verify_caching(sample_payload):
         response2 = await ac.post("/verify", json=sample_payload)
         assert response2.status_code == 200
         
-        # In a real scenario we'd assert latency is lower, but logic validation suffices
-        assert response1.json()["reports"][0]["verdict"] == response2.json()["reports"][0]["verdict"]
+        assert response1.json()["claim_evidence"][0]["verdict"] == response2.json()["claim_evidence"][0]["verdict"]

@@ -55,3 +55,8 @@ class ClaimMerger:
             },
             'evidence_items': merged_evidence
         }
+
+    def merge(self, sub_claim_reports: list[dict]) -> dict:
+        """Alias for merge_results."""
+        return self.merge_results(sub_claim_reports)
+

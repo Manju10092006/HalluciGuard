@@ -1,12 +1,12 @@
 from __future__ import annotations
 import pytest
-from adapters.registry import Registry, get_registry
+from adapters.registry import AdapterRegistry, get_registry
 
 def test_register_adapter():
-    registry = Registry()
+    registry = AdapterRegistry()
     class DummyAdapter:
-        pass
-    registry.register("dummy", DummyAdapter())
+        name = "dummy"
+    registry.register(DummyAdapter())
     adapter = registry.get_adapter("dummy")
     assert isinstance(adapter, DummyAdapter)
 
@@ -24,6 +24,7 @@ def test_list_domains():
 
 def test_domain_statistics():
     registry = get_registry()
-    adapter = registry.get_adapter("general")
-    stats = adapter.get_health_status()
+    stats = registry.get_domain_statistics("general")
+    assert "sources" in stats
     assert "status" in stats
+

@@ -12,7 +12,7 @@ class HybridRetriever:
         self.sparse = BM25Retriever()
         self.dense = DenseRetriever()
         
-    def retrieve(self, query: str, passages: List[Passage], k: int) -> List[Passage]:
+    def retrieve(self, query: str, passages: List[Passage], k: int = 5) -> List[Passage]:
         """
         Retrieve and fuse results using Reciprocal Rank Fusion (RRF).
         
@@ -39,15 +39,16 @@ class HybridRetriever:
         passage_map: dict[str, Passage] = {}
         
         for rank, (passage, _) in enumerate(sparse_results):
-            passage_id = passage.id or passage.snippet
+            passage_id = passage.source_id or passage.snippet
             passage_map[passage_id] = passage
             rrf_scores[passage_id] = rrf_scores.get(passage_id, 0.0) + 1.0 / (rank + 1 + 60)
             
         if self.dense._is_available:
             for rank, (passage, _) in enumerate(dense_results):
-                passage_id = passage.id or passage.snippet
+                passage_id = passage.source_id or passage.snippet
                 passage_map[passage_id] = passage
                 rrf_scores[passage_id] = rrf_scores.get(passage_id, 0.0) + 1.0 / (rank + 1 + 60)
+
                 
         # Sort by fused score
         sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)

@@ -8,9 +8,8 @@ from .source_reliability import SourceReliabilityManager
 class EvidenceScorer:
     """Scores evidence based on entailment, credibility, and agreement."""
 
-    def __init__(self, credibility_config: Dict[str, Any]) -> None:
+    def __init__(self, credibility_config: Dict[str, Any] = None) -> None:
         self.reliability_manager = SourceReliabilityManager()
-        # Mocking config load for brevity, typically would pass it to reliability_manager
 
     def score_evidence(self, claim: str, passages: List[Passage], nli_results: List[Dict[str, Any]], domain: str) -> Dict[str, Any]:
         """
@@ -28,27 +27,28 @@ class EvidenceScorer:
             }
 
         # Calculate agreement bonus
-        supports_count = sum(1 for res in nli_results if res['label'] == EntailmentLabel.SUPPORTS)
-        contradicts_count = sum(1 for res in nli_results if res['label'] == EntailmentLabel.CONTRADICTS)
+        supports_count = sum(1 for res in nli_results if res['label'] == EntailmentLabel.ENTAILMENT)
+        contradicts_count = sum(1 for res in nli_results if res['label'] == EntailmentLabel.CONTRADICTION)
         
         weighted_scores = []
         
         for passage, nli in zip(passages, nli_results):
             entailment_margin = nli['entailment_score'] - nli['contradiction_score']
             
-            source_id = passage.source_name or "unknown"
+            source_id = getattr(passage, 'source_id', '') or passage.source or "unknown"
             credibility_weight = self.reliability_manager.get_credibility(domain, source_id)
             
             pub_date_str = passage.publication_date or datetime.now().isoformat()
             recency_factor = self.reliability_manager.compute_recency_factor(pub_date_str)
             
             # Agreement bonus
-            if nli['label'] == EntailmentLabel.SUPPORTS:
+            if nli['label'] == EntailmentLabel.ENTAILMENT:
                 agreement_bonus = 1.0 + (0.1 * supports_count)
-            elif nli['label'] == EntailmentLabel.CONTRADICTS:
+            elif nli['label'] == EntailmentLabel.CONTRADICTION:
                 agreement_bonus = 1.0 + (0.1 * contradicts_count)
             else:
                 agreement_bonus = 1.0
+
                 
             weighted_score = entailment_margin * credibility_weight * recency_factor * agreement_bonus
             weighted_scores.append(weighted_score)

@@ -71,9 +71,9 @@ class NLIEngine:
             
             max_score = max(entailment, neutral, contradiction)
             if max_score == entailment:
-                final_label = EntailmentLabel.SUPPORTS
+                final_label = EntailmentLabel.ENTAILMENT
             elif max_score == contradiction:
-                final_label = EntailmentLabel.CONTRADICTS
+                final_label = EntailmentLabel.CONTRADICTION
             else:
                 final_label = EntailmentLabel.NEUTRAL
                 
@@ -92,6 +92,12 @@ class NLIEngine:
                 'contradiction_score': 0.33,
                 'neutral_score': 0.34
             }
+
+    def predict(self, claim: str, evidence: str) -> EntailmentLabel:
+        """Helper returning the top EntailmentLabel."""
+        res = self.classify(claim, evidence)
+        return res['label']
+
 
     def batch_classify(self, claim: str, evidences: List[str]) -> List[Dict[str, Any]]:
         """
