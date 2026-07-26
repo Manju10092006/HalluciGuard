@@ -183,8 +183,9 @@ class VerificationPipeline:
                         verdict=verdict
                     )
 
-                # Cache set
-                await self.cache.set(validated_domain, claim.text, report.model_dump())
+                # Cache set (only cache valid non-empty evidence results)
+                if claim_evidence_items:
+                    await self.cache.set(validated_domain, claim.text, report.model_dump())
                 claim_reports.append(report)
 
             except Exception as e:

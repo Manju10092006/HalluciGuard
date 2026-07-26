@@ -29,8 +29,12 @@ class ClaimMerger:
             total_trust += scores.get('trust_score', 0.0)
             
             for evidence in report.get('evidence_items', []):
-                snippet = evidence.get('snippet', '')
-                if snippet not in seen_evidence:
+                if isinstance(evidence, dict):
+                    snippet = evidence.get('snippet', '')
+                else:
+                    snippet = getattr(evidence, 'snippet', '')
+
+                if snippet and snippet not in seen_evidence:
                     seen_evidence.add(snippet)
                     merged_evidence.append(evidence)
 
@@ -39,10 +43,12 @@ class ClaimMerger:
         avg_contradict = total_contradict / count
         avg_trust = total_trust / count
         
-        if avg_trust > 0.6:
+        if avg_trust > 0.5 or avg_support > 0.6:
             overall_verdict = 'verified'
-        elif avg_trust < 0.3:
+        elif avg_contradict > 0.5:
             overall_verdict = 'likely_hallucinated'
+        elif avg_support == 0.0 and avg_contradict == 0.0:
+            overall_verdict = 'insufficient_evidence'
         else:
             overall_verdict = 'mixed_evidence'
 
@@ -59,4 +65,3 @@ class ClaimMerger:
     def merge(self, sub_claim_reports: list[dict]) -> dict:
         """Alias for merge_results."""
         return self.merge_results(sub_claim_reports)
-

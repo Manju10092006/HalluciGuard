@@ -35,8 +35,9 @@ class DuplicateRemover:
                 seen_urls.add(p.url)
                 
             # Strategy 3: Same title + same source
-            if p.title and p.source_name:
-                title_source_key = f"{p.title.lower()}::{p.source_name.lower()}"
+            source_val = p.source
+            if p.title and source_val:
+                title_source_key = f"{p.title.lower()}::{source_val.lower()}"
                 if title_source_key in seen_title_sources:
                     continue
                 seen_title_sources.add(title_source_key)
