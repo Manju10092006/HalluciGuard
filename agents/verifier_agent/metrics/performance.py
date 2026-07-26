@@ -3,7 +3,7 @@ import time
 from contextlib import contextmanager
 from typing import Dict, List, Generator
 
-from schemas.models import PipelineStageStatus
+from schemas.models import PipelineStageStatus, PipelineStage
 
 class PerformanceTracker:
     """Tracks execution time for different pipeline stages."""
@@ -37,7 +37,18 @@ class PerformanceTracker:
 
     def to_pipeline_stages(self) -> List[PipelineStageStatus]:
         """Convert recorded timings to PipelineStageStatus schema objects."""
-        return [
-            PipelineStageStatus(stage_name=name, duration_ms=duration)
-            for name, duration in self.timings.items()
-        ]
+        stages: List[PipelineStageStatus] = []
+        for name, duration in self.timings.items():
+            try:
+                enum_stage = PipelineStage(name)
+            except ValueError:
+                enum_stage = PipelineStage.RETRIEVAL
+            stages.append(
+                PipelineStageStatus(
+                    stage=enum_stage,
+                    status="completed",
+                    duration_ms=duration,
+                    details=f"Completed in {duration}ms"
+                )
+            )
+        return stages

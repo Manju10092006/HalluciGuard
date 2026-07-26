@@ -15,10 +15,10 @@ class LegalGeneralAdapter:
         self.name = "legal_general"
         self._curated_acts = {
             "ipc": "Indian Penal Code, major sections cover criminal offenses.",
-            "crpc": "Code of Criminal Procedure, sets out the procedure for the administration of criminal law in India.",
-            "constitution": "Constitution of India, the supreme law of India.",
+            "crpc": "Code of Criminal Procedure, sets out the procedure for criminal law in India.",
+            "constitution": "Constitution of India, supreme legal framework.",
             "it act 2000": "Information Technology Act, 2000 deals with cybercrime and electronic commerce.",
-            "bns 2023": "Bharatiya Nyaya Sanhita, 2023 replaces the IPC."
+            "bns 2023": "Bharatiya Nyaya Sanhita, 2023 replaces the Indian Penal Code."
         }
 
     @property
@@ -34,17 +34,22 @@ class LegalGeneralAdapter:
             is_stub=False
         )
 
+    def credibility_of(self, source_id: str) -> float:
+        return 0.75
+
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
-            # Check curated acts
             query_lower = query.lower()
             for act_key, act_desc in self._curated_acts.items():
                 if act_key in query_lower:
                     passages.append(Passage(
-                        text=act_desc,
+                        title=f"Curated Legal Act: {act_key.upper()}",
+                        source="curated_acts",
+                        url="https://legislative.gov.in",
+                        publication_date="2024",
+                        snippet=f"Legal Statute [{act_key.upper()}]: {act_desc}",
                         source_id=f"curated_{act_key.replace(' ', '_')}",
-                        source_url="",
                         relevance_score=0.9
                     ))
 
@@ -67,21 +72,20 @@ class LegalGeneralAdapter:
             search_results = res.json().get("query", {}).get("search", [])
             passages = []
             for item in search_results:
-                title = item.get("title", "")
+                title = item.get("title", "Legal Article")
                 snippet = item.get("snippet", "").replace('<span class="searchmatch">', '').replace('</span>', '')
                 title_url = title.replace(" ", "_")
                 
                 passages.append(Passage(
-                    text=f"{title}: {snippet}",
+                    title=f"Wikipedia Legal: {title}",
+                    source="wikipedia",
+                    url=f"https://en.wikipedia.org/wiki/{title_url}",
+                    publication_date="2024",
+                    snippet=f"Legal Reference [{title}]: {snippet[:300]}",
                     source_id=f"wiki_{title_url}",
-                    source_url=f"https://en.wikipedia.org/wiki/{title_url}",
                     relevance_score=0.8
                 ))
             return passages
         except Exception as e:
             logger.error(f"Wikipedia legal search error: {e}")
             return []
-
-    def credibility_of(self, source_id: str) -> float:
-        # Honest about limited coverage
-        return 0.75

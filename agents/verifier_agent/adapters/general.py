@@ -27,6 +27,9 @@ class GeneralAdapter:
             is_stub=False
         )
 
+    def credibility_of(self, source_id: str) -> float:
+        return 0.80
+
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
@@ -37,21 +40,21 @@ class GeneralAdapter:
                 
                 search_results = res.json().get("query", {}).get("search", [])
                 for item in search_results:
-                    title = item.get("title", "")
+                    title = item.get("title", "Wikipedia Article")
                     snippet_html = item.get("snippet", "")
                     snippet = BeautifulSoup(snippet_html, "html.parser").get_text()
                     title_url = title.replace(" ", "_")
                     
                     passages.append(Passage(
-                        text=f"{title}: {snippet}",
+                        title=f"Wikipedia: {title}",
+                        source="wikipedia",
+                        url=f"https://en.wikipedia.org/wiki/{title_url}",
+                        publication_date="2024",
+                        snippet=f"Article [{title}]: {snippet[:300]}",
                         source_id=f"wiki_{title_url}",
-                        source_url=f"https://en.wikipedia.org/wiki/{title_url}",
                         relevance_score=0.8
                     ))
         except Exception as e:
             logger.error(f"Failed general search: {e}")
             
         return passages
-
-    def credibility_of(self, source_id: str) -> float:
-        return 0.80

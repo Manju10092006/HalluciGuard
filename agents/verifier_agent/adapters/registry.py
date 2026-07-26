@@ -49,11 +49,13 @@ class AdapterRegistry:
         if not adapter:
             return {}
         return {
+            "domain": domain,
             "sources": adapter.metadata.supported_domains,
             "status": "active" if not adapter.metadata.is_stub else "stub",
-            "credibility_scores": {}, # In real scenario, would be detailed
+            "credibility_scores": {},
             "is_implemented": not adapter.metadata.is_stub
         }
+
 
     def get_all_statistics(self) -> List[Dict[str, Any]]:
         """Gets statistics for all domain adapters."""

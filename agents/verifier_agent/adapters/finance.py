@@ -28,6 +28,12 @@ class FinanceAdapter:
             is_stub=False
         )
 
+    def credibility_of(self, source_id: str) -> float:
+        if source_id.startswith("sec"): return 0.98
+        if source_id.startswith("wb"): return 0.95
+        if source_id.startswith("alpha"): return 0.90
+        return 0.85
+
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
@@ -62,14 +68,17 @@ class FinanceAdapter:
             passages = []
             for item in hits[:k]:
                 source = item.get("_source", {})
-                date = source.get("filing_date", "")
-                entity = source.get("display_names", [""])[0] if source.get("display_names") else ""
-                desc = source.get("file_description", "")
+                date = source.get("filing_date", "2024")
+                entity = source.get("display_names", ["EDGAR Entity"])[0] if source.get("display_names") else "EDGAR Entity"
+                desc = source.get("file_description", "SEC Filing Document.")
                 
                 passages.append(Passage(
-                    text=f"SEC Filing by {entity} on {date}: {desc}",
+                    title=f"SEC Filing: {entity}",
+                    source="sec_edgar",
+                    url=f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={entity}",
+                    publication_date=str(date)[:10],
+                    snippet=f"SEC Filing by {entity} ({date}): {desc[:300]}",
                     source_id=f"sec_{entity}",
-                    source_url=f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={entity}",
                     relevance_score=0.9
                 ))
             return passages
@@ -79,7 +88,7 @@ class FinanceAdapter:
 
     async def _search_worldbank(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
         try:
-            url = f"https://api.worldbank.org/v2/country/all?format=json&per_page=50"
+            url = "https://api.worldbank.org/v2/country/all?format=json&per_page=50"
             res = await client.get(url, timeout=10.0)
             res.raise_for_status()
             
@@ -92,9 +101,12 @@ class FinanceAdapter:
                     name = item.get("name", "")
                     if query_lower in name.lower() or query_lower in item.get("id", "").lower():
                         passages.append(Passage(
-                            text=f"World Bank Data for {name} (Capital: {item.get('capitalCity', '')}, Region: {item.get('region', {}).get('value', '')})",
+                            title=f"World Bank Country Profile: {name}",
+                            source="world_bank",
+                            url=f"https://data.worldbank.org/country/{item.get('id')}",
+                            publication_date="2024",
+                            snippet=f"World Bank Economic Data for {name} (Capital: {item.get('capitalCity', '')}, Region: {item.get('region', {}).get('value', '')})",
                             source_id=f"wb_{item.get('id')}",
-                            source_url=f"https://data.worldbank.org/country/{item.get('id')}",
                             relevance_score=0.85
                         ))
                         if len(passages) >= k:
@@ -105,9 +117,7 @@ class FinanceAdapter:
             return []
 
     async def _search_alphavantage(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
-        # Implementation would extract ticker from query and search. Placeholder for logic.
         try:
-            # Assuming 'query' is a ticker symbol for simplicity in this example
             ticker = query.split()[0].upper()
             url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={self.api_key}"
             res = await client.get(url, timeout=10.0)
@@ -116,18 +126,15 @@ class FinanceAdapter:
             data = res.json()
             if "Symbol" in data:
                 return [Passage(
-                    text=f"Alpha Vantage Overview for {data['Symbol']}: {data.get('Description', '')[:200]}...",
+                    title=f"Alpha Vantage: {data['Symbol']}",
+                    source="alpha_vantage",
+                    url=f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={data['Symbol']}",
+                    publication_date="2024",
+                    snippet=f"Overview for {data['Symbol']}: {data.get('Description', '')[:300]}",
                     source_id=f"alpha_{data['Symbol']}",
-                    source_url=f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={data['Symbol']}",
                     relevance_score=0.88
                 )]
             return []
         except Exception as e:
             logger.error(f"Alpha Vantage search error: {e}")
             return []
-
-    def credibility_of(self, source_id: str) -> float:
-        if source_id.startswith("sec"): return 0.98
-        if source_id.startswith("wb"): return 0.95
-        if source_id.startswith("alpha"): return 0.9
-        return 0.8

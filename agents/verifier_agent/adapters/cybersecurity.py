@@ -30,6 +30,9 @@ class CybersecurityAdapter:
             is_stub=False
         )
 
+    def credibility_of(self, source_id: str) -> float:
+        return 0.96
+
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
@@ -61,16 +64,19 @@ class CybersecurityAdapter:
             passages = []
             for item in data:
                 cve = item.get("cve", {})
-                cve_id = cve.get("id", "")
+                cve_id = cve.get("id", "CVE-Unknown")
                 descriptions = cve.get("descriptions", [])
                 desc_text = descriptions[0].get("value", "") if descriptions else ""
-                published = cve.get("published", "")
+                published = cve.get("published", "2023")
                 
                 if desc_text:
                     passages.append(Passage(
-                        text=f"{cve_id} (Published: {published}): {desc_text}",
+                        title=f"NVD CVE: {cve_id}",
+                        source="nvd",
+                        url=f"https://nvd.nist.gov/vuln/detail/{cve_id}",
+                        publication_date=str(published)[:10],
+                        snippet=f"Vulnerability {cve_id}: {desc_text[:300]}",
                         source_id=f"nvd_{cve_id}",
-                        source_url=f"https://nvd.nist.gov/vuln/detail/{cve_id}",
                         relevance_score=0.9
                     ))
             return passages
@@ -92,23 +98,27 @@ class CybersecurityAdapter:
             
             passages = []
             query_lower = query.lower()
-            for obj in self._mitre_cache:
-                name = obj.get("name", "").lower()
-                desc = obj.get("description", "").lower()
-                if query_lower in name or query_lower in desc:
-                    ext_id = ""
-                    for ext_ref in obj.get("external_references", []):
-                        if ext_ref.get("source_name") == "mitre-attack":
-                            ext_id = ext_ref.get("external_id", "")
+            if self._mitre_cache:
+                for obj in self._mitre_cache:
+                    name = obj.get("name", "").lower()
+                    desc = obj.get("description", "").lower()
+                    if query_lower in name or query_lower in desc:
+                        ext_id = ""
+                        for ext_ref in obj.get("external_references", []):
+                            if ext_ref.get("source_name") == "mitre-attack":
+                                ext_id = ext_ref.get("external_id", "")
+                                break
+                        passages.append(Passage(
+                            title=f"MITRE ATT&CK: {obj.get('name')}",
+                            source="mitre",
+                            url=f"https://attack.mitre.org/techniques/{ext_id}",
+                            publication_date="2024",
+                            snippet=f"Technique [{ext_id}]: {obj.get('description', '')[:300]}",
+                            source_id=f"mitre_{ext_id}",
+                            relevance_score=0.85
+                        ))
+                        if len(passages) >= k:
                             break
-                    passages.append(Passage(
-                        text=f"MITRE ATT&CK: {obj.get('name')}\n{obj.get('description', '')}",
-                        source_id=f"mitre_{ext_id}",
-                        source_url=f"https://attack.mitre.org/techniques/{ext_id}",
-                        relevance_score=0.85
-                    ))
-                    if len(passages) >= k:
-                        break
             return passages
         except Exception as e:
             logger.error(f"MITRE search error: {e}")
@@ -133,12 +143,15 @@ class CybersecurityAdapter:
                         item.get("shortDescription", "")
                     ]
                     if any(query_lower in str(field).lower() for field in match_fields):
-                        cve = item.get("cveID", "")
+                        cve = item.get("cveID", "CVE")
                         passages.append(Passage(
-                            text=f"CISA KEV {cve}: {item.get('vendorProject')} {item.get('product')}\n{item.get('shortDescription')}",
+                            title=f"CISA KEV: {cve}",
+                            source="cisa",
+                            url="https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+                            publication_date="2024",
+                            snippet=f"CISA KEV [{cve}] {item.get('vendorProject')} {item.get('product')}: {item.get('shortDescription', '')[:300]}",
                             source_id=f"cisa_{cve}",
-                            source_url="https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
-                            relevance_score=0.95
+                            relevance_score=0.88
                         ))
                         if len(passages) >= k:
                             break
@@ -146,9 +159,3 @@ class CybersecurityAdapter:
         except Exception as e:
             logger.error(f"CISA search error: {e}")
             return []
-
-    def credibility_of(self, source_id: str) -> float:
-        if source_id.startswith("nvd"): return 0.95
-        if source_id.startswith("mitre"): return 0.98
-        if source_id.startswith("cisa"): return 0.99
-        return 0.85

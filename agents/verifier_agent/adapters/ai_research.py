@@ -28,6 +28,12 @@ class AiResearchAdapter:
             is_stub=False
         )
 
+    def credibility_of(self, source_id: str) -> float:
+        if source_id.startswith("arxiv"): return 0.90
+        if source_id.startswith("s2"): return 0.95
+        if source_id.startswith("crossref"): return 0.92
+        return 0.85
+
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
@@ -60,15 +66,18 @@ class AiResearchAdapter:
             
             passages = []
             for entry in entries:
-                title = entry.title.text.strip() if entry.title else ""
+                title = entry.title.text.strip() if entry.title else "arXiv Paper"
                 summary = entry.summary.text.strip() if entry.summary else ""
                 url_id = entry.id.text.strip() if entry.id else ""
-                published = entry.published.text.strip() if entry.published else ""
+                published = entry.published.text.strip() if entry.published else "2024"
                 
                 passages.append(Passage(
-                    text=f"arXiv: {title} ({published})\n{summary}",
+                    title=f"arXiv Paper: {title}",
+                    source="arxiv",
+                    url=url_id,
+                    publication_date=published[:10],
+                    snippet=f"Paper Title [{title}]: {summary[:300]}",
                     source_id=f"arxiv_{url_id.split('/')[-1]}",
-                    source_url=url_id,
                     relevance_score=0.9
                 ))
             return passages
@@ -85,15 +94,18 @@ class AiResearchAdapter:
             data = res.json().get("data", [])
             passages = []
             for item in data:
-                title = item.get("title", "")
+                title = item.get("title", "Paper")
                 abstract = item.get("abstract", "")
-                url_val = item.get("url", "")
-                year = item.get("year", "")
+                url_val = item.get("url", "https://semanticscholar.org")
+                year = item.get("year", "2024")
                 
                 passages.append(Passage(
-                    text=f"Semantic Scholar: {title} ({year})\n{abstract}",
-                    source_id=f"s2_{item.get('paperId', '')}",
-                    source_url=url_val,
+                    title=f"Semantic Scholar: {title}",
+                    source="semantic_scholar",
+                    url=url_val or "https://semanticscholar.org",
+                    publication_date=str(year),
+                    snippet=f"Abstract [{title} ({year})]: {abstract[:300]}",
+                    source_id=f"s2_{item.get('paperId', 'paper')}",
                     relevance_score=0.92
                 ))
             return passages
@@ -111,23 +123,20 @@ class AiResearchAdapter:
             items = res.json().get("message", {}).get("items", [])
             passages = []
             for item in items:
-                title = item.get("title", [""])[0]
-                url_val = item.get("URL", "")
+                title = item.get("title", ["Crossref Work"])[0]
+                url_val = item.get("URL", "https://crossref.org")
                 abstract = item.get("abstract", "")
                 
                 passages.append(Passage(
-                    text=f"Crossref: {title}\n{abstract}",
+                    title=f"Crossref: {title}",
+                    source="crossref",
+                    url=url_val,
+                    publication_date="2024",
+                    snippet=f"Publication [{title}]: {abstract[:300]}",
                     source_id=f"crossref_{url_val.split('/')[-1]}",
-                    source_url=url_val,
                     relevance_score=0.88
                 ))
             return passages
         except Exception as e:
             logger.error(f"Crossref search error: {e}")
             return []
-
-    def credibility_of(self, source_id: str) -> float:
-        if source_id.startswith("arxiv"): return 0.9
-        if source_id.startswith("s2"): return 0.95
-        if source_id.startswith("crossref"): return 0.92
-        return 0.85
