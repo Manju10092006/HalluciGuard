@@ -3,6 +3,7 @@ import logging
 from typing import List
 
 from schemas.models import Passage
+from models.model_manager import get_model_manager
 
 class CrossEncoderReranker:
     """Reranks passages using a cross-encoder model."""
@@ -18,9 +19,7 @@ class CrossEncoderReranker:
             return
             
         try:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+            self.model = get_model_manager().load_reranker_model()
         except ImportError:
             logging.warning("transformers not installed. CrossEncoderReranker falling back.")
             self._is_available = False
@@ -46,30 +45,16 @@ class CrossEncoderReranker:
             return passages[:k]
             
         try:
-            import torch
-            
             pairs = [(claim, p.snippet) for p in passages]
-            features = self.tokenizer(pairs, padding=True, truncation=True, return_tensors="pt")
-            
-            with torch.no_grad():
-                scores = self.model(**features).logits
-                
-            if scores.shape[1] > 1:
-                # If model returns multiple logits, typically take the positive class (e.g. idx 1)
-                scores = scores[:, 1]
-            else:
-                scores = scores.squeeze(-1)
-                
-            scores = scores.tolist()
+            scores = self.model.predict(pairs, batch_size=16).tolist()
             
             scored_passages = [(passages[i], scores[i]) for i in range(len(passages))]
             scored_passages.sort(key=lambda x: x[1], reverse=True)
             
-            # Optionally update relevance_score
-            for p, s in scored_passages:
-                p.relevance_score = s
-                
-            return [p for p, s in scored_passages[:k]]
+            return [
+                p.model_copy(update={"relevance_score": float(s)})
+                for p, s in scored_passages[:k]
+            ]
             
         except Exception as e:
             logging.warning(f"Error during reranking: {e}. Returning original passages.")
