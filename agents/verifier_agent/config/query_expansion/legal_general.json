@@ -1,0 +1,17 @@
+{
+  "synonyms": {
+    "IPC": "Indian Penal Code",
+    "CrPC": "Code of Criminal Procedure",
+    "CPC": "Code of Civil Procedure",
+    "IT Act": "Information Technology Act 2000",
+    "RTI": "Right to Information",
+    "PIL": "Public Interest Litigation",
+    "FIR": "First Information Report",
+    "SC": "Supreme Court",
+    "HC": "High Court",
+    "BNS": "Bharatiya Nyaya Sanhita",
+    "BNSS": "Bharatiya Nagarik Suraksha Sanhita",
+    "BSA": "Bharatiya Sakshya Adhiniyam"
+  },
+  "domain_terms": ["statute", "section", "amendment", "article", "constitution", "jurisdiction", "precedent", "bail", "habeas corpus", "writ petition"]
+}

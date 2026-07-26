@@ -1,0 +1,27 @@
+healthcare:
+  pubmed: 0.97
+  openfda: 0.98
+  clinicaltrials: 0.95
+  cdc: 0.96
+  who_gho: 0.95
+  medlineplus: 0.93
+cybersecurity:
+  mitre_attack: 0.97
+  nvd: 0.96
+  cisa_kev: 0.96
+  owasp: 0.85
+finance:
+  sec_edgar: 0.97
+  world_bank: 0.95
+  alpha_vantage: 0.85
+  imf: 0.93
+legal_general:
+  wikipedia_legal: 0.75
+  curated_acts: 0.80
+ai_research:
+  arxiv: 0.93
+  semantic_scholar: 0.92
+  crossref: 0.90
+general:
+  wikipedia: 0.80
+  wikidata: 0.82

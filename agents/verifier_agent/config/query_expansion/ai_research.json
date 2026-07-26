@@ -1,0 +1,21 @@
+{
+  "synonyms": {
+    "LLM": "Large Language Model",
+    "NLP": "Natural Language Processing",
+    "NLI": "Natural Language Inference",
+    "RAG": "Retrieval-Augmented Generation",
+    "RLHF": "Reinforcement Learning from Human Feedback",
+    "GPT": "Generative Pre-trained Transformer",
+    "BERT": "Bidirectional Encoder Representations from Transformers",
+    "CNN": "Convolutional Neural Network",
+    "RNN": "Recurrent Neural Network",
+    "GAN": "Generative Adversarial Network",
+    "VAE": "Variational Autoencoder",
+    "LoRA": "Low-Rank Adaptation",
+    "QLoRA": "Quantized Low-Rank Adaptation",
+    "MoE": "Mixture of Experts",
+    "SFT": "Supervised Fine-Tuning",
+    "DPO": "Direct Preference Optimization"
+  },
+  "domain_terms": ["transformer", "attention mechanism", "fine-tuning", "pre-training", "embedding", "tokenization", "hallucination", "benchmark", "perplexity", "BLEU score"]
+}

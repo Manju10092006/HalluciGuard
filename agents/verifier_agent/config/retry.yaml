@@ -1,0 +1,25 @@
+default:
+  max_retries: 3
+  base_delay_seconds: 1.0
+  max_delay_seconds: 16.0
+  exponential_base: 2
+  retry_on_status: [429, 500, 502, 503, 504]
+  timeout_seconds: 10.0
+
+adapters:
+  pubmed:
+    max_retries: 3
+    timeout_seconds: 8.0
+  nvd:
+    max_retries: 2
+    timeout_seconds: 12.0
+    base_delay_seconds: 2.0
+  sec_edgar:
+    max_retries: 2
+    timeout_seconds: 10.0
+  arxiv:
+    max_retries: 3
+    timeout_seconds: 8.0
+  mitre_attack:
+    max_retries: 2
+    timeout_seconds: 15.0

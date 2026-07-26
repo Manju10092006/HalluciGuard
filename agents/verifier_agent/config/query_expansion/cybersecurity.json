@@ -1,0 +1,21 @@
+{
+  "synonyms": {
+    "APT": "Advanced Persistent Threat",
+    "XSS": "Cross-Site Scripting",
+    "SQLi": "SQL Injection",
+    "RCE": "Remote Code Execution",
+    "DoS": "Denial of Service",
+    "DDoS": "Distributed Denial of Service",
+    "MITM": "Man-in-the-Middle",
+    "CVE": "Common Vulnerabilities and Exposures",
+    "CVSS": "Common Vulnerability Scoring System",
+    "IOC": "Indicator of Compromise",
+    "TTP": "Tactics, Techniques, and Procedures",
+    "EDR": "Endpoint Detection and Response",
+    "SIEM": "Security Information and Event Management",
+    "WAF": "Web Application Firewall",
+    "2FA": "Two-Factor Authentication",
+    "MFA": "Multi-Factor Authentication"
+  },
+  "domain_terms": ["vulnerability", "exploit", "malware", "ransomware", "phishing", "zero-day", "patch", "threat actor", "attack vector", "privilege escalation"]
+}

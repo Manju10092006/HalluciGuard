@@ -1,0 +1,21 @@
+{
+  "synonyms": {
+    "T2DM": "type 2 diabetes mellitus",
+    "HTN": "hypertension",
+    "MI": "myocardial infarction",
+    "CVD": "cardiovascular disease",
+    "COPD": "chronic obstructive pulmonary disease",
+    "CHF": "congestive heart failure",
+    "CKD": "chronic kidney disease",
+    "DVT": "deep vein thrombosis",
+    "PE": "pulmonary embolism",
+    "NSAID": "nonsteroidal anti-inflammatory drug",
+    "ACE inhibitor": "angiotensin-converting enzyme inhibitor",
+    "SSRI": "selective serotonin reuptake inhibitor",
+    "BMI": "body mass index",
+    "HbA1c": "glycated hemoglobin",
+    "LDL": "low-density lipoprotein",
+    "HDL": "high-density lipoprotein"
+  },
+  "domain_terms": ["clinical trial", "randomized controlled trial", "meta-analysis", "systematic review", "FDA approved", "adverse effect", "contraindication", "drug interaction"]
+}

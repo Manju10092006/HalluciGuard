@@ -1,0 +1,113 @@
+from __future__ import annotations
+import datetime
+from enum import Enum
+from typing import Optional
+from pydantic import BaseModel, Field, ConfigDict
+
+class EntailmentLabel(str, Enum):
+    ENTAILMENT = "entailment"
+    CONTRADICTION = "contradiction"
+    NEUTRAL = "neutral"
+
+class VerdictLabel(str, Enum):
+    VERIFIED = "verified"
+    LIKELY_HALLUCINATED = "likely_hallucinated"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    MIXED_EVIDENCE = "mixed_evidence"
+
+class PipelineStage(str, Enum):
+    DOMAIN_VALIDATION = "domain_validation"
+    CLAIM_DECOMPOSITION = "claim_decomposition"
+    QUERY_EXPANSION = "query_expansion"
+    RETRIEVAL = "retrieval"
+    AGGREGATION = "aggregation"
+    RERANKING = "reranking"
+    NLI = "nli"
+    SCORING = "scoring"
+    FORMATTING = "formatting"
+
+class Passage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    title: str
+    source: str
+    url: str
+    publication_date: str
+    snippet: str
+    source_id: str = ""
+    relevance_score: float = 0.0
+
+class SuspiciousClaim(BaseModel):
+    claim_id: str
+    text: str
+
+class DecomposedClaim(BaseModel):
+    original_text: str
+    sub_claims: list[str]
+
+class VerifierInputV2(BaseModel):
+    query_id: str
+    domain: str
+    suspicious_claims: list[SuspiciousClaim]
+
+class EvidenceItem(BaseModel):
+    title: str
+    source: str
+    url: str
+    publication_date: str
+    snippet: str
+    entailment_label: EntailmentLabel
+    entailment_score: float = Field(ge=0.0, le=1.0)
+    credibility_score: float = Field(ge=0.0, le=1.0)
+
+class ClaimReport(BaseModel):
+    claim_id: str
+    claim_text: str
+    evidence: list[EvidenceItem]
+    support_score: float = Field(ge=0.0, le=1.0)
+    contradiction_score: float = Field(ge=0.0, le=1.0)
+    trust_score: float = Field(ge=0.0, le=1.0)
+    verdict: VerdictLabel
+    explanation: str = ""
+
+class PipelineStageStatus(BaseModel):
+    stage: PipelineStage
+    status: str  # "completed", "running", "failed", "skipped"
+    duration_ms: int = 0
+    details: str = ""
+
+class VerifierOutputV2(BaseModel):
+    query_id: str
+    domain: str
+    domain_validated: bool
+    retrieved_sources: int
+    verified_sources: int
+    claim_evidence: list[ClaimReport]
+    overall_evidence_confidence: float = Field(ge=0.0, le=1.0)
+    latency_ms: int
+    pipeline_stages: list[PipelineStageStatus] = []
+
+class AdapterMetadata(BaseModel):
+    name: str
+    version: str = "1.0.0"
+    supported_domains: list[str] = []
+    supported_languages: list[str] = ["en"]
+    supports_live_search: bool = True
+    cacheable: bool = True
+    priority: int = 1
+    max_results: int = 10
+    is_stub: bool = False
+
+class AdapterHealthStatus(BaseModel):
+    adapter_name: str
+    is_healthy: bool
+    last_check: str = ""
+    response_time_ms: int = 0
+    error: str = ""
+
+class DomainStatistics(BaseModel):
+    domain: str
+    sources: list[str]
+    status: str  # "fully_implemented", "stub", "mock"
+    credibility_scores: dict[str, float] = {}
+    is_implemented: bool = True
+    adapter_health: list[AdapterHealthStatus] = []

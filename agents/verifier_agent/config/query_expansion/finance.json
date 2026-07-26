@@ -1,0 +1,20 @@
+{
+  "synonyms": {
+    "IPO": "Initial Public Offering",
+    "P/E": "Price-to-Earnings ratio",
+    "EPS": "Earnings Per Share",
+    "ROI": "Return on Investment",
+    "ROE": "Return on Equity",
+    "GDP": "Gross Domestic Product",
+    "CPI": "Consumer Price Index",
+    "SEC": "Securities and Exchange Commission",
+    "FDIC": "Federal Deposit Insurance Corporation",
+    "ETF": "Exchange-Traded Fund",
+    "EBITDA": "Earnings Before Interest Taxes Depreciation and Amortization",
+    "YoY": "Year over Year",
+    "QoQ": "Quarter over Quarter",
+    "AUM": "Assets Under Management",
+    "NAV": "Net Asset Value"
+  },
+  "domain_terms": ["annual report", "quarterly earnings", "market capitalization", "balance sheet", "income statement", "cash flow", "SEC filing", "10-K", "10-Q"]
+}

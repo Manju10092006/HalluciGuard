@@ -1,0 +1,27 @@
+{
+  "passages": [
+    {
+      "text": "arXiv: Attention Is All You Need (2017-06-12)\nThe dominant sequence transduction models are based on complex recurrent or convolutional neural networks...",
+      "source_id": "arxiv_1706.03762",
+      "source_url": "http://arxiv.org/abs/1706.03762",
+      "relevance_score": 0.98
+    },
+    {
+      "text": "Semantic Scholar: Survey of Hallucination in Natural Language Generation (2022)\nThis paper surveys the recent advances on the hallucination problem in natural language generation.",
+      "source_id": "s2_abcdef123456",
+      "source_url": "https://semanticscholar.org/paper/abcdef123456",
+      "relevance_score": 0.95
+    },
+    {
+      "text": "Crossref: On the Dangers of Stochastic Parrots: Can Language Models Be Too Big? 🦜\nAn exploration of the risks associated with large language models, including bias and hallucination.",
+      "source_id": "crossref_10.1145_3442188.3445922",
+      "source_url": "https://doi.org/10.1145/3442188.3445922",
+      "relevance_score": 0.92
+    }
+  ],
+  "credibility_scores": {
+    "arxiv_1706.03762": 0.95,
+    "s2_abcdef123456": 0.92,
+    "crossref_10.1145_3442188.3445922": 0.95
+  }
+}
