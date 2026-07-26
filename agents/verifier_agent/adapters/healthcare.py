@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import List
 
 from config.settings import get_settings
@@ -55,10 +56,17 @@ class HealthcareAdapter:
             
         return sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k] if passages else passages
 
+    def _sanitize_query_for_api(self, query: str) -> str:
+        """Strip punctuation and extract clean alphanumeric search keywords."""
+        cleaned = re.sub(r'[^\w\s]', ' ', query)
+        words = [w for w in cleaned.split() if len(w) > 1 and w.lower() not in {'is', 'a', 'an', 'the', 'for', 'and', 'or', 'of', 'in', 'to', 'on', 'with'}]
+        return " ".join(words[:6]) if words else query
+
     async def _search_pubmed(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
+            search_query = self._sanitize_query_for_api(query)
             search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-            params = {"db": "pubmed", "term": query, "retmode": "json", "retmax": k}
+            params = {"db": "pubmed", "term": search_query, "retmode": "json", "retmax": k}
             search_res = await client.get(search_url, adapter_name=self.name, params=params)
             
             ids = search_res.json().get("esearchresult", {}).get("idlist", [])
@@ -96,11 +104,12 @@ class HealthcareAdapter:
 
     async def _search_pubmed_central(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
+            search_query = self._sanitize_query_for_api(query)
             search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
             search_res = await client.get(
                 search_url,
                 adapter_name=self.name,
-                params={"db": "pmc", "term": query, "retmode": "json", "retmax": k},
+                params={"db": "pmc", "term": search_query, "retmode": "json", "retmax": k},
             )
 
             ids = search_res.json().get("esearchresult", {}).get("idlist", [])
@@ -137,7 +146,8 @@ class HealthcareAdapter:
 
     async def _search_openfda(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            params = {"search": query, "limit": k}
+            search_query = self._sanitize_query_for_api(query)
+            params = {"search": search_query, "limit": k}
             if self.openfda_key:
                 params["api_key"] = self.openfda_key
             res = await client.get(
@@ -149,7 +159,7 @@ class HealthcareAdapter:
             data = res.json().get("results", [])
             passages = []
             for item in data:
-                brand = item.get("openfda", {}).get("brand_name", ["Unknown Brand"])[0]
+                brand = item.get("openfda", {}).get("brand_name", ["FDA Drug Label"])[0]
                 desc_list = item.get("description", []) or item.get("indications_and_usage", [])
                 desc = desc_list[0] if desc_list else "FDA approved drug label details."
                 if desc:
@@ -169,10 +179,11 @@ class HealthcareAdapter:
 
     async def _search_clinicaltrials(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
+            search_query = self._sanitize_query_for_api(query)
             res = await client.get(
                 "https://clinicaltrials.gov/api/v2/studies",
                 adapter_name=self.name,
-                params={"query.term": query, "pageSize": k, "format": "json"},
+                params={"query.term": search_query, "pageSize": k, "format": "json"},
             )
             
             data = res.json().get("studies", [])
