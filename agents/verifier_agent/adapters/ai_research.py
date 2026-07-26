@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import List
 from bs4 import BeautifulSoup
 
-import httpx
-
+from config.settings import get_settings
 from schemas.models import Passage, AdapterMetadata
+from utils.async_executor import gather_results
+from utils.http_client import ResilientHttpClient, get_client
 
 logger = logging.getLogger(__name__)
 
 class AiResearchAdapter:
     def __init__(self) -> None:
         self.name = "ai_research"
+        self.semantic_scholar_key = get_settings().semantic_scholar_key
 
     @property
     def metadata(self) -> AdapterMetadata:
@@ -37,29 +38,30 @@ class AiResearchAdapter:
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
-            async with httpx.AsyncClient() as client:
-                results = await asyncio.gather(
-                    self._search_arxiv(client, query, k),
-                    self._search_semanticscholar(client, query, k),
-                    self._search_crossref(client, query, k),
-                    return_exceptions=True
-                )
+            client = get_client()
+            results = await gather_results([
+                self._search_arxiv(client, query, k),
+                self._search_semanticscholar(client, query, k),
+                self._search_crossref(client, query, k),
+            ])
                 
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"AI research source search error: {result}")
-                    elif isinstance(result, list):
-                        passages.extend(result)
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"AI research source search error: {result}")
+                elif isinstance(result, list):
+                    passages.extend(result)
         except Exception as e:
             logger.error(f"Failed ai_research search: {e}")
             
         return sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k] if passages else passages
 
-    async def _search_arxiv(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_arxiv(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            url = f"http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results={k}"
-            res = await client.get(url, timeout=10.0)
-            res.raise_for_status()
+            res = await client.get(
+                "https://export.arxiv.org/api/query",
+                adapter_name=self.name,
+                params={"search_query": f"all:{query}", "start": 0, "max_results": k},
+            )
             
             soup = BeautifulSoup(res.text, "xml")
             entries = soup.find_all("entry")
@@ -85,11 +87,15 @@ class AiResearchAdapter:
             logger.error(f"arXiv search error: {e}")
             return []
 
-    async def _search_semanticscholar(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_semanticscholar(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&limit={k}&fields=title,abstract,url,year,externalIds"
-            res = await client.get(url, timeout=10.0)
-            res.raise_for_status()
+            headers = {"x-api-key": self.semantic_scholar_key} if self.semantic_scholar_key else None
+            res = await client.get(
+                "https://api.semanticscholar.org/graph/v1/paper/search",
+                adapter_name=self.name,
+                params={"query": query, "limit": k, "fields": "title,abstract,url,year,externalIds"},
+                headers=headers,
+            )
             
             data = res.json().get("data", [])
             passages = []
@@ -113,12 +119,15 @@ class AiResearchAdapter:
             logger.error(f"Semantic Scholar search error: {e}")
             return []
 
-    async def _search_crossref(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_crossref(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            url = f"https://api.crossref.org/works?query={query}&rows={k}&select=title,abstract,URL,published-print,container-title"
             headers = {"User-Agent": "HalluciGuard/2.0 (mailto:compliance@halluciguard.ai)"}
-            res = await client.get(url, headers=headers, timeout=10.0)
-            res.raise_for_status()
+            res = await client.get(
+                "https://api.crossref.org/works",
+                adapter_name=self.name,
+                headers=headers,
+                params={"query": query, "rows": k, "select": "title,abstract,URL,published-print,container-title,published-online"},
+            )
             
             items = res.json().get("message", {}).get("items", [])
             passages = []
@@ -126,12 +135,15 @@ class AiResearchAdapter:
                 title = item.get("title", ["Crossref Work"])[0]
                 url_val = item.get("URL", "https://crossref.org")
                 abstract = item.get("abstract", "")
+                published = item.get("published-print") or item.get("published-online") or {}
+                date_parts = published.get("date-parts", [["2024"]])
+                publication_date = "-".join(str(part) for part in date_parts[0]) if date_parts and date_parts[0] else "2024"
                 
                 passages.append(Passage(
                     title=f"Crossref: {title}",
                     source="crossref",
                     url=url_val,
-                    publication_date="2024",
+                    publication_date=publication_date,
                     snippet=f"Publication [{title}]: {abstract[:300]}",
                     source_id=f"crossref_{url_val.split('/')[-1]}",
                     relevance_score=0.88

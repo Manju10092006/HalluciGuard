@@ -4,11 +4,12 @@ from typing import List, Tuple, Optional
 import numpy as np
 
 from schemas.models import Passage
+from models.model_manager import get_model_manager
 
 class DenseRetriever:
     """Dense retriever using sentence-transformers and FAISS."""
 
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2') -> None:
+    def __init__(self, model_name: str = 'sentence-transformers/all-MiniLM-L6-v2') -> None:
         self.model_name = model_name
         self.model = None
         self.index = None
@@ -20,8 +21,7 @@ class DenseRetriever:
             return
             
         try:
-            from sentence_transformers import SentenceTransformer
-            self.model = SentenceTransformer(self.model_name)
+            self.model = get_model_manager().load_embedding_model()
         except ImportError:
             logging.warning("sentence_transformers not installed. DenseRetriever falling back.")
             self._is_available = False
@@ -43,10 +43,12 @@ class DenseRetriever:
             import faiss
             
             texts = [p.snippet for p in passages]
-            embeddings = self.model.encode(texts, convert_to_numpy=True)
-            
-            # Normalize embeddings for cosine similarity (Inner Product)
-            faiss.normalize_L2(embeddings)
+            embeddings = self.model.encode(
+                texts,
+                batch_size=32,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            )
             
             dim = embeddings.shape[1]
             self.index = faiss.IndexFlatIP(dim)
@@ -71,9 +73,7 @@ class DenseRetriever:
         if not self._is_available or self.index is None or not self.passages:
             return []
             
-        query_embedding = self.model.encode([query], convert_to_numpy=True)
-        import faiss
-        faiss.normalize_L2(query_embedding)
+        query_embedding = self.model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
         
         scores, indices = self.index.search(query_embedding, min(k, len(self.passages)))
         

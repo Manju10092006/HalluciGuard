@@ -8,7 +8,10 @@ from pathlib import Path
 class ResilientHttpClient:
     def __init__(self, config_path: str = "config/retry.yaml") -> None:
         self.config = self._load_config(config_path)
-        self.client = httpx.AsyncClient(http2=True, timeout=self.config["default"]["timeout_seconds"])
+        try:
+            self.client = httpx.AsyncClient(http2=True, timeout=self.config["default"]["timeout_seconds"])
+        except ImportError:
+            self.client = httpx.AsyncClient(timeout=self.config["default"]["timeout_seconds"])
         
     def _load_config(self, config_path: str) -> dict[str, Any]:
         path = Path(__file__).parent.parent / config_path

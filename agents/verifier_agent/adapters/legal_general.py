@@ -1,32 +1,27 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import List
+from bs4 import BeautifulSoup
 
-import httpx
-
+from config.settings import get_settings
 from schemas.models import Passage, AdapterMetadata
+from utils.async_executor import gather_results
+from utils.http_client import ResilientHttpClient, get_client
 
 logger = logging.getLogger(__name__)
 
 class LegalGeneralAdapter:
     def __init__(self) -> None:
         self.name = "legal_general"
-        self._curated_acts = {
-            "ipc": "Indian Penal Code, major sections cover criminal offenses.",
-            "crpc": "Code of Criminal Procedure, sets out the procedure for criminal law in India.",
-            "constitution": "Constitution of India, supreme legal framework.",
-            "it act 2000": "Information Technology Act, 2000 deals with cybercrime and electronic commerce.",
-            "bns 2023": "Bharatiya Nyaya Sanhita, 2023 replaces the Indian Penal Code."
-        }
+        self.courtlistener_key = get_settings().courtlistener_key
 
     @property
     def metadata(self) -> AdapterMetadata:
         return AdapterMetadata(
             name=self.name,
             version="1.0.0",
-            supported_domains=["wikipedia", "curated_acts"],
+            supported_domains=["courtlistener", "wikipedia"],
             supports_live_search=True,
             cacheable=True,
             priority=10,
@@ -35,46 +30,77 @@ class LegalGeneralAdapter:
         )
 
     def credibility_of(self, source_id: str) -> float:
+        if source_id.startswith("courtlistener"): return 0.92
+        if source_id.startswith("wiki"): return 0.80
         return 0.75
 
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
-            query_lower = query.lower()
-            for act_key, act_desc in self._curated_acts.items():
-                if act_key in query_lower:
-                    passages.append(Passage(
-                        title=f"Curated Legal Act: {act_key.upper()}",
-                        source="curated_acts",
-                        url="https://legislative.gov.in",
-                        publication_date="2024",
-                        snippet=f"Legal Statute [{act_key.upper()}]: {act_desc}",
-                        source_id=f"curated_{act_key.replace(' ', '_')}",
-                        relevance_score=0.9
-                    ))
-
-            async with httpx.AsyncClient() as client:
-                wiki_results = await self._search_wikipedia(client, query, k)
-                passages.extend(wiki_results)
+            client = get_client()
+            results = await gather_results([
+                self._search_courtlistener(client, query, k),
+                self._search_wikipedia(client, query, k),
+            ])
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Legal source search error: {result}")
+                elif isinstance(result, list):
+                    passages.extend(result)
                 
         except Exception as e:
             logger.error(f"Failed legal general search: {e}")
             
         return sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k] if passages else passages
 
-    async def _search_wikipedia(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_courtlistener(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
+        try:
+            headers = {"Authorization": f"Token {self.courtlistener_key}"} if self.courtlistener_key else None
+            res = await client.get(
+                "https://www.courtlistener.com/api/rest/v4/search/",
+                adapter_name=self.name,
+                params={"q": query, "type": "o", "order_by": "score desc"},
+                headers=headers,
+            )
+            results = res.json().get("results", [])
+            passages = []
+            for item in results[:k]:
+                case_name = item.get("caseName") or item.get("case_name") or "CourtListener Opinion"
+                absolute_url = item.get("absolute_url") or item.get("cluster", "")
+                url = f"https://www.courtlistener.com{absolute_url}" if str(absolute_url).startswith("/") else absolute_url
+                snippet = item.get("snippet") or item.get("plain_text") or item.get("suitNature") or ""
+                snippet = BeautifulSoup(str(snippet), "html.parser").get_text()
+                date_filed = item.get("dateFiled") or item.get("date_filed") or "2024"
+                passages.append(Passage(
+                    title=f"CourtListener: {case_name}",
+                    source="courtlistener",
+                    url=url or "https://www.courtlistener.com/",
+                    publication_date=str(date_filed)[:10],
+                    snippet=f"Legal opinion [{case_name}]: {snippet[:300]}",
+                    source_id=f"courtlistener_{item.get('cluster_id', item.get('id', 'opinion'))}",
+                    relevance_score=0.9
+                ))
+            return passages
+        except Exception as e:
+            logger.error(f"CourtListener search error: {e}")
+            return []
+
+    async def _search_wikipedia(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
             search_query = f"{query} law legal act"
-            url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={search_query}&format=json&srlimit={k}"
-            res = await client.get(url, timeout=10.0)
-            res.raise_for_status()
+            res = await client.get(
+                "https://en.wikipedia.org/w/rest.php/v1/search/page",
+                adapter_name=self.name,
+                params={"q": search_query, "limit": k},
+                headers={"User-Agent": "HalluciGuard/2.0 (compliance@halluciguard.ai)"},
+            )
             
-            search_results = res.json().get("query", {}).get("search", [])
+            search_results = res.json().get("pages", [])
             passages = []
             for item in search_results:
                 title = item.get("title", "Legal Article")
-                snippet = item.get("snippet", "").replace('<span class="searchmatch">', '').replace('</span>', '')
-                title_url = title.replace(" ", "_")
+                snippet = BeautifulSoup(item.get("excerpt", ""), "html.parser").get_text()
+                title_url = item.get("key", title.replace(" ", "_"))
                 
                 passages.append(Passage(
                     title=f"Wikipedia Legal: {title}",

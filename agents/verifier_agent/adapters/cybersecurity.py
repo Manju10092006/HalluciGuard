@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import json
 from typing import List, Dict, Any, Optional
 
-import httpx
-
+from config.settings import get_settings
 from schemas.models import Passage, AdapterMetadata
+from utils.async_executor import gather_results
+from utils.http_client import ResilientHttpClient, get_client
 
 logger = logging.getLogger(__name__)
 
 class CybersecurityAdapter:
     def __init__(self) -> None:
         self.name = "cybersecurity"
+        self.nvd_api_key = get_settings().nvd_api_key
         self._mitre_cache: Optional[List[Dict[str, Any]]] = None
         self._cisa_cache: Optional[List[Dict[str, Any]]] = None
 
@@ -36,29 +36,32 @@ class CybersecurityAdapter:
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
-            async with httpx.AsyncClient() as client:
-                results = await asyncio.gather(
-                    self._search_nvd(client, query, k),
-                    self._search_mitre(client, query, k),
-                    self._search_cisa(client, query, k),
-                    return_exceptions=True
-                )
+            client = get_client()
+            results = await gather_results([
+                self._search_nvd(client, query, k),
+                self._search_mitre(client, query, k),
+                self._search_cisa(client, query, k),
+            ])
                 
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"Cybersecurity source search error: {result}")
-                    elif isinstance(result, list):
-                        passages.extend(result)
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Cybersecurity source search error: {result}")
+                elif isinstance(result, list):
+                    passages.extend(result)
         except Exception as e:
             logger.error(f"Failed cybersecurity search: {e}")
             
         return sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k] if passages else passages
 
-    async def _search_nvd(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_nvd(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch={query}&resultsPerPage={k}"
-            res = await client.get(url, timeout=15.0)
-            res.raise_for_status()
+            headers = {"apiKey": self.nvd_api_key} if self.nvd_api_key else None
+            res = await client.get(
+                "https://services.nvd.nist.gov/rest/json/cves/2.0",
+                adapter_name=self.name,
+                params={"keywordSearch": query, "resultsPerPage": k},
+                headers=headers,
+            )
             
             data = res.json().get("vulnerabilities", [])
             passages = []
@@ -84,12 +87,17 @@ class CybersecurityAdapter:
             logger.error(f"NVD search error: {e}")
             return []
 
-    async def _search_mitre(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    def _mitre_attack_url(self, external_id: str) -> str:
+        if "." in external_id:
+            technique, subtechnique = external_id.split(".", 1)
+            return f"https://attack.mitre.org/techniques/{technique}/{subtechnique}/"
+        return f"https://attack.mitre.org/techniques/{external_id}/"
+
+    async def _search_mitre(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
             if not self._mitre_cache:
                 url = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json"
-                res = await client.get(url, timeout=20.0)
-                res.raise_for_status()
+                res = await client.get(url, adapter_name=self.name)
                 objects = res.json().get("objects", [])
                 self._mitre_cache = [
                     obj for obj in objects 
@@ -111,8 +119,8 @@ class CybersecurityAdapter:
                         passages.append(Passage(
                             title=f"MITRE ATT&CK: {obj.get('name')}",
                             source="mitre",
-                            url=f"https://attack.mitre.org/techniques/{ext_id}",
-                            publication_date="2024",
+                            url=self._mitre_attack_url(ext_id) if ext_id else "https://attack.mitre.org/",
+                            publication_date=str(obj.get("modified", obj.get("created", "2024")))[:10],
                             snippet=f"Technique [{ext_id}]: {obj.get('description', '')[:300]}",
                             source_id=f"mitre_{ext_id}",
                             relevance_score=0.85
@@ -124,12 +132,11 @@ class CybersecurityAdapter:
             logger.error(f"MITRE search error: {e}")
             return []
 
-    async def _search_cisa(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_cisa(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
             if not self._cisa_cache:
                 url = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-                res = await client.get(url, timeout=10.0)
-                res.raise_for_status()
+                res = await client.get(url, adapter_name=self.name)
                 self._cisa_cache = res.json().get("vulnerabilities", [])
                 
             passages = []
@@ -148,7 +155,7 @@ class CybersecurityAdapter:
                             title=f"CISA KEV: {cve}",
                             source="cisa",
                             url="https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
-                            publication_date="2024",
+                            publication_date=str(item.get("dateAdded", "2024"))[:10],
                             snippet=f"CISA KEV [{cve}] {item.get('vendorProject')} {item.get('product')}: {item.get('shortDescription', '')[:300]}",
                             source_id=f"cisa_{cve}",
                             relevance_score=0.88

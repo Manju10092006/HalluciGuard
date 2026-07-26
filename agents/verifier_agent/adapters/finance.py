@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import List, Optional
 
-import httpx
-
+from config.settings import get_settings
 from schemas.models import Passage, AdapterMetadata
+from utils.async_executor import gather_results
+from utils.http_client import ResilientHttpClient, get_client
 
 logger = logging.getLogger(__name__)
 
 class FinanceAdapter:
     def __init__(self, api_key: Optional[str] = None) -> None:
         self.name = "finance"
-        self.api_key = api_key
+        settings = get_settings()
+        self.api_key = api_key or settings.alpha_vantage_key
+        self.sec_user_agent = settings.sec_user_agent
 
     @property
     def metadata(self) -> AdapterMetadata:
@@ -37,32 +39,41 @@ class FinanceAdapter:
     async def search(self, query: str, k: int = 5) -> List[Passage]:
         passages: List[Passage] = []
         try:
-            async with httpx.AsyncClient() as client:
-                tasks = [
-                    self._search_sec(client, query, k),
-                    self._search_worldbank(client, query, k)
-                ]
-                if self.api_key:
-                    tasks.append(self._search_alphavantage(client, query, k))
-                    
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+            client = get_client()
+            tasks = [
+                self._search_sec(client, query, k),
+                self._search_worldbank(client, query, k)
+            ]
+            if self.api_key:
+                tasks.append(self._search_alphavantage(client, query, k))
                 
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"Finance source search error: {result}")
-                    elif isinstance(result, list):
-                        passages.extend(result)
+            results = await gather_results(tasks)
+                
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Finance source search error: {result}")
+                elif isinstance(result, list):
+                    passages.extend(result)
         except Exception as e:
             logger.error(f"Failed finance search: {e}")
             
         return sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k] if passages else passages
 
-    async def _search_sec(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_sec(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            url = f"https://efts.sec.gov/LATEST/search-index?q={query}&dateRange=custom&startdt=2020-01-01&forms=10-K,10-Q,8-K&hits.hits.total=value"
-            headers = {"User-Agent": "HalluciGuard/2.0 (compliance@halluciguard.ai)"}
-            res = await client.get(url, headers=headers, timeout=10.0)
-            res.raise_for_status()
+            headers = {"User-Agent": self.sec_user_agent, "Accept-Encoding": "gzip, deflate"}
+            res = await client.get(
+                "https://efts.sec.gov/LATEST/search-index",
+                adapter_name=self.name,
+                headers=headers,
+                params={
+                    "q": query,
+                    "dateRange": "custom",
+                    "startdt": "2020-01-01",
+                    "forms": "10-K,10-Q,8-K",
+                    "hits.hits.total": "value",
+                },
+            )
             
             hits = res.json().get("hits", {}).get("hits", [])
             passages = []
@@ -86,11 +97,13 @@ class FinanceAdapter:
             logger.error(f"SEC search error: {e}")
             return []
 
-    async def _search_worldbank(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_worldbank(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
-            url = "https://api.worldbank.org/v2/country/all?format=json&per_page=50"
-            res = await client.get(url, timeout=10.0)
-            res.raise_for_status()
+            res = await client.get(
+                "https://api.worldbank.org/v2/indicator",
+                adapter_name=self.name,
+                params={"format": "json", "per_page": 100, "source": 2},
+            )
             
             data = res.json()
             passages = []
@@ -99,13 +112,14 @@ class FinanceAdapter:
                 query_lower = query.lower()
                 for item in items:
                     name = item.get("name", "")
-                    if query_lower in name.lower() or query_lower in item.get("id", "").lower():
+                    source_note = item.get("sourceNote", "")
+                    if query_lower in name.lower() or query_lower in item.get("id", "").lower() or query_lower in source_note.lower():
                         passages.append(Passage(
-                            title=f"World Bank Country Profile: {name}",
+                            title=f"World Bank Indicator: {name}",
                             source="world_bank",
-                            url=f"https://data.worldbank.org/country/{item.get('id')}",
+                            url=f"https://data.worldbank.org/indicator/{item.get('id')}",
                             publication_date="2024",
-                            snippet=f"World Bank Economic Data for {name} (Capital: {item.get('capitalCity', '')}, Region: {item.get('region', {}).get('value', '')})",
+                            snippet=f"World Bank indicator {item.get('id')}: {source_note[:300]}",
                             source_id=f"wb_{item.get('id')}",
                             relevance_score=0.85
                         ))
@@ -116,12 +130,14 @@ class FinanceAdapter:
             logger.error(f"World Bank search error: {e}")
             return []
 
-    async def _search_alphavantage(self, client: httpx.AsyncClient, query: str, k: int) -> List[Passage]:
+    async def _search_alphavantage(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
             ticker = query.split()[0].upper()
-            url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={self.api_key}"
-            res = await client.get(url, timeout=10.0)
-            res.raise_for_status()
+            res = await client.get(
+                "https://www.alphavantage.co/query",
+                adapter_name=self.name,
+                params={"function": "OVERVIEW", "symbol": ticker, "apikey": self.api_key},
+            )
             
             data = res.json()
             if "Symbol" in data:
