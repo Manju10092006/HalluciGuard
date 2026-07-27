@@ -1,0 +1,7 @@
+category,sample_count,accuracy,avg_confidence,avg_hallucination_prob
+factual_correct,4,0.25,0.5819,0.4181
+factual_hallucinated,2,0.0,0.5267,0.4733
+partially_correct,1,1.0,0.5079,0.4921
+unrelated_response,1,1.0,0.3295,0.6705
+creative_writing,1,0.0,0.4261,0.5739
+reasoning,1,0.0,0.4841,0.5159

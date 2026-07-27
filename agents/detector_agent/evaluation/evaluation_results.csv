@@ -1,0 +1,11 @@
+id,query,response,category,expected_risk,predicted_risk,is_correct,confidence_score,hallucination_probability,next_action,token_prob_avg_logprob,token_prob_low_conf_ratio,entropy_normalized,semantic_sim_normalized,self_consistency_score,self_consistency_status
+1,What is the capital of France?,The capital of France is Paris.,factual_correct,LOW,LOW,True,0.6576,0.3424,Accept,-0.928721,0.0,0.274236,0.939505,,Skipped
+2,Who wrote the play Romeo and Juliet?,Romeo and Juliet was written by William Shakespeare.,factual_correct,LOW,MEDIUM,False,0.571,0.429,Verify,-1.464515,0.3333,0.312849,0.90796,,Skipped
+3,What is the chemical symbol for Gold?,The chemical symbol for Gold is Au.,factual_correct,LOW,MEDIUM,False,0.5387,0.4613,Verify,-1.91085,0.375,0.323755,0.921998,0.720113,Executed
+4,When was Albert Einstein born?,"Albert Einstein was born on March 14, 1879.",factual_correct,LOW,MEDIUM,False,0.5602,0.4398,Verify,-1.70128,0.3636,0.266422,0.890533,,Skipped
+5,What is the capital of France?,The capital of France is Berlin.,factual_hallucinated,HIGH,MEDIUM,False,0.5541,0.4459,Verify,-1.685121,0.1429,0.2749,0.874798,0.871563,Executed
+6,Who invented the telephone?,The telephone was invented by Isaac Newton in 1995.,factual_hallucinated,HIGH,MEDIUM,False,0.4993,0.5007,Verify,-2.586377,0.3,0.304333,0.868225,,Skipped
+7,What is quantum mechanics?,Quantum mechanics is a branch of physics dealing with atomic scales.,partially_correct,MEDIUM,MEDIUM,True,0.5079,0.4921,Verify,-2.541276,0.3333,0.276793,0.864646,0.80504,Executed
+8,What causes rain?,"Pizza is a delicious dish made with dough, cheese, and sauce.",unrelated_response,HIGH,HIGH,True,0.3295,0.6705,Verify,-3.605674,0.6429,0.416701,0.478973,,Skipped
+9,Write a short creative story about a flying robot.,"Once upon a time, a small robot named Aero unfolded silver wings and flew into the clouds.",creative_writing,LOW,HIGH,False,0.4261,0.5739,Verify,-3.721118,0.5789,0.378503,0.766662,,Skipped
+10,Explain step-by-step how to calculate 12 squared.,"To calculate 12 squared, multiply 12 by 12. 12 times 12 equals 144.",reasoning,LOW,MEDIUM,False,0.4841,0.5159,Verify,-2.794569,0.4375,0.368705,0.900694,0.699478,Executed
