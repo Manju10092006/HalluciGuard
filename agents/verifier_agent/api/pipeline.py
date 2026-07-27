@@ -2,7 +2,7 @@
 HalluciGuard Verifier Agent — 9-Stage Verification Pipeline Orchestrator.
 
 Runtime flow:
-  Claim → Domain Validation → Claim Decomposition → Query Expansion →
+  Claim → Domain Validation → Claim Decomposition → Entity Resolution & Query Expansion →
   Domain Router → Load Correct Models → Generate Domain Embeddings →
   Dense Retrieval + Sparse Retrieval → Hybrid Retrieval → Evidence Aggregation →
   Cross Encoder Reranking → Natural Language Inference → Evidence Fusion →
@@ -22,7 +22,7 @@ from schemas.models import (
     PipelineStage, PipelineStageStatus, RuntimeModelInfo,
 )
 from adapters.registry import get_registry
-from claims import ClaimDecomposer, ClaimNormalizer, ClaimMerger
+from claims import ClaimDecomposer, ClaimNormalizer, ClaimMerger, EntityResolver
 from retrievers import HybridRetriever
 from aggregation import EvidenceAggregator
 from rerankers import CrossEncoderReranker
@@ -41,7 +41,7 @@ class VerificationPipeline:
     """
     The 9-stage verification pipeline orchestrator.
 
-    Integrates domain-specific model routing, runtime model metadata,
+    Integrates entity resolution, domain-specific model routing, runtime model metadata,
     confidence calibration, and cache-hit indicators into every response.
     """
 
@@ -49,6 +49,7 @@ class VerificationPipeline:
         self.claim_decomposer = ClaimDecomposer()
         self.claim_normalizer = ClaimNormalizer()
         self.claim_merger = ClaimMerger()
+        self.entity_resolver = EntityResolver()
         self.hybrid_retriever = HybridRetriever()
         self.aggregator = EvidenceAggregator()
         self.reranker = CrossEncoderReranker()
@@ -64,7 +65,7 @@ class VerificationPipeline:
         self.query_expander = QueryExpander()
         self.cache = SqliteCache()
         self.metrics = MetricsCollector()
-        self.logger = setup_logger('pipeline')
+        self.logger = setup_logger("pipeline")
 
     # ------------------------------------------------------------------
     # Confidence Calibration
@@ -78,12 +79,6 @@ class VerificationPipeline:
         """
         Calibrate confidence by combining trust score with evidence volume
         and conflict resolution signals.
-
-        Formula:
-            base = trust_score
-            volume_factor = min(1.0, evidence_count / 5)
-            conflict_penalty = 0.85 if genuine_conflict else 1.0
-            confidence = base * volume_factor * conflict_penalty
         """
         base = float(scores.get("trust_score", 0.0))
         volume_factor = min(1.0, evidence_count / 5.0) if evidence_count > 0 else 0.0
@@ -175,13 +170,13 @@ class VerificationPipeline:
                 claim_reranked = 0
 
                 for sub_claim in sub_claims:
-                    # ── Stage 3: Query Expansion ─────────────────────
+                    # ── Stage 3: Entity Resolution & Query Expansion ──
                     with tracker.track(PipelineStage.QUERY_EXPANSION):
-                        expanded_query = self.query_expander.expand(
+                        expanded_query, resolution = self.query_expander.resolve_and_expand(
                             sub_claim, validated_domain
                         )
 
-                    # ── Stage 4: Multi-Source Retrieval ───────────────
+                    # ── Stage 4: Multi-Source Entity-Aware Retrieval ──
                     with tracker.track(PipelineStage.RETRIEVAL):
                         retrieval_start = time.time()
                         try:
@@ -225,7 +220,7 @@ class VerificationPipeline:
                         )
                         claim_reranked += len(reranked_passages)
 
-                    # ── Stage 7: NLI Entailment ──────────────────────
+                    # ── Stage 7: NLI Entailment (Batched) ────────────
                     with tracker.track(PipelineStage.NLI):
                         nli_start = time.time()
                         if reranked_passages:

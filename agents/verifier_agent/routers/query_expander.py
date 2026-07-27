@@ -3,14 +3,18 @@ import json
 import logging
 from pathlib import Path
 import re
-from typing import Dict, List
+from typing import Dict, List, Tuple
+
+from claims.entity_resolver import EntityResolver, EntityResolution
+
 
 class QueryExpander:
-    """Expands queries with domain-specific synonyms and terms from config JSON files."""
+    """Expands queries with entity resolution, domain-specific synonyms, and terms."""
 
     def __init__(self) -> None:
         self.synonyms: Dict[str, Dict[str, str]] = {}
         self.domain_terms: Dict[str, List[str]] = {}
+        self.entity_resolver = EntityResolver()
         self._load_configs()
 
     def _load_configs(self) -> None:
@@ -29,33 +33,41 @@ class QueryExpander:
             except Exception as e:
                 logging.warning(f"Failed to load query expansion config {json_file}: {e}")
 
-    def expand(self, query: str, domain: str) -> str:
+    def resolve_and_expand(self, query: str, domain: str) -> Tuple[str, EntityResolution]:
         """
-        Expand a query using abbreviations and domain terms.
+        Extract entities and produce an entity-aware expanded query string.
 
         Args:
-            query: The original query.
-            domain: The domain of the query.
+            query: The input sub-claim or query string.
+            domain: Target domain.
 
         Returns:
-            The expanded query string.
+            Tuple of (expanded_query, entity_resolution)
         """
+        resolution = self.entity_resolver.resolve(query, domain)
         domain_key = domain.lower()
-        if domain_key not in self.synonyms:
-            return query
 
-        expanded_query = query
+        # If a canonical entity query was resolved (e.g. CVE-2021-44228 or Metformin type 2 diabetes),
+        # start with the canonical query!
+        if resolution.canonical_query and resolution.primary_entity:
+            base_query = resolution.canonical_query
+        else:
+            base_query = query
 
-        # Check abbreviations
-        for abbr, expansion in self.synonyms[domain_key].items():
-            pattern = re.compile(rf'\b{re.escape(abbr)}\b', re.IGNORECASE)
-            if pattern.search(query):
-                expanded_query += f" {expansion}"
+        expanded_query = base_query
 
-        # Add domain terms if available
-        if domain_key in self.domain_terms and self.domain_terms[domain_key]:
-            term = self.domain_terms[domain_key][0]
-            expanded_query += f" {term}"
+        # Check domain abbreviation lookups
+        if domain_key in self.synonyms:
+            for abbr, expansion in self.synonyms[domain_key].items():
+                pattern = re.compile(rf"\b{re.escape(abbr)}\b", re.IGNORECASE)
+                if pattern.search(query):
+                    expanded_query += f" {expansion}"
 
         # Clean up whitespace
-        return ' '.join(expanded_query.split())
+        clean_query = " ".join(expanded_query.split())
+        return clean_query, resolution
+
+    def expand(self, query: str, domain: str) -> str:
+        """Helper returning just the expanded query string for backward compatibility."""
+        expanded, _ = self.resolve_and_expand(query, domain)
+        return expanded
