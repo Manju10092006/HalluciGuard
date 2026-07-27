@@ -21,7 +21,7 @@
 
 ```mermaid
 flowchart TD
-    subgraph HalluciGuard Trust Layer
+    subgraph Layer["HalluciGuard Trust Layer"]
         LLM[Raw LLM Output] -->|Candidate Claims| DA[🔍 Detector Agent]
         DA -->|Suspicious Claims| VA[✅ Verifier Agent]
         VA -->|Verified Evidence & Trust Scores| JA[⚖️ Judge Agent]

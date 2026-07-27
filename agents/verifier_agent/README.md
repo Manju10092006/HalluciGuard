@@ -17,38 +17,41 @@ The **HalluciGuard Verifier Agent** is an autonomous, production-grade evidence 
 
 ```mermaid
 flowchart TD
-    subgraph Client Layer
+    subgraph Client["Client Layer"]
         A[LLM Output / Claim Payload] -->|POST /verify| B(FastAPI Router)
     end
 
-    subgraph Stage 1 & 2: Routing & Decomposition
+    subgraph S1["Stage 1 & 2: Routing & Decomposition"]
         B --> C[Domain Validator & Model Router]
         C --> D[Claim Decomposer & Normalizer]
     end
 
-    subgraph Stage 3 & 4: Entity Resolution & Multi-Source Search
+    subgraph S3["Stage 3 & 4: Entity Resolution & Multi-Source Search"]
         D --> E[Entity Resolver]
         E -->|CVE / CIK / Drug / Statute| F[Query Expander]
         F --> G[Multi-Source Domain Adapters]
         G -->|NVD / SEC / PubMed / OpenFDA / arXiv| H[Raw Passages]
     end
 
-    subgraph Stage 5 & 6: Hybrid RRF & Reranking
+    subgraph S5["Stage 5 & 6: Hybrid RRF & Reranking"]
         H --> I[Aggregation & Jaccard Dedup]
         I --> J[Hybrid BM25 + FAISS Dense RRF]
         J --> K[Cross-Encoder Reranker]
     end
 
-    subgraph Stage 7, 8 & 9: NLI Inference & Trust Scoring
+    subgraph S7["Stage 7, 8 & 9: NLI Inference & Trust Scoring"]
         K --> L[Batched DeBERTa NLI Engine]
         L --> M[Source Reliability & Evidence Scorer]
         M --> N[Conflict Resolver & Confidence Calibrator]
         N --> O[Explanation Generator & Citation Formatter]
     end
 
-    subgraph Persistence & Models
+    subgraph Storage["Persistence & Models"]
         P[(SQLite Async Cache)] <---> B
-        Q[Model Manager Singleton & LRU Pool] <---> C & J & K & L
+        Q[Model Manager Singleton & LRU Pool] <---> C
+        Q <---> J
+        Q <---> K
+        Q <---> L
     end
 
     O -->|VerifierOutputV2| R[Structured API Response]
