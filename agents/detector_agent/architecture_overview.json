@@ -1,0 +1,81 @@
+{
+  "system_name": "HalluciGuard Detector Agent",
+  "version": "2.0.0",
+  "status": "Calibrated & Verified",
+  "architecture_type": "Multi-Signal Agentic AI Uncertainty Estimation System",
+  "description": "Estimates LLM output hallucination likelihood using token probabilities, predictive entropy, semantic similarity, and conditionally gated self-consistency sampling.",
+  "modules": [
+    {
+      "name": "detector_agent.detector",
+      "purpose": "Core pipeline orchestrator for multi-signal detection and score aggregation",
+      "inputs": ["user_query: str", "llm_response: str"],
+      "outputs": ["DetectionResult"],
+      "classes": ["DetectorAgent"],
+      "algorithms": ["Single-pass inference", "Weighted linear score aggregation", "Calibrated double-threshold risk binning"]
+    },
+    {
+      "name": "detector_agent.config",
+      "purpose": "Type-safe Pydantic configuration schema and signal weights validator",
+      "classes": ["DetectorConfig", "SignalWeights"],
+      "validation_rules": ["All weights in [0, 1]", "Total weight sum equals 1.0"]
+    },
+    {
+      "name": "detector_agent.model_manager",
+      "purpose": "Singleton/Flyweight loader for PyTorch causal LLM and SentenceTransformer models",
+      "classes": ["ModelManager"],
+      "models_loaded": ["Qwen/Qwen2.5-0.5B-Instruct", "sentence-transformers/all-MiniLM-L6-v2"]
+    },
+    {
+      "name": "detector_agent.gate",
+      "purpose": "Intelligent gating controller for conditional Self-Consistency execution",
+      "classes": ["SelfConsistencyGate"],
+      "gating_conditions": ["Single-pass risk is MEDIUM", "Query category is analytical"]
+    },
+    {
+      "name": "detector_agent.signals",
+      "purpose": "Statistical uncertainty signal calculators",
+      "classes": ["TokenProbabilityCalculator", "EntropyCalculator", "SemanticSimilarityCalculator", "SelfConsistencyCalculator"]
+    },
+    {
+      "name": "detector_agent.datasets",
+      "purpose": "Modular benchmark dataset loading infrastructure",
+      "classes": ["BenchmarkExample", "BaseDatasetLoader", "HaluEvalLoader", "TruthfulQALoader"]
+    },
+    {
+      "name": "detector_agent.evaluation",
+      "purpose": "Research evaluation suite, pairwise ranking evaluator, ablation framework, and dashboard generator",
+      "classes": ["Evaluator", "PairwiseEvaluator", "AblationEvaluator", "DashboardGenerator", "CSVExporter", "ConsoleReporter"]
+    }
+  ],
+  "configuration_defaults": {
+    "signal_weights": {
+      "token_probability": 0.35,
+      "entropy": 0.25,
+      "semantic_similarity": 0.25,
+      "self_consistency": 0.15
+    },
+    "risk_thresholds": {
+      "low_risk_threshold": 0.40,
+      "high_risk_threshold": 0.55
+    },
+    "self_consistency_sampling": {
+      "num_samples": 5,
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "max_new_tokens": 100
+    }
+  },
+  "evaluation_outputs": [
+    "evaluation_dashboard.html",
+    "summary_report.md",
+    "evaluation_summary.json",
+    "evaluation_results.csv",
+    "pairwise_results.csv",
+    "ablation_results.csv"
+  ],
+  "extension_points": [
+    "Implement New Signal in detector_agent/signals/",
+    "Subclass BaseDatasetLoader in detector_agent/datasets/",
+    "Add Metrics in detector_agent/evaluation/metrics.py"
+  ]
+}
