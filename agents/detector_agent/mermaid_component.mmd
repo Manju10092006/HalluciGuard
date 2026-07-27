@@ -1,0 +1,53 @@
+graph TD
+    subgraph External_Agents["External Agent System Integration"]
+        Verifier[Verifier Agent]
+        Judge[Judge Agent]
+        Corrector[Corrector Agent]
+        Memory[Memory Agent]
+    end
+
+    subgraph HalluciGuard_Detector_Engine["HalluciGuard Detector Engine (detector_agent)"]
+        API[FastAPI HTTP Endpoint /detect]
+        Orchestrator[DetectorAgent]
+        Config[DetectorConfig & SignalWeights]
+        MM[ModelManager Singleton]
+        Classifier[PromptClassifier]
+        Gate[SelfConsistencyGate]
+
+        subgraph Statistical_Signals["Signal Calculators"]
+            TokenProb[TokenProbabilityCalculator]
+            Entropy[EntropyCalculator]
+            SemSim[SemanticSimilarityCalculator]
+            SelfConsist[SelfConsistencyCalculator]
+        end
+    end
+
+    subgraph Neural_Models["Shared Neural Weights"]
+        Qwen[Qwen/Qwen2.5-0.5B-Instruct]
+        Embed[all-MiniLM-L6-v2]
+    end
+
+    Verifier -->|HTTP POST / Python API| Orchestrator
+    Judge -->|HTTP POST / Python API| Orchestrator
+    Corrector -->|HTTP POST / Python API| Orchestrator
+    Memory -->|HTTP POST / Python API| Orchestrator
+
+    API --> Orchestrator
+    Orchestrator --> Config
+    Orchestrator --> MM
+    Orchestrator --> Gate
+    Gate --> Classifier
+
+    Orchestrator --> TokenProb
+    Orchestrator --> Entropy
+    Orchestrator --> SemSim
+    Orchestrator -->|Gated Execution| SelfConsist
+
+    MM --> Qwen
+    MM --> Embed
+
+    TokenProb -.-> Qwen
+    Entropy -.-> Qwen
+    SemSim -.-> Embed
+    SelfConsist -.-> Qwen
+    SelfConsist -.-> Embed

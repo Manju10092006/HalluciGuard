@@ -1,0 +1,10 @@
+configuration,accuracy,precision,recall,f1,pairwise_accuracy,avg_confidence_gap,avg_hallucination_gap,sc_activation_rate,avg_confidence_change_sc
+Full Detector,0.375,0.1667,0.25,0.2,25.0,-0.0831,-0.0831,0.0,0.0
+Without Token Probability,0.5,0.1667,0.3333,0.2222,75.0,-0.0164,-0.0164,0.0,0.0
+Without Entropy,0.25,0.2778,0.1667,0.2063,25.0,-0.1277,-0.1277,0.0,0.0
+Without Semantic Similarity,0.25,0.2222,0.1667,0.1905,25.0,-0.1073,-0.1073,0.0,0.0
+Without Self-Consistency,0.375,0.1667,0.25,0.2,25.0,-0.0811,-0.0811,0.0,0.0
+Token Probability Only,0.25,0.1333,0.1667,0.1481,25.0,-0.1782,-0.1782,0.0,0.0
+Entropy Only,0.5,0.1667,0.3333,0.2222,75.0,0.0109,0.0109,0.0,0.0
+Semantic Similarity Only,0.375,0.1429,0.25,0.1818,75.0,-0.0437,-0.0437,0.0,0.0
+Self-Consistency Only,0.5,0.1667,0.3333,0.2222,0.0,0.0,0.0,0.0,0.0
