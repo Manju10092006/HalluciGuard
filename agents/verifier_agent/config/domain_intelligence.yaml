@@ -1,0 +1,393 @@
+version: "2026.07.27"
+default_domain: general
+shared_models:
+  embedding_model: BAAI/bge-m3
+  dense_model: BAAI/bge-m3
+  sparse_model: bm25
+  cross_encoder: BAAI/bge-reranker-large
+  reranker: BAAI/bge-reranker-large
+  nli_model: cross-encoder/nli-deberta-v3-base
+  sentence_transformer: BAAI/bge-m3
+  entity_recognition_model: dslim/bert-base-NER
+  classification_model: FacebookAI/roberta-large-mnli
+defaults:
+  retriever: hybrid_rrf
+  retrieval_strategy: multi_source_api_then_bm25_dense_faiss_rrf
+  evidence_ranking_strategy: source_credibility_recency_dense_sparse_cross_encoder_nli
+  confidence_strategy: credibility_weighted_nli_with_domain_risk_and_source_agreement
+  verification_workflow:
+    - validate_domain
+    - decompose_claim
+    - expand_query
+    - retrieve_authoritative_sources
+    - aggregate_and_deduplicate
+    - hybrid_retrieve
+    - rerank
+    - classify_entailment
+    - score_and_explain
+  chunking_strategy: source_native_abstract_or_512_token_windows_80_overlap
+domains:
+  general:
+    aliases: [general_knowledge, common]
+    adapter: general
+    sentence_transformer: intfloat/e5-large-v2
+    api_sources:
+      - {id: wikidata, name: Wikidata Query Service, base_url: "https://query.wikidata.org/sparql", requires_key: false, credibility: 0.84}
+      - {id: wikipedia_rest, name: Wikipedia REST Search, base_url: "https://en.wikipedia.org/w/rest.php/v1/search/page", requires_key: false, credibility: 0.78}
+    knowledge_bases: [Wikidata, Wikipedia secondary context]
+    benchmarks: [fever]
+    notebooks: [research/general/general_verification.ipynb]
+  healthcare:
+    aliases: [health, clinical]
+    adapter: healthcare
+    embedding_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    dense_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    entity_recognition_model: d4data/biomedical-ner-all
+    classification_model: emilyalsentzer/Bio_ClinicalBERT
+    api_sources:
+      - {id: pubmed, name: PubMed E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.97}
+      - {id: pubmed_central, name: PubMed Central, base_url: "https://pmc.ncbi.nlm.nih.gov/api/oai/v1/mh/", requires_key: false, credibility: 0.97}
+      - {id: clinicaltrials, name: ClinicalTrials.gov, base_url: "https://clinicaltrials.gov/api/v2/studies", requires_key: false, credibility: 0.95}
+      - {id: openfda, name: openFDA Drug Label, base_url: "https://api.fda.gov/drug/label.json", requires_key: false, credibility: 0.96}
+    knowledge_bases: [PubMed, PMC Open Access, FDA labels, ClinicalTrials.gov]
+    benchmarks: [pubhealth, healthver]
+    notebooks: [research/healthcare/pubmedbert_demo.ipynb, research/healthcare/biobert_demo.ipynb]
+  medicine:
+    aliases: [medical]
+    adapter: healthcare
+    embedding_model: dmis-lab/biobert-base-cased-v1.1
+    dense_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    entity_recognition_model: d4data/biomedical-ner-all
+    classification_model: emilyalsentzer/Bio_ClinicalBERT
+    api_sources:
+      - {id: pubmed, name: PubMed E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.97}
+      - {id: clinicaltrials, name: ClinicalTrials.gov, base_url: "https://clinicaltrials.gov/api/v2/studies", requires_key: false, credibility: 0.95}
+      - {id: openfda, name: openFDA Drug Label, base_url: "https://api.fda.gov/drug/label.json", requires_key: false, credibility: 0.96}
+    knowledge_bases: [PubMed, ClinicalTrials.gov, FDA labels]
+    benchmarks: [pubhealth, mednli]
+    notebooks: [research/medicine/biobert_demo.ipynb]
+  pharmacy:
+    aliases: [pharmaceuticals, pharma, drugs]
+    adapter: healthcare
+    embedding_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    dense_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    entity_recognition_model: d4data/biomedical-ner-all
+    classification_model: kamalkraj/bioelectra-base-discriminator-pubmed
+    api_sources:
+      - {id: openfda, name: openFDA Drug Label, base_url: "https://api.fda.gov/drug/label.json", requires_key: false, credibility: 0.96}
+      - {id: pubmed, name: PubMed E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.95}
+    knowledge_bases: [FDA labels, PubMed, DrugBank references]
+    benchmarks: [pubhealth, bc5cdr]
+    notebooks: [research/pharmacy/pharmacy_models.ipynb]
+  biology:
+    aliases: [life_science, life_sciences]
+    adapter: healthcare
+    embedding_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    dense_model: dmis-lab/biobert-base-cased-v1.1
+    entity_recognition_model: d4data/biomedical-ner-all
+    classification_model: dmis-lab/biobert-base-cased-v1.1
+    api_sources:
+      - {id: pubmed, name: PubMed E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.96}
+      - {id: ncbi_gene, name: NCBI Gene E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.95}
+    knowledge_bases: [PubMed, NCBI Gene, UniProt]
+    benchmarks: [bioasq]
+    notebooks: [research/biology/biobert_demo.ipynb]
+  genetics:
+    aliases: [genomics]
+    adapter: healthcare
+    embedding_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    dense_model: dmis-lab/biobert-base-cased-v1.1
+    entity_recognition_model: d4data/biomedical-ner-all
+    classification_model: dmis-lab/biobert-base-cased-v1.1
+    api_sources:
+      - {id: ncbi_gene, name: NCBI Gene E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.95}
+      - {id: pubmed, name: PubMed E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.96}
+    knowledge_bases: [NCBI Gene, ClinVar, PubMed]
+    benchmarks: [bioasq, bc5cdr]
+    notebooks: [research/genetics/genetics_models.ipynb]
+  chemistry:
+    aliases: [chemical_science]
+    adapter: ai_research
+    embedding_model: DeepChem/ChemBERTa-77M-MTR
+    dense_model: DeepChem/ChemBERTa-77M-MTR
+    entity_recognition_model: pruas/BENT-PubMedBERT-NER-Chemical
+    classification_model: DeepChem/ChemBERTa-77M-MLM
+    api_sources:
+      - {id: pubchem, name: PubChem PUG REST, base_url: "https://pubchem.ncbi.nlm.nih.gov/rest/pug/", requires_key: false, credibility: 0.95}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.90}
+    knowledge_bases: [PubChem, Crossref, arXiv]
+    benchmarks: [chemprot]
+    notebooks: [research/chemistry/chemberta_demo.ipynb]
+  physics:
+    aliases: [physical_science]
+    adapter: ai_research
+    embedding_model: allenai/specter2_base
+    dense_model: allenai/specter2_base
+    api_sources:
+      - {id: arxiv, name: arXiv API, base_url: "https://export.arxiv.org/api/query", requires_key: false, credibility: 0.90}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.90}
+    knowledge_bases: [arXiv physics, Crossref, Semantic Scholar]
+    benchmarks: [scifact]
+    notebooks: [research/physics/specter_demo.ipynb]
+  mathematics:
+    aliases: [maths, math]
+    adapter: ai_research
+    embedding_model: allenai/specter2_base
+    dense_model: allenai/specter2_base
+    classification_model: FacebookAI/roberta-large-mnli
+    api_sources:
+      - {id: arxiv, name: arXiv API, base_url: "https://export.arxiv.org/api/query", requires_key: false, credibility: 0.90}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.90}
+    knowledge_bases: [arXiv mathematics, Crossref, zbMATH references]
+    benchmarks: [scifact]
+    notebooks: [research/mathematics/math_retrieval.ipynb]
+  astronomy:
+    aliases: [astrophysics]
+    adapter: ai_research
+    embedding_model: allenai/specter2_base
+    dense_model: allenai/specter2_base
+    api_sources:
+      - {id: nasa_apod, name: NASA APOD, base_url: "https://api.nasa.gov/planetary/apod", requires_key: true, credibility: 0.93}
+      - {id: nasa_exoplanet, name: NASA Exoplanet Archive, base_url: "https://exoplanetarchive.ipac.caltech.edu/TAP/sync", requires_key: false, credibility: 0.94}
+      - {id: arxiv, name: arXiv API, base_url: "https://export.arxiv.org/api/query", requires_key: false, credibility: 0.90}
+    knowledge_bases: [NASA Exoplanet Archive, NASA APOD, arXiv astro-ph]
+    benchmarks: [scifact]
+    notebooks: [research/astronomy/astronomy_retrieval.ipynb]
+  space_science:
+    aliases: [space, space_science, planetary_science]
+    adapter: ai_research
+    embedding_model: allenai/specter2_base
+    dense_model: allenai/specter2_base
+    api_sources:
+      - {id: nasa_neo, name: NASA Asteroids NeoWs, base_url: "https://api.nasa.gov/neo/rest/v1/", requires_key: true, credibility: 0.93}
+      - {id: nasa_donki, name: NASA DONKI, base_url: "https://api.nasa.gov/DONKI/", requires_key: true, credibility: 0.93}
+      - {id: nasa_images, name: NASA Image and Video Library, base_url: "https://images-api.nasa.gov/search", requires_key: false, credibility: 0.90}
+    knowledge_bases: [NASA NeoWs, NASA DONKI, NASA Images]
+    benchmarks: [scifact]
+    notebooks: [research/space_science/nasa_models.ipynb]
+  climate_environment:
+    aliases: [climate, environment, environmental_science]
+    adapter: ai_research
+    embedding_model: allenai/specter2_base
+    dense_model: allenai/specter2_base
+    api_sources:
+      - {id: noaa_cdo, name: NOAA CDO Web Services, base_url: "https://www.ncdc.noaa.gov/cdo-web/api/v2/", requires_key: true, credibility: 0.95}
+      - {id: nasa_eonet, name: NASA EONET, base_url: "https://eonet.gsfc.nasa.gov/api/v3/events", requires_key: false, credibility: 0.93}
+    knowledge_bases: [NOAA CDO, NASA EONET, NASA EarthData]
+    benchmarks: [climate_fever]
+    notebooks: [research/climate_environment/climate_models.ipynb]
+  agriculture:
+    aliases: [agri, farming]
+    adapter: ai_research
+    embedding_model: allenai/specter2_base
+    dense_model: allenai/specter2_base
+    api_sources:
+      - {id: usda_quickstats, name: USDA QuickStats, base_url: "https://quickstats.nass.usda.gov/api/", requires_key: true, credibility: 0.94}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.88}
+    knowledge_bases: [USDA QuickStats, Crossref agriculture literature]
+    benchmarks: [scifact]
+    notebooks: [research/agriculture/agriculture_retrieval.ipynb]
+  food_nutrition:
+    aliases: [nutrition, food]
+    adapter: ai_research
+    embedding_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    dense_model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+    entity_recognition_model: d4data/biomedical-ner-all
+    api_sources:
+      - {id: usda_fdc, name: USDA FoodData Central, base_url: "https://api.nal.usda.gov/fdc/v1/", requires_key: true, credibility: 0.95}
+      - {id: pubmed, name: PubMed E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.95}
+    knowledge_bases: [USDA FoodData Central, PubMed nutrition studies]
+    benchmarks: [pubhealth]
+    notebooks: [research/food_nutrition/fooddata_models.ipynb]
+  artificial_intelligence:
+    aliases: [ai, ai_research]
+    adapter: ai_research
+    embedding_model: BAAI/bge-m3
+    dense_model: BAAI/bge-m3
+    classification_model: FacebookAI/roberta-large-mnli
+    api_sources:
+      - {id: arxiv, name: arXiv API, base_url: "https://export.arxiv.org/api/query", requires_key: false, credibility: 0.90}
+      - {id: semantic_scholar, name: Semantic Scholar Graph, base_url: "https://api.semanticscholar.org/graph/v1/", requires_key: false, credibility: 0.93}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.90}
+    knowledge_bases: [arXiv cs.AI, Semantic Scholar, Crossref]
+    benchmarks: [scifact]
+    notebooks: [research/artificial_intelligence/bge_demo.ipynb]
+  machine_learning:
+    aliases: [ml]
+    adapter: ai_research
+    embedding_model: BAAI/bge-m3
+    dense_model: BAAI/bge-m3
+    api_sources:
+      - {id: arxiv, name: arXiv API, base_url: "https://export.arxiv.org/api/query", requires_key: false, credibility: 0.90}
+      - {id: semantic_scholar, name: Semantic Scholar Graph, base_url: "https://api.semanticscholar.org/graph/v1/", requires_key: false, credibility: 0.93}
+    knowledge_bases: [arXiv cs.LG, Semantic Scholar]
+    benchmarks: [scifact]
+    notebooks: [research/machine_learning/bge_demo.ipynb]
+  computer_science:
+    aliases: [cs, technology]
+    adapter: ai_research
+    embedding_model: BAAI/bge-m3
+    dense_model: BAAI/bge-m3
+    classification_model: microsoft/codebert-base
+    api_sources:
+      - {id: arxiv, name: arXiv API, base_url: "https://export.arxiv.org/api/query", requires_key: false, credibility: 0.90}
+      - {id: semantic_scholar, name: Semantic Scholar Graph, base_url: "https://api.semanticscholar.org/graph/v1/", requires_key: false, credibility: 0.93}
+    knowledge_bases: [arXiv cs, Semantic Scholar, ACM references]
+    benchmarks: [scifact]
+    notebooks: [research/computer_science/codebert_demo.ipynb]
+  cybersecurity:
+    aliases: [security, infosec, cyber_security]
+    adapter: cybersecurity
+    embedding_model: jackaduma/SecBERT
+    dense_model: jackaduma/SecBERT
+    entity_recognition_model: dslim/bert-base-NER
+    classification_model: jackaduma/SecBERT
+    api_sources:
+      - {id: nvd, name: NVD CVE API, base_url: "https://services.nvd.nist.gov/rest/json/cves/2.0", requires_key: false, credibility: 0.96}
+      - {id: mitre_attack, name: MITRE ATT&CK STIX, base_url: "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/", requires_key: false, credibility: 0.95}
+      - {id: cisa_kev, name: CISA KEV Catalog, base_url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json", requires_key: false, credibility: 0.95}
+    knowledge_bases: [NVD, MITRE ATT&CK, CISA KEV]
+    benchmarks: [cti_bench]
+    notebooks: [research/cybersecurity/secbert_demo.ipynb]
+  programming:
+    aliases: [software, coding]
+    adapter: ai_research
+    embedding_model: microsoft/codebert-base
+    dense_model: BAAI/bge-m3
+    classification_model: microsoft/codebert-base
+    api_sources:
+      - {id: github_code_search, name: GitHub Code Search, base_url: "https://api.github.com/search/code", requires_key: true, credibility: 0.88}
+      - {id: semantic_scholar, name: Semantic Scholar Graph, base_url: "https://api.semanticscholar.org/graph/v1/", requires_key: false, credibility: 0.90}
+    knowledge_bases: [Official docs, GitHub, Semantic Scholar]
+    benchmarks: [code_x_glue]
+    notebooks: [research/programming/codebert_demo.ipynb]
+  data_science:
+    aliases: [analytics, statistics]
+    adapter: ai_research
+    embedding_model: BAAI/bge-m3
+    dense_model: BAAI/bge-m3
+    api_sources:
+      - {id: worldbank, name: World Bank Data API, base_url: "https://api.worldbank.org/v2/", requires_key: false, credibility: 0.92}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.90}
+    knowledge_bases: [World Bank, Crossref, Semantic Scholar]
+    benchmarks: [scifact]
+    notebooks: [research/data_science/data_science_retrieval.ipynb]
+  finance:
+    aliases: [financial]
+    adapter: finance
+    embedding_model: ProsusAI/finbert
+    dense_model: BAAI/bge-m3
+    entity_recognition_model: Jean-Baptiste/roberta-large-ner-english
+    classification_model: ProsusAI/finbert
+    api_sources:
+      - {id: sec_edgar, name: SEC EDGAR Search, base_url: "https://efts.sec.gov/LATEST/search-index", requires_key: false, credibility: 0.98}
+      - {id: worldbank, name: World Bank Data API, base_url: "https://api.worldbank.org/v2/", requires_key: false, credibility: 0.94}
+      - {id: alphavantage, name: Alpha Vantage, base_url: "https://www.alphavantage.co/query", requires_key: true, credibility: 0.88}
+    knowledge_bases: [SEC EDGAR, World Bank, Alpha Vantage]
+    benchmarks: [financial_phrasebank, fiqa]
+    notebooks: [research/finance/finbert_demo.ipynb]
+  economics:
+    aliases: [macro_economics, macroeconomics]
+    adapter: finance
+    embedding_model: BAAI/bge-m3
+    dense_model: BAAI/bge-m3
+    classification_model: ProsusAI/finbert
+    api_sources:
+      - {id: worldbank, name: World Bank Data API, base_url: "https://api.worldbank.org/v2/", requires_key: false, credibility: 0.94}
+      - {id: imf, name: IMF Data API, base_url: "https://www.imf.org/external/datamapper/api/v1/", requires_key: false, credibility: 0.94}
+    knowledge_bases: [World Bank, IMF Data, OECD references]
+    benchmarks: [fiqa]
+    notebooks: [research/economics/economics_retrieval.ipynb]
+  business:
+    aliases: [management, commerce]
+    adapter: finance
+    embedding_model: BAAI/bge-m3
+    dense_model: BAAI/bge-m3
+    classification_model: ProsusAI/finbert
+    api_sources:
+      - {id: sec_edgar, name: SEC EDGAR Search, base_url: "https://efts.sec.gov/LATEST/search-index", requires_key: false, credibility: 0.95}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.86}
+    knowledge_bases: [SEC EDGAR, Crossref business literature]
+    benchmarks: [financial_phrasebank]
+    notebooks: [research/business/business_retrieval.ipynb]
+  law:
+    aliases: [legal, legal_general]
+    adapter: legal_general
+    embedding_model: nlpaueb/legal-bert-base-uncased
+    dense_model: BAAI/bge-m3
+    entity_recognition_model: dslim/bert-base-NER
+    classification_model: nlpaueb/legal-bert-base-uncased
+    api_sources:
+      - {id: courtlistener, name: CourtListener Search API, base_url: "https://www.courtlistener.com/api/rest/v4/search/", requires_key: false, credibility: 0.92}
+      - {id: govinfo, name: GovInfo API, base_url: "https://api.govinfo.gov/", requires_key: true, credibility: 0.93}
+    knowledge_bases: [CourtListener, GovInfo, legislation portals]
+    benchmarks: [lex_glue]
+    notebooks: [research/legal/legalbert_demo.ipynb]
+  government_public_policy:
+    aliases: [government, public_policy, policy]
+    adapter: legal_general
+    embedding_model: BAAI/bge-m3
+    dense_model: BAAI/bge-m3
+    classification_model: FacebookAI/roberta-large-mnli
+    api_sources:
+      - {id: federal_register, name: Federal Register API, base_url: "https://www.federalregister.gov/api/v1/", requires_key: false, credibility: 0.93}
+      - {id: govinfo, name: GovInfo API, base_url: "https://api.govinfo.gov/", requires_key: true, credibility: 0.93}
+    knowledge_bases: [Federal Register, GovInfo, government portals]
+    benchmarks: [fever]
+    notebooks: [research/government_public_policy/policy_retrieval.ipynb]
+  history:
+    aliases: [historical]
+    adapter: ai_research
+    api_sources:
+      - {id: loc, name: Library of Congress API, base_url: "https://www.loc.gov/apis/json-and-yaml/", requires_key: false, credibility: 0.91}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.88}
+    knowledge_bases: [Library of Congress, Crossref history literature]
+    benchmarks: [fever]
+    notebooks: [research/history/history_retrieval.ipynb]
+  geography:
+    aliases: [geo]
+    adapter: ai_research
+    api_sources:
+      - {id: usgs, name: USGS APIs, base_url: "https://earthquake.usgs.gov/fdsnws/event/1/", requires_key: false, credibility: 0.94}
+      - {id: geonames, name: GeoNames, base_url: "http://api.geonames.org/", requires_key: true, credibility: 0.84}
+    knowledge_bases: [USGS, GeoNames, NASA EarthData]
+    benchmarks: [fever]
+    notebooks: [research/geography/geography_retrieval.ipynb]
+  education:
+    aliases: [learning, pedagogy]
+    adapter: ai_research
+    api_sources:
+      - {id: eric, name: ERIC API, base_url: "https://api.ies.ed.gov/eric/", requires_key: false, credibility: 0.91}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.88}
+    knowledge_bases: [ERIC, Crossref education literature]
+    benchmarks: [scifact]
+    notebooks: [research/education/education_retrieval.ipynb]
+  psychology:
+    aliases: [psych]
+    adapter: ai_research
+    embedding_model: allenai/specter2_base
+    dense_model: allenai/specter2_base
+    api_sources:
+      - {id: pubmed, name: PubMed E-Utilities, base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", requires_key: false, credibility: 0.93}
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.88}
+    knowledge_bases: [PubMed psychology literature, Crossref, Semantic Scholar]
+    benchmarks: [scifact]
+    notebooks: [research/psychology/psychology_retrieval.ipynb]
+  sociology:
+    aliases: [social_science]
+    adapter: ai_research
+    api_sources:
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.88}
+      - {id: worldbank, name: World Bank Data API, base_url: "https://api.worldbank.org/v2/", requires_key: false, credibility: 0.90}
+    knowledge_bases: [Crossref sociology literature, World Bank indicators]
+    benchmarks: [scifact]
+    notebooks: [research/sociology/sociology_retrieval.ipynb]
+  philosophy:
+    aliases: [ethics]
+    adapter: ai_research
+    api_sources:
+      - {id: crossref, name: Crossref Works, base_url: "https://api.crossref.org/works", requires_key: false, credibility: 0.88}
+      - {id: semantic_scholar, name: Semantic Scholar Graph, base_url: "https://api.semanticscholar.org/graph/v1/", requires_key: false, credibility: 0.90}
+    knowledge_bases: [Crossref philosophy literature, Semantic Scholar]
+    benchmarks: [fever]
+    notebooks: [research/philosophy/philosophy_retrieval.ipynb]

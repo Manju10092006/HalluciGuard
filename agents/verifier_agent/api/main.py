@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from schemas.models import VerifierInputV2, VerifierOutputV2, DomainStatistics
 from api.pipeline import VerificationPipeline
 from adapters.registry import get_registry
-from models import get_model_manager
+from models import get_domain_intelligence_registry, get_model_manager
 from metrics import MetricsCollector
 from version import get_version_info
 from utils.logging import setup_logger, VerificationLogRecord, log_verification_request
@@ -85,10 +85,17 @@ async def health(request: Request) -> Dict[str, Any]:
     except Exception:
         cache_stats = {"status": "unavailable"}
 
+    domain_registry = get_domain_intelligence_registry()
+
     return {
         "status": "healthy",
         "version": get_version_info(),
         "models": model_manager.status(),
+        "domain_intelligence": {
+            "version": domain_registry.version,
+            "configured_domains": len(domain_registry.list_domains()),
+            "configured_model_ids": len(domain_registry.unique_model_ids()),
+        },
         "cache": cache_stats,
         "adapters_registered": registry.list_domains(),
         "uptime_seconds": round(time.time(), 2)

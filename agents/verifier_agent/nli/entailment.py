@@ -8,7 +8,7 @@ from models.model_manager import get_model_manager
 class NLIEngine:
     """Natural Language Inference engine for entailment classification."""
 
-    def __init__(self, model_name: str = 'microsoft/deberta-v3-base-mnli') -> None:
+    def __init__(self, model_name: str = 'cross-encoder/nli-deberta-v3-base') -> None:
         self.model_name = model_name
         self.pipeline = None
         self._is_available = True
@@ -18,7 +18,7 @@ class NLIEngine:
             return
             
         try:
-            self.pipeline = get_model_manager().load_nli_model()
+            self.pipeline = get_model_manager().load_nli_model(self.model_name)
         except ImportError:
             logging.warning("transformers not installed. NLIEngine falling back.")
             self._is_available = False
@@ -26,7 +26,7 @@ class NLIEngine:
             logging.warning(f"Error loading NLI model: {e}. Falling back.")
             self._is_available = False
 
-    def classify(self, claim: str, evidence: str) -> Dict[str, Any]:
+    def classify(self, claim: str, evidence: str, model_name: str | None = None) -> Dict[str, Any]:
         """
         Classify the entailment relationship between claim and evidence.
         
@@ -93,10 +93,23 @@ class NLIEngine:
         return res['label']
 
 
-    def batch_classify(self, claim: str, evidences: List[str]) -> List[Dict[str, Any]]:
+    def batch_classify(
+        self,
+        claim: str,
+        evidences: List[str],
+        model_name: str | None = None,
+    ) -> List[Dict[str, Any]]:
         """
         Classify multiple evidences against a single claim.
         """
+        if model_name and model_name != self.model_name:
+            self.model_name = model_name
+            self.pipeline = None
+            self._is_available = True
+        if model_name and model_name != self.model_name:
+            self.model_name = model_name
+            self.pipeline = None
+            self._is_available = True
         self._load_model()
         if not self._is_available:
             return [self.classify(claim, ev) for ev in evidences]
