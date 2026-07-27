@@ -45,6 +45,10 @@ verification_cache.db
 *.log
 logs/*.log
 
+# Generated Document Builds
+*.pdf
+*.html
+
 # OS
 .DS_Store
 Thumbs.db
