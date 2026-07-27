@@ -1,9 +1,9 @@
-# Verifier Agent v2.0 — Comprehensive Built Status & Future Roadmap
+﻿# Verifier Agent v2.0 â€” Comprehensive Built Status & Future Roadmap
 
-> **System**: HalluciGuard AI — Verifier Agent Component  
-> **Version**: `2.0.0` (API `v2`, Schema `2.0`)  
-> **Repository Branch**: `main` & `verifier-agent`  
-> **Status**: Production-Ready Baseline (100% Test Pass Rate, 38/38 Unit Tests Green)  
+> **System**: HalluciGuard AI â€” Verifier Agent Component
+> **Version**: `2.0.0` (API `v2`, Schema `2.0`)
+> **Repository Branch**: `main` & `verifier-agent`
+> **Status**: Production-Ready Baseline (100% Test Pass Rate, 45/45 Unit Tests Green)
 
 ---
 
@@ -19,26 +19,26 @@ The Verifier Agent currently consists of **83 implemented Python files** organiz
 
 ```
 agents/verifier_agent/
-├── adapters/            # Domain retrieval adapters & registry (6 Live, 18 Stubs)
-├── aggregation/         # Evidence merging & Jaccard token overlap deduplication
-├── api/                 # FastAPI REST application & 8-stage pipeline orchestrator
-├── cache/               # Async SQLite persistent caching engine
-├── claims/              # Claim decomposition, normalization & result merging
-├── config/              # Centralized Pydantic settings, credibility & retry YAMLs
-├── explanations/        # Natural language explanation generator
-├── formatters/          # Citation & VerifierOutputV2 response formatters
-├── metrics/             # Performance tracking & latency metrics collection
-├── models/              # Lazy-loaded ML model manager (NLI, Cross-Encoder, Dense, Zero-Shot)
-├── nli/                 # DeBERTa-v3 NLI entailment classifier
-├── rerankers/           # Cross-encoder claim-evidence reranking
-├── retrievers/          # Sparse (BM25) + Dense (FAISS) + Hybrid (RRF Fusion) engines
-├── routers/             # Domain routing & JSON query expansion loader
-├── schemas/             # Pydantic v2 data models & contract schemas
-├── scorers/             # Evidence scoring, credibility weighting & 2:1 conflict resolution
-├── tests/               # Pytest async test suite (31 tests)
-├── utils/               # Resilient HTTP client, JSON logger, async parallel executor
-├── container.py         # Dependency Injection Container
-└── version.py           # System version definitions
+â”œâ”€â”€ adapters/            # Domain retrieval adapters & registry (6 Live, 18 Stubs)
+â”œâ”€â”€ aggregation/         # Evidence merging & Jaccard token overlap deduplication
+â”œâ”€â”€ api/                 # FastAPI REST application & 8-stage pipeline orchestrator
+â”œâ”€â”€ cache/               # Async SQLite persistent caching engine
+â”œâ”€â”€ claims/              # Claim decomposition, normalization & result merging
+â”œâ”€â”€ config/              # Centralized Pydantic settings, credibility & retry YAMLs
+â”œâ”€â”€ explanations/        # Natural language explanation generator
+â”œâ”€â”€ formatters/          # Citation & VerifierOutputV2 response formatters
+â”œâ”€â”€ metrics/             # Performance tracking & latency metrics collection
+â”œâ”€â”€ models/              # Lazy-loaded ML model manager (NLI, Cross-Encoder, Dense, Zero-Shot)
+â”œâ”€â”€ nli/                 # DeBERTa-v3 NLI entailment classifier
+â”œâ”€â”€ rerankers/           # Cross-encoder claim-evidence reranking
+â”œâ”€â”€ retrievers/          # Sparse (BM25) + Dense (FAISS) + Hybrid (RRF Fusion) engines
+â”œâ”€â”€ routers/             # Domain routing & JSON query expansion loader
+â”œâ”€â”€ schemas/             # Pydantic v2 data models & contract schemas
+â”œâ”€â”€ scorers/             # Evidence scoring, credibility weighting & 2:1 conflict resolution
+â”œâ”€â”€ tests/               # Pytest async test suite (31 tests)
+â”œâ”€â”€ utils/               # Resilient HTTP client, JSON logger, async parallel executor
+â”œâ”€â”€ container.py         # Dependency Injection Container
+â””â”€â”€ version.py           # System version definitions
 ```
 
 ### Key Modules Built & Verified
@@ -56,16 +56,16 @@ agents/verifier_agent/
    - **AI Research Adapter**: Live calls to arXiv XML API, Semantic Scholar Graph API, and CrossRef REST API.
    - **Legal General Adapter**: Live integration with CourtListener API and Wikipedia REST API.
    - **General Adapter**: Wikipedia REST API search.
-   - **18 Structured Stub Adapters**: Pre-registered stubs for future domain expansion (`programming`, `scientific`, `education`, `government`, `news`, `mathematics`, `physics`, `chemistry`, `biology`, `space`, `history`, `geography`, `economics`, `climate`, `sports`, `business`, `manufacturing`, `pharmaceuticals`).
+   - **30 Domain Intelligence Profiles**: Registry-backed domain profiles for model routing, authoritative source metadata, confidence calibration, benchmarks, and research notebooks.
 
 3. **ML Pipeline & Inference Engine**:
    - `claims/claim_decomposer.py`: Decomposes compound claims into atomic sub-claims using conjunction, boundary, and regex analysis.
    - `routers/query_expander.py`: Dynamically loads domain synonyms and terms from `config/query_expansion/*.json`.
    - `retrievers/hybrid.py`: Hybrid Reciprocal Rank Fusion (RRF) combining Sparse BM25 and Dense FAISS vector similarity.
-   - `models/model_manager.py`: Lazy singleton model management for `facebook/bart-large-mnli`, `microsoft/deberta-v3-base-mnli`, `sentence-transformers/all-MiniLM-L6-v2`, and `cross-encoder/ms-marco-MiniLM-L-6-v2` with automatic CPU/CUDA selection.
+   - `models/model_manager.py`: Lazy singleton model management for `facebook/bart-large-mnli`, `cross-encoder/nli-deberta-v3-base`, `BAAI/bge-m3`, and `BAAI/bge-reranker-large` with automatic CPU/CUDA selection.
    - `aggregation/duplicate_remover.py`: Eliminates duplicate evidence using Jaccard token overlap threshold (>85%).
-   - `rerankers/cross_encoder.py`: Cross-encoder reranking via `cross-encoder/ms-marco-MiniLM-L-6-v2`.
-   - `nli/entailment.py`: Natural Language Inference via `microsoft/deberta-v3-base-mnli` predicting `Entailment`, `Contradiction`, or `Neutral`.
+   - `rerankers/cross_encoder.py`: Cross-encoder reranking via `BAAI/bge-reranker-large`.
+   - `nli/entailment.py`: Natural Language Inference via `cross-encoder/nli-deberta-v3-base` predicting `Entailment`, `Contradiction`, or `Neutral`.
    - `scorers/evidence_scorer.py`: Calculates support, contradiction, and overall trust score based on credibility weights and publication recency decay.
    - `scorers/conflict_resolver.py`: Applies a 2:1 majority weighting rule to resolve contradictory evidence.
    - `explanations/generator.py`: Generates human-readable natural language justification paragraphs.
@@ -94,7 +94,7 @@ While the Verifier Agent engine is fully functional and production-ready, the fo
 | **GPU Acceleration Setup** | CPU fallback default (`FP32`) | Configure `CUDA` / TensorRT execution for < 500ms NLI inference | High |
 | **Domain-Specific NLI Fine-Tuning** | Generic `deberta-v3-base-mnli` | Fine-tune DeBERTa on domain datasets (`MedNLI`, `SciFact`, `FEVER`) | Medium |
 | **Zero-Shot Domain Classifier** | Lazy-loaded `facebook/bart-large-mnli` singleton | Add domain-specific calibration/evaluation set | Medium |
-| **Local Vector Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` singleton | Integrate quantized ONNX runtime for zero-dependency local embeddings | Low |
+| **Local Vector Embeddings** | `BAAI/bge-m3` singleton | Integrate quantized ONNX runtime for zero-dependency local embeddings | Low |
 
 ### B. API Keys & Rate-Limit Escalations
 
@@ -109,17 +109,19 @@ The Verifier Agent runs completely on **free, open endpoints** out of the box, b
 | **CourtListener** | `COURTLISTENER_KEY` | Enables authenticated legal search requests for higher production reliability |
 | **SEC EDGAR** | `SEC_USER_AGENT` | Sets a compliant SEC contact identity for EDGAR requests |
 
-### C. Stub Domain Adapters Implementation (18 Domains)
+### C. Domain Intelligence Adapter Expansion
 
-The following 18 stub adapters require real API integrations to replace their current `StubAdapter` implementations:
+All 30 required domains are now registered through `config/domain_intelligence.yaml`. Domains with dedicated live adapters use those adapters directly, and domains that share an authoritative retrieval family use `DomainProxyAdapter` while preserving their own model choices, API source metadata, credibility scores, benchmarks, notebooks, retrieval strategy, and confidence strategy.
 
-1. **Programming**: Integrate StackOverflow API & GitHub Code Search API.
-2. **Scientific & Chemistry**: Integrate PubChem REST API & Europe PMC.
-3. **News**: Integrate NewsAPI / GDELT Project API.
-4. **Economics & Business**: Integrate IMF API & FRED Economic Data API.
-5. **Government & Policy**: Integrate GovInfo API & UK Legislation API.
-6. **Climate & Environment**: Integrate NASA POWER & NOAA APIs.
-7. **Mathematics, Physics, Biology, Space, History, Geography, Education, Sports, Manufacturing, Pharmaceuticals**: Implement dedicated niche domain adapters.
+Future implementation work should add dedicated live adapters for high-priority proxy-backed sources:
+
+1. **Programming**: Add GitHub Code Search and official documentation retrieval.
+2. **Chemistry**: Add PubChem PUG REST retrieval.
+3. **Economics & Business**: Add IMF and other official macroeconomic APIs.
+4. **Government & Policy**: Add GovInfo and Federal Register APIs.
+5. **Climate & Environment**: Add NOAA CDO and NASA EONET/NASA POWER retrieval.
+6. **Food & Nutrition / Agriculture**: Add USDA FoodData Central and USDA QuickStats.
+7. **Astronomy / Space Science / Geography**: Add dedicated NASA and USGS source adapters.
 
 ### D. Inter-Agent Architecture & Ecosystem Integration
 
@@ -144,9 +146,7 @@ graph TD
 
 ## 4. Summary Checklist for Team Collaboration
 
-- [x] Full Verifier Agent Engine v2.0 built and tested (83 files, 38/38 tests).
+- [x] Full Verifier Agent Engine v2.0 built and tested (45/45 tests).
 - [x] 6 Live Domain Adapters fully implemented (`healthcare`, `cybersecurity`, `finance`, `ai_research`, `legal_general`, `general`).
-- [x] 18 Stub Adapter directories created for team expansion.
-- [x] Empty scaffold directories for sibling agents (`detector_agent/`, `judge_agent/`, `corrector_agent/`, `memory_agent/`).
-- [x] Pushed to GitHub `main` and `verifier-agent` branches (`commit 52ec3d2`).
+- [x] 30 Domain Intelligence profiles registered for model routing, API metadata, confidence strategy, benchmarks, and notebooks.
 - [ ] **Next User Action**: Provision optional API keys in `.env` and initiate `detector_agent` / `judge_agent` development.

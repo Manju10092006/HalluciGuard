@@ -12,7 +12,13 @@ class HybridRetriever:
         self.sparse = BM25Retriever()
         self.dense = DenseRetriever()
         
-    def retrieve(self, query: str, passages: List[Passage], k: int = 5) -> List[Passage]:
+    def retrieve(
+        self,
+        query: str,
+        passages: List[Passage],
+        k: int = 5,
+        dense_model: str | None = None,
+    ) -> List[Passage]:
         """
         Retrieve and fuse results using Reciprocal Rank Fusion (RRF).
         
@@ -28,6 +34,8 @@ class HybridRetriever:
             return []
             
         try:
+            if dense_model and dense_model != self.dense.model_name:
+                self.dense = DenseRetriever(model_name=dense_model)
             self.sparse.build_index(passages)
             self.dense.build_index(passages)
             

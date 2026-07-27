@@ -8,7 +8,7 @@ from models.model_manager import get_model_manager
 class CrossEncoderReranker:
     """Reranks passages using a cross-encoder model."""
 
-    def __init__(self, model_name: str = 'cross-encoder/ms-marco-MiniLM-L-6-v2') -> None:
+    def __init__(self, model_name: str = 'BAAI/bge-reranker-large') -> None:
         self.model_name = model_name
         self.model = None
         self.tokenizer = None
@@ -19,7 +19,7 @@ class CrossEncoderReranker:
             return
             
         try:
-            self.model = get_model_manager().load_reranker_model()
+            self.model = get_model_manager().load_reranker_model(self.model_name)
         except ImportError:
             logging.warning("transformers not installed. CrossEncoderReranker falling back.")
             self._is_available = False
@@ -27,7 +27,13 @@ class CrossEncoderReranker:
             logging.warning(f"Error loading cross-encoder model: {e}. Falling back.")
             self._is_available = False
 
-    def rerank(self, claim: str, passages: List[Passage], k: int) -> List[Passage]:
+    def rerank(
+        self,
+        claim: str,
+        passages: List[Passage],
+        k: int,
+        model_name: str | None = None,
+    ) -> List[Passage]:
         """
         Rerank passages against a claim.
         
@@ -39,6 +45,10 @@ class CrossEncoderReranker:
         Returns:
             Top-k passages sorted by cross-encoder score.
         """
+        if model_name and model_name != self.model_name:
+            self.model_name = model_name
+            self.model = None
+            self._is_available = True
         self._load_model()
         
         if not self._is_available or not passages:

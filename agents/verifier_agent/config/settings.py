@@ -11,10 +11,12 @@ class Settings(BaseSettings):
     sec_user_agent: str = "HalluciGuard/2.0 compliance@halluciguard.ai"
     
     mock_mode: bool = False
+    allow_model_downloads: bool = False
+    enable_domain_classifier: bool = False
     
-    nli_model: str = "microsoft/deberta-v3-base-mnli"
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    nli_model: str = "cross-encoder/nli-deberta-v3-base"
+    reranker_model: str = "BAAI/bge-reranker-large"
+    embedding_model: str = "BAAI/bge-m3"
     zero_shot_model: str = "facebook/bart-large-mnli"
     
     cache_ttl: int = 86400

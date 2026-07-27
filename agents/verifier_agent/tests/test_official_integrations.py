@@ -33,9 +33,9 @@ def test_model_manager_uses_official_huggingface_ids() -> None:
     status = get_model_manager().status()
 
     assert settings.zero_shot_model == "facebook/bart-large-mnli"
-    assert settings.nli_model == "microsoft/deberta-v3-base-mnli"
-    assert settings.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
-    assert settings.reranker_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    assert settings.nli_model == "cross-encoder/nli-deberta-v3-base"
+    assert settings.embedding_model == "BAAI/bge-m3"
+    assert settings.reranker_model == "BAAI/bge-reranker-large"
     assert settings.embedding_model in status
 
 
