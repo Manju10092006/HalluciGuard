@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Protocol, Optional
 
+from models.domain_intelligence import get_domain_intelligence_registry
 from schemas.models import Passage, AdapterMetadata
 
 
@@ -35,6 +35,10 @@ class AdapterRegistry:
 
     def get_adapter(self, domain: str) -> DomainAdapter:
         """Gets an adapter by domain name, falling back to general."""
+        domain_registry = get_domain_intelligence_registry()
+        canonical_domain = domain_registry.canonicalize(domain)
+        if canonical_domain in self._adapters:
+            return self._adapters[canonical_domain]
         if domain in self._adapters:
             return self._adapters[domain]
         return self._adapters.get("general")  # type: ignore
@@ -45,14 +49,17 @@ class AdapterRegistry:
 
     def get_domain_statistics(self, domain: str) -> Dict[str, Any]:
         """Gets statistics for a specific domain adapter."""
-        adapter = self.get_adapter(domain)
+        domain_registry = get_domain_intelligence_registry()
+        canonical_domain = domain_registry.canonicalize(domain)
+        adapter = self.get_adapter(canonical_domain)
         if not adapter:
             return {}
+        profile = domain_registry.get_profile(canonical_domain)
         return {
-            "domain": domain,
-            "sources": adapter.metadata.supported_domains,
+            "domain": canonical_domain,
+            "sources": profile.source_ids,
             "status": "active" if not adapter.metadata.is_stub else "stub",
-            "credibility_scores": {},
+            "credibility_scores": {source.id: source.credibility for source in profile.api_sources},
             "is_implemented": not adapter.metadata.is_stub
         }
 
@@ -77,7 +84,7 @@ def get_registry() -> AdapterRegistry:
         from .finance import FinanceAdapter
         from .legal_general import LegalGeneralAdapter
         from .ai_research import AiResearchAdapter
-        from .stub_adapter import register_all_stubs
+        from .domain_proxy import DomainProxyAdapter
         
         _REGISTRY.register(GeneralAdapter())
         _REGISTRY.register(HealthcareAdapter())
@@ -85,7 +92,12 @@ def get_registry() -> AdapterRegistry:
         _REGISTRY.register(FinanceAdapter())
         _REGISTRY.register(LegalGeneralAdapter())
         _REGISTRY.register(AiResearchAdapter())
-        
-        register_all_stubs(_REGISTRY)
+
+        domain_registry = get_domain_intelligence_registry()
+        for profile in domain_registry.all_profiles():
+            if profile.domain in _REGISTRY._adapters:
+                continue
+            delegate = _REGISTRY._adapters.get(profile.adapter) or _REGISTRY._adapters["general"]
+            _REGISTRY.register(DomainProxyAdapter(profile, delegate))
         
     return _REGISTRY

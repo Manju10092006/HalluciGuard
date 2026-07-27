@@ -19,6 +19,7 @@ from scorers import EvidenceScorer, SourceReliabilityManager, ConflictResolver
 from explanations import ExplanationGenerator
 from formatters import CitationFormatter, ResponseFormatter
 from routers import DomainValidator, QueryExpander
+from models import ModelRouter
 from cache import SqliteCache
 from metrics import MetricsCollector, PerformanceTracker
 from utils.logging import setup_logger
@@ -41,6 +42,7 @@ class VerificationPipeline:
         self.citation_formatter = CitationFormatter()
         self.response_formatter = ResponseFormatter()
         self.domain_validator = DomainValidator()
+        self.model_router = ModelRouter()
         self.query_expander = QueryExpander()
         self.cache = SqliteCache()
         self.metrics = MetricsCollector()
@@ -61,6 +63,8 @@ class VerificationPipeline:
                 detector_domain=payload.domain
             )
         
+        route = self.model_router.route(validated_domain, first_claim_text)
+        validated_domain = route.domain
         registry = get_registry()
         adapter = registry.get_adapter(validated_domain)
         
@@ -111,16 +115,29 @@ class VerificationPipeline:
                     # Stage 5: Aggregation + Deduplication & Hybrid RRF Retrieval
                     with tracker.track(PipelineStage.AGGREGATION):
                         aggregated_passages = self.aggregator.aggregate([raw_passages])
-                        hybrid_passages = self.hybrid_retriever.retrieve(sub_claim, aggregated_passages, k=5)
+                        hybrid_passages = self.hybrid_retriever.retrieve(
+                            sub_claim,
+                            aggregated_passages,
+                            k=5,
+                            dense_model=route.dense_model,
+                        )
 
                     # Stage 6: Cross-Encoder Reranking
                     with tracker.track(PipelineStage.RERANKING):
-                        reranked_passages = self.reranker.rerank(sub_claim, hybrid_passages, k=5)
+                        reranked_passages = self.reranker.rerank(
+                            sub_claim,
+                            hybrid_passages,
+                            k=5,
+                            model_name=route.reranker_model,
+                        )
 
                     # Stage 7: NLI Entailment
                     with tracker.track(PipelineStage.NLI):
                         nli_start = time.time()
-                        nli_results = [self.nli_engine.classify(sub_claim, p.snippet) for p in reranked_passages]
+                        nli_results = [
+                            self.nli_engine.classify(sub_claim, p.snippet, model_name=route.nli_model)
+                            for p in reranked_passages
+                        ]
                         self.metrics.record_nli_inference(int((time.time() - nli_start) * 1000))
 
                     # Stage 8: Evidence Scoring & Citation Formatting
