@@ -1,0 +1,44 @@
+sequenceDiagram
+    autonumber
+    actor ExternalAgent as External Agent (Verifier/Judge/Corrector/Memory)
+    participant Detector as DetectorAgent
+    participant Manager as ModelManager
+    participant Signals as Signal Calculators
+    participant Gate as SelfConsistencyGate
+
+    ExternalAgent->>Detector: detect(user_query, llm_response)
+    activate Detector
+    
+    Detector->>Manager: get_model_and_tokenizer()
+    activate Manager
+    Manager-->>Detector: (model, tokenizer, sentence_model)
+    deactivate Manager
+
+    Detector->>Signals: compute_token_probability(query, response)
+    Signals-->>Detector: TokenProbabilityMetrics
+    
+    Detector->>Signals: compute_entropy(query, response)
+    Signals-->>Detector: EntropyMetrics
+
+    Detector->>Signals: compute_semantic_similarity(query, response)
+    Signals-->>Detector: SemanticSimilarityMetrics
+
+    Detector->>Detector: _aggregate_scores(single_pass_metrics)
+    Detector->>Detector: Calculate Single-Pass Risk Level
+
+    Detector->>Gate: should_run_self_consistency(query, current_result)
+    activate Gate
+    Gate-->>Detector: True / False
+    deactivate Gate
+
+    alt Gate returns True (MEDIUM Risk & Analytical Category)
+        Detector->>Signals: compute_self_consistency(query, response)
+        Signals-->>Detector: SelfConsistencyMetrics
+        Detector->>Detector: Synthesize Final 4-Signal Aggregated Score
+    else Gate returns False (LOW/HIGH Risk or Non-Analytical Category)
+        Detector->>Detector: Finalize 3-Signal Single-Pass Score
+    end
+
+    Detector->>Detector: Assign RiskLevel & NextAction
+    Detector-->>ExternalAgent: DetectionResult (confidence, prob, risk, metrics)
+    deactivate Detector
