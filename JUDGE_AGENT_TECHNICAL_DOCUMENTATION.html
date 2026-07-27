@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Judge Agent Technical Documentation</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm 15mm 20mm 15mm;
+            @bottom-right {
+                content: counter(page);
+            }
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 11pt;
+            line-height: 1.6;
+            color: #1a1a1a;
+            background-color: #ffffff;
+            margin: 0;
+            padding: 20px;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            color: #0f172a;
+            font-weight: 700;
+            line-height: 1.25;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            page-break-after: avoid;
+        }
+        h1 {
+            font-size: 24pt;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 8px;
+            color: #1e293b;
+        }
+        h2 {
+            font-size: 18pt;
+            border-bottom: 1px solid #cbd5e1;
+            padding-bottom: 6px;
+            margin-top: 2em;
+        }
+        h3 { font-size: 14pt; }
+        h4 { font-size: 12pt; }
+        code {
+            font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
+            background-color: #f1f5f9;
+            color: #0f172a;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-size: 9.5pt;
+        }
+        pre {
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 14px;
+            border-radius: 6px;
+            overflow-x: auto;
+            page-break-inside: avoid;
+        }
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+        blockquote {
+            border-left: 4px solid #3b82f6;
+            background-color: #eff6ff;
+            margin: 1.5em 0;
+            padding: 10px 16px;
+            color: #1e3a8a;
+            border-radius: 0 4px 4px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5em 0;
+            page-break-inside: avoid;
+            font-size: 10pt;
+        }
+        th, td {
+            border: 1px solid #cbd5e1;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f8fafc;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            margin: 2em 0;
+            background: #ffffff;
+            padding: 15px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            page-break-inside: avoid;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #e2e8f0;
+            margin: 2em 0;
+        }
+    </style>
+</head>
+<body>
+    <h1 id="halluciguard-judge-agent-technical-documentation-architectural-reference">HalluciGuard Judge Agent — Technical Documentation &amp; Architectural Reference</h1>
+<blockquote>
+<p><strong>Subsystem</strong>: HalluciGuard Judge Agent (<code>agents/judge_agent</code>)<br />
+<strong>Author &amp; Lead Engineer</strong>: Anil (<code>anil@halluciguard.ai</code>)<br />
+<strong>Version</strong>: <code>2.0.0-PROD</code> | <strong>Status</strong>: Fully Implemented &amp; Production-Ready<br />
+<strong>Repository Commit Ref</strong>: <code>8d3fca764b9453cc6f437c4a5a21ad745cf25cf4</code>  </p>
+</blockquote>
+<hr />
+<h2 id="1-executive-summary-overview">1. Executive Summary &amp; Overview</h2>
+<p>The <strong>HalluciGuard Judge Agent</strong> is the central arbitration and decision-making engine within the HalluciGuard multi-agent AI verification framework. Operating between the upstream <strong>Detector Agent</strong> (which estimates raw hallucination probabilities) and <strong>Verifier Agent</strong> (which retrieves authoritative ground-truth evidence), the Judge Agent evaluates claim-evidence entailment, calibrates Bayesian confidence scores, calculates risk levels, and executes structured trust decisions:</p>
+<ol>
+<li><strong><code>ACCEPT</code></strong>: Pass response directly to user without alteration.</li>
+<li><strong><code>CORRECT</code></strong>: Forward hallucinated claims and verified evidence to the Corrector Agent for precise editing.</li>
+<li><strong><code>VERIFY_AGAIN</code></strong>: Re-route targeted sub-claims to the Verifier Agent for deeper search.</li>
+<li><strong><code>REJECT</code></strong>: Block response immediately due to severe or critical factual contradictions.</li>
+<li><strong><code>ABSTAIN</code></strong>: Refrain from answering when ground-truth evidence is missing and model confidence is low.</li>
+</ol>
+<hr />
+<h2 id="2-module-inventory-file-map">2. Module Inventory &amp; File Map</h2>
+<p>The Judge Agent subsystem is organized into 8 modular Python components:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Module File</th>
+<th style="text-align: left;">Class / Component</th>
+<th style="text-align: left;">Responsibilities &amp; Functions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/judge_agent/judge_agent.py"><code>judge_agent.py</code></a></td>
+<td style="text-align: left;"><code>JudgeAgent</code></td>
+<td style="text-align: left;">Main orchestrator class; executes the end-to-end evaluation pipeline.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><a href="file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/judge_agent/decision_engine.py"><code>decision_engine.py</code></a></td>
+<td style="text-align: left;"><code>DecisionEngine</code></td>
+<td style="text-align: left;">Evaluates decision rules, assigns action thresholds, constructs Corrector payload.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><a href="file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/judge_agent/nli_engine.py"><code>nli_engine.py</code></a></td>
+<td style="text-align: left;"><code>NLIEngine</code></td>
+<td style="text-align: left;">Cross-encoder NLI engine using DeBERTa-v3 / BART-MNLI with zero-dependency heuristic fallback.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><a href="file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/judge_agent/confidence_calibrator.py"><code>confidence_calibrator.py</code></a></td>
+<td style="text-align: left;"><code>ConfidenceCalibrator</code></td>
+<td style="text-align: left;">Fuses Detector probability, Verifier strength, and NLI entailment into Bayesian risk metrics.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><a href="file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/judge_agent/config.py"><code>config.py</code></a></td>
+<td style="text-align: left;"><code>JudgeConfig</code></td>
+<td style="text-align: left;">Dataclass storing all calibration weights, NLI model names, and decision boundaries.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><a href="file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/judge_agent/app.py"><code>app.py</code></a></td>
+<td style="text-align: left;">FastAPI REST API</td>
+<td style="text-align: left;">Exposes <code>/judge</code>, <code>/simulate</code>, and <code>/health</code> HTTP endpoints for microservice deployment.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><a href="file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/judge_agent/simulator.py"><code>simulator.py</code></a></td>
+<td style="text-align: left;"><code>JudgeSimulator</code></td>
+<td style="text-align: left;">Benchmark suite for evaluating synthetic test cases across all decision branches.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><a href="file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/judge_agent/test_judge.py"><code>test_judge.py</code></a></td>
+<td style="text-align: left;">Test Suite</td>
+<td style="text-align: left;">Unit and integration specs for Pytest verification.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-system-architecture-multi-agent-flow">3. System Architecture &amp; Multi-Agent Flow</h2>
+<pre class="mermaid">
+flowchart TD
+    subgraph Upstream Signal Sources
+        D[Detector Agent Signal\n- Hallucination Prob: P_det\n- Confidence Score]
+        V[Verifier Agent Signal\n- Claim-Evidence Pairs\n- Evidence Confidence: C_ev]
+        M[Memory Agent Context\n- Entity History & Prior Claims]
+    end
+
+    subgraph Judge Agent Core Engine
+        JA[JudgeAgent Orchestrator]
+        NLI[NLIEngine\nDeBERTa-v3 / BART-MNLI]
+        CAL[ConfidenceCalibrator\nBayesian Fusion & Risk Engine]
+        DEC[DecisionEngine\nThreshold Rules & Action Matrix]
+    end
+
+    subgraph Downstream Destinations
+        ACCEPT[ACCEPT: Return Response to User]
+        CORRECT[CORRECT: Send to Corrector Agent]
+        VERIFY[VERIFY_AGAIN: Re-route to Verifier Agent]
+        REJECT[REJECT: Block Response & Issue Warning]
+        ABSTAIN[ABSTAIN: Return Safe Fallback Message]
+    end
+
+    D --> JA
+    V --> JA
+    M --> JA
+    JA --> NLI
+    NLI -->|Entailment / Contradiction / Neutral| CAL
+    CAL -->|Calibrated Conf & Risk Score| DEC
+    DEC -->|Action Selection| ACCEPT
+    DEC -->|Action Selection| CORRECT
+    DEC -->|Action Selection| VERIFY
+    DEC -->|Action Selection| REJECT
+    DEC -->|Action Selection| ABSTAIN
+</pre>
+
+<hr />
+<h2 id="4-input-output-schemas-specification">4. Input &amp; Output Schemas Specification</h2>
+<h3 id="41-input-schema-post-judge">4.1 Input Schema (<code>POST /judge</code>)</h3>
+<pre><code class="language-json">{
+  &quot;user_query&quot;: &quot;What is Metformin used for?&quot;,
+  &quot;draft_response&quot;: &quot;Metformin is a first-line oral medication for type 1 diabetes.&quot;,
+  &quot;detector_output&quot;: {
+    &quot;hallucination_probability&quot;: 0.75,
+    &quot;confidence_score&quot;: 0.88,
+    &quot;risk_level&quot;: &quot;HIGH&quot;
+  },
+  &quot;verifier_output&quot;: {
+    &quot;claim_evidence_pairs&quot;: [
+      {
+        &quot;claim&quot;: &quot;Metformin is used to treat type 1 diabetes as first-line therapy.&quot;,
+        &quot;evidence&quot;: &quot;Metformin is indicated as first-line oral therapy for type 2 diabetes mellitus, not type 1.&quot;,
+        &quot;evidence_confidence&quot;: 0.95,
+        &quot;rank&quot;: 1,
+        &quot;source&quot;: &quot;PubMed / NIH&quot;
+      }
+    ]
+  }
+}
+</code></pre>
+<h3 id="42-output-schema-post-judge-response">4.2 Output Schema (<code>POST /judge</code> Response)</h3>
+<pre><code class="language-json">{
+  &quot;agent&quot;: &quot;JUDGE_AGENT&quot;,
+  &quot;status&quot;: &quot;SUCCESS&quot;,
+  &quot;decision&quot;: &quot;CORRECT&quot;,
+  &quot;severity&quot;: &quot;HIGH&quot;,
+  &quot;reason&quot;: &quot;Hallucinations identified in 1 claim(s); correction required.&quot;,
+  &quot;explanation&quot;: &quot;The response contains specific factual inconsistencies that can be minimally edited using verified evidence.&quot;,
+  &quot;next_action&quot;: &quot;Forward hallucinated claims and trusted evidence to Corrector Agent&quot;,
+  &quot;metrics&quot;: {
+    &quot;calibrated_confidence&quot;: 0.2845,
+    &quot;risk_score&quot;: 0.7647,
+    &quot;overall_entailment&quot;: 0.05,
+    &quot;overall_contradiction&quot;: 0.8,
+    &quot;evidence_strength&quot;: 0.95,
+    &quot;detector_hallucination_prob&quot;: 0.75,
+    &quot;latency_ms&quot;: 142.5
+  },
+  &quot;corrector_payload&quot;: {
+    &quot;judge_decision&quot;: &quot;CORRECT&quot;,
+    &quot;severity&quot;: &quot;HIGH&quot;,
+    &quot;hallucinated_claims&quot;: [
+      {
+        &quot;claim&quot;: &quot;Metformin is used to treat type 1 diabetes as first-line therapy.&quot;,
+        &quot;contradiction_score&quot;: 0.8,
+        &quot;reason&quot;: &quot;Contradicted by retrieved evidence with score 0.80&quot;
+      }
+    ],
+    &quot;verified_claims&quot;: [],
+    &quot;trusted_evidence&quot;: [
+      {
+        &quot;claim&quot;: &quot;Metformin is used to treat type 1 diabetes as first-line therapy.&quot;,
+        &quot;evidence_snippet&quot;: &quot;Metformin is indicated as first-line oral therapy for type 2 diabetes mellitus, not type 1.&quot;,
+        &quot;evidence_source&quot;: &quot;PubMed / NIH&quot;,
+        &quot;confidence&quot;: 0.95,
+        &quot;nli_relation&quot;: &quot;contradiction&quot;
+      }
+    ]
+  }
+}
+</code></pre>
+<hr />
+<h2 id="5-mathematical-algorithmic-formulations">5. Mathematical &amp; Algorithmic Formulations</h2>
+<h3 id="51-bayesian-confidence-fusion-equation">5.1 Bayesian Confidence Fusion Equation</h3>
+<p>The calibrated overall confidence $C_{\text{calibrated}}$ fuses predictions from all multi-agent components:</p>
+<p>$$C_{\text{calibrated}} = \max\left(0, \min\left(1, w_{\text{nli}} \cdot \bar{E} + w_{\text{verif}} \cdot \bar{S}<em>{\text{ev}} + w</em>{\text{det}} \cdot (1 - P_{\text{det}}) \cdot C_{\text{det}} - 0.4 \cdot \bar{C}\right)\right)$$</p>
+<p>Where:<br />
+- $\bar{E}$ = Rank-discounted weighted average NLI entailment score.<br />
+- $\bar{C}$ = Rank-discounted weighted average NLI contradiction score.<br />
+- $\bar{S}<em>{\text{ev}}$ = Verifier evidence strength score.<br />
+- $P</em>{\text{det}}$ = Detector hallucination probability.<br />
+- $C_{\text{det}}$ = Detector confidence score.<br />
+- $w_{\text{nli}} = 0.50$, $w_{\text{verif}} = 0.35$, $w_{\text{det}} = 0.15$.</p>
+<h3 id="52-evidence-rank-discount-formula">5.2 Evidence Rank Discount Formula</h3>
+<p>Evidence rank $r$ scales the influence of retrieved passages:</p>
+<p>$$w_r = C_{\text{ev}} \cdot \frac{1}{1.0 + 0.2 \cdot (r - 1)}$$</p>
+<h3 id="53-risk-score-equation">5.3 Risk Score Equation</h3>
+<p>The composite risk score $R$ determines severity levels (<code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>):</p>
+<p>$$R = 0.5 \cdot \bar{C} + 0.3 \cdot (1.0 - C_{\text{calibrated}}) + 0.2 \cdot P_{\text{det}}$$</p>
+<hr />
+<h2 id="6-decision-action-matrix">6. Decision Action Matrix</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Condition / Metric Boundaries</th>
+<th style="text-align: left;">Verdict Decision</th>
+<th style="text-align: left;">Next System Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">$C_{\text{calibrated}} \ge 0.70$ and $\bar{E} \ge 0.50$</td>
+<td style="text-align: left;"><strong><code>ACCEPT</code></strong></td>
+<td style="text-align: left;">Pass draft response directly to user.</td>
+</tr>
+<tr>
+<td style="text-align: left;">$\bar{C} \ge 0.40$ (Moderate Contradiction)</td>
+<td style="text-align: left;"><strong><code>CORRECT</code></strong></td>
+<td style="text-align: left;">Send hallucinated claims + evidence to Corrector Agent.</td>
+</tr>
+<tr>
+<td style="text-align: left;">$\bar{C} \ge 0.75$ or $R \ge 0.80$</td>
+<td style="text-align: left;"><strong><code>REJECT</code></strong></td>
+<td style="text-align: left;">Block response; emit critical security alert.</td>
+</tr>
+<tr>
+<td style="text-align: left;">$0.40 \le C_{\text{calibrated}} &lt; 0.70$</td>
+<td style="text-align: left;"><strong><code>VERIFY_AGAIN</code></strong></td>
+<td style="text-align: left;">Re-route sub-claims to Verifier Agent for deeper search.</td>
+</tr>
+<tr>
+<td style="text-align: left;">No Evidence &amp; $C_{\text{calibrated}} &lt; 0.30$</td>
+<td style="text-align: left;"><strong><code>ABSTAIN</code></strong></td>
+<td style="text-align: left;">Emit safe fallback answer indicating missing data.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="7-heuristic-nli-fallback-engine">7. Heuristic NLI Fallback Engine</h2>
+<p>When GPU/HuggingFace libraries are omitted in edge or lightweight container environments, <code>NLIEngine</code> automatically engages a zero-dependency heuristic inference engine:</p>
+<ol>
+<li><strong>Explicit Negation Mismatch</strong>: Detects opposing polarity (e.g. <code>is</code> vs <code>is not</code>).</li>
+<li><strong>Numeric Conflict Extractor</strong>: Identifies mismatched dates, percentages, or dosages.</li>
+<li><strong>Contradiction Keyword Matching</strong>: Scans for refutation terms (<code>contraindicated</code>, <code>false</code>, <code>prohibited</code>).</li>
+<li><strong>Jaccard Token Overlap Ratio</strong>: Computes word-level similarity bounds.</li>
+</ol>
+<hr />
+<h2 id="8-summary-engineering-attributions">8. Summary &amp; Engineering Attributions</h2>
+<ul>
+<li><strong>Implementation Author</strong>: Anil (<code>anil@halluciguard.ai</code>)</li>
+<li><strong>System Role</strong>: Judge Agent Subsystem Baseline for HalluciGuard v2.0</li>
+<li><strong>Verification Status</strong>: Tested, document generated, and synchronized across <code>agents/judge_agent/</code> and root workspace.</li>
+</ul>
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    </script>
+</body>
+</html>
