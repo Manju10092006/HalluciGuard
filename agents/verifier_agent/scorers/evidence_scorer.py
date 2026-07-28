@@ -34,12 +34,15 @@ class EvidenceScorer:
             }
 
         # Calculate agreement counts
+        total_count = len(nli_results)
         supports_count = sum(
             1 for res in nli_results if res.get("label") == EntailmentLabel.ENTAILMENT
         )
         contradicts_count = sum(
             1 for res in nli_results if res.get("label") == EntailmentLabel.CONTRADICTION
         )
+        neutral_count = total_count - supports_count - contradicts_count
+        neutral_ratio = neutral_count / total_count if total_count > 0 else 0.0
 
         support_weights = []
         contradiction_weights = []
@@ -65,13 +68,13 @@ class EvidenceScorer:
 
             # Passage relevance score contribution
             relevance = (
-                getattr(passage, "relevance_score", 0.9)
+                getattr(passage, "relevance_score", 0.5)
                 if getattr(passage, "relevance_score", 0.0) > 0
-                else 0.9
+                else 0.5
             )
 
             if label == EntailmentLabel.ENTAILMENT or entailment_score > contradiction_score_val:
-                agreement_bonus = 1.0 + (0.05 * supports_count)
+                agreement_bonus = min(1.3, 1.0 + (0.05 * supports_count))
                 weight = (
                     entailment_score
                     * credibility_weight
@@ -82,7 +85,7 @@ class EvidenceScorer:
                 support_weights.append(weight)
 
             elif label == EntailmentLabel.CONTRADICTION or contradiction_score_val > entailment_score:
-                agreement_bonus = 1.0 + (0.05 * contradicts_count)
+                agreement_bonus = min(1.3, 1.0 + (0.05 * contradicts_count))
                 weight = (
                     contradiction_score_val
                     * credibility_weight
@@ -106,22 +109,32 @@ class EvidenceScorer:
         contradiction_score = round(max(0.0, min(1.0, contradiction_score)), 4)
 
         # Calculate trust score
-        trust_score = round(support_score * (1.0 - (0.8 * contradiction_score)), 4)
+        trust_score = support_score * (1.0 - (0.8 * contradiction_score))
+        if neutral_ratio > 0.7:
+            trust_score *= 0.8
+        trust_score = round(trust_score, 4)
 
         # Determine Verdict
         if support_score == 0.0 and contradiction_score == 0.0:
+            # No valid evidence found to support or contradict
             verdict = VerdictLabel.INSUFFICIENT_EVIDENCE
         elif support_score > 0.4 and contradiction_score < 0.25:
+            # Strong support with minimal contradicting evidence
             verdict = VerdictLabel.VERIFIED
         elif contradiction_score > 0.4 and support_score < 0.25:
+            # Strong contradiction with minimal supporting evidence
             verdict = VerdictLabel.LIKELY_HALLUCINATED
         elif support_score > 0.2 and contradiction_score > 0.2:
+            # Significant evidence exists for both sides
             verdict = VerdictLabel.MIXED_EVIDENCE
         elif support_score > 0.25:
+            # Moderate support with low contradiction
             verdict = VerdictLabel.VERIFIED
         elif contradiction_score > 0.25:
+            # Moderate contradiction with low support
             verdict = VerdictLabel.LIKELY_HALLUCINATED
         else:
+            # Evidence scores are too low to make a confident decision
             verdict = VerdictLabel.INSUFFICIENT_EVIDENCE
 
         return {

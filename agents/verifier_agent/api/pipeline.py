@@ -87,7 +87,9 @@ class VerificationPipeline:
             if conflict_res.get("resolution_type") == "genuine_conflict"
             else 1.0
         )
-        return round(max(0.0, min(1.0, base * volume_factor * conflict_penalty)), 4)
+        conflict_adj = float(conflict_res.get("confidence_adjustment", 0.0))
+        calibrated = base * volume_factor * conflict_penalty + conflict_adj
+        return round(max(0.0, min(1.0, calibrated)), 4)
 
     # ------------------------------------------------------------------
     # Main pipeline entry
@@ -137,6 +139,7 @@ class VerificationPipeline:
         claim_reports: List[ClaimReport] = []
         total_retrieved = 0
         any_cache_hit = False
+        adapter_failures: List[str] = []
 
         # ── Process Each Suspicious Claim ────────────────────────────
         for claim in payload.suspicious_claims:
@@ -187,6 +190,7 @@ class VerificationPipeline:
                                 expanded_query,
                                 e,
                             )
+                            adapter_failures.append(f"{validated_domain}:{str(e)[:100]}")
                             raw_passages = []
 
                         retrieval_duration = int(
@@ -364,7 +368,7 @@ class VerificationPipeline:
                     trust_score=0.0,
                     confidence_score=0.0,
                     verdict=VerdictLabel.INSUFFICIENT_EVIDENCE,
-                    explanation=f"Processing encountered error: {str(e)}",
+                    explanation=f"Pipeline error: {type(e).__name__} — {str(e)[:200]}. This claim could not be verified.",
                 )
                 claim_reports.append(error_report)
 
@@ -379,6 +383,17 @@ class VerificationPipeline:
         else:
             avg_trust = 0.0
 
+        pipeline_stages_list = tracker.to_pipeline_stages()
+        if adapter_failures:
+            pipeline_stages_list.append(
+                PipelineStageStatus(
+                    stage=PipelineStage.RETRIEVAL,
+                    status="failed",
+                    duration_ms=0,
+                    details=f"Adapter failures: {', '.join(adapter_failures)}"
+                )
+            )
+
         final_response = VerifierOutputV2(
             query_id=payload.query_id,
             domain=validated_domain,
@@ -388,7 +403,7 @@ class VerificationPipeline:
             claim_evidence=claim_reports,
             overall_evidence_confidence=round(avg_trust, 4),
             latency_ms=latency_ms,
-            pipeline_stages=tracker.to_pipeline_stages(),
+            pipeline_stages=pipeline_stages_list,
             runtime_models=runtime_models,
             cache_hit=any_cache_hit,
         )
