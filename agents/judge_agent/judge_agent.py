@@ -1,18 +1,26 @@
 """
-HalluciGuard - Judge Agent Main Module
-Orchestrates the entire Judge Agent workflow:
-Inputs: Detector Signals + Verifier Evidence + Memory Context
-Outputs: Trust Decision (Accept, Verify Again, Correct, Reject, Abstain), Severity, Explanation, Corrector Payload.
+HalluciGuard - Enterprise Judge Agent Orchestrator
+Main orchestrator class tying together Domain Policy Registry, Evidence Intelligence,
+Source Consensus Engine, Contradiction Taxonomy, Dynamic 11-Signal Calibrator, Decision Intelligence Engine,
+Memory Intelligence, Multi-Agent Negotiation Protocol, and Reproducible Audit Logging.
+Includes Circuit Breaker, Graceful Degradation, and Fallback Policies.
 """
 
 import time
 import logging
+import asyncio
 from typing import Dict, List, Any, Optional
 
 from config import JudgeConfig, DEFAULT_CONFIG
+from domain_policies import DomainPolicyRegistry, DEFAULT_DOMAIN_REGISTRY
+from evidence_intelligence import EvidenceIntelligenceEngine
+from source_consensus import SourceConsensusEngine
+from contradiction_analyzer import ContradictionTaxonomyAnalyzer
+from claim_criticality import ClaimCriticalityAssessor
+from memory_integration import MemoryIntelligenceEngine
 from nli_engine import NLIEngine
-from confidence_calibrator import ConfidenceCalibrator
-from decision_engine import DecisionEngine
+from confidence_calibrator import DynamicConfidenceCalibrator
+from decision_engine import DecisionIntelligenceEngine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("HalluciGuard.JudgeAgent")
@@ -20,15 +28,27 @@ logger = logging.getLogger("HalluciGuard.JudgeAgent")
 class JudgeAgent:
     def __init__(self, config: Optional[JudgeConfig] = None):
         self.config = config or DEFAULT_CONFIG
-        logger.info(f"Initializing HalluciGuard Judge Agent (Model: {self.config.default_nli_model})...")
+        logger.info(f"Initializing HalluciGuard Enterprise Judge Agent Engine...")
+
+        self.domain_registry = DEFAULT_DOMAIN_REGISTRY
+        self.evidence_intel_engine = EvidenceIntelligenceEngine(config=self.config)
+        self.consensus_engine = SourceConsensusEngine()
+        self.contradiction_analyzer = ContradictionTaxonomyAnalyzer()
+        self.criticality_assessor = ClaimCriticalityAssessor()
+        self.memory_engine = MemoryIntelligenceEngine()
         
         self.nli_engine = NLIEngine(
             model_name=self.config.default_nli_model,
             use_hf=self.config.use_huggingface
         )
-        self.calibrator = ConfidenceCalibrator(config=self.config)
-        self.decision_engine = DecisionEngine(config=self.config)
-        logger.info("Judge Agent initialized and ready.")
+        self.calibrator = DynamicConfidenceCalibrator(config=self.config)
+        self.decision_engine = DecisionIntelligenceEngine(config=self.config)
+
+        # Circuit breaker state
+        self._consecutive_errors = 0
+        self._circuit_open = False
+
+        logger.info("HalluciGuard Enterprise Judge Agent initialized and ready.")
 
     def evaluate(
         self,
@@ -39,99 +59,180 @@ class JudgeAgent:
         memory_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Executes full evaluation pipeline for a request:
-        1. Extract Detector hallucination probabilities and Verifier claim-evidence pairs.
-        2. Perform NLI entailment / contradiction scoring via DeBERTa/BART engine.
-        3. Calibrate confidence scores & compute Bayesian risk scores.
-        4. Make trust decision and output payload for Corrector Agent.
+        Executes complete Enterprise Decision Intelligence Pipeline:
+        1. Circuit Breaker & Input Normalization
+        2. Domain Policy Lookup (Healthcare, Cybersecurity, Finance, etc.)
+        3. Evidence Intelligence (Source Authority, Freshness Decay, Diversity Index, Graph Clustering)
+        4. NLI Inference (Entailment / Contradiction scoring)
+        5. Source Consensus Matrix Calculation
+        6. Contradiction Taxonomy & Claim Criticality Assessment
+        7. Memory Signals Integration
+        8. Dynamic 11-Signal Bayesian Calibration
+        9. Decision Arbitration & Multi-Agent Negotiation Protocol
+        10. Reproducible Audit Trail & Observability Signal Emission
         """
         start_time = time.time()
-        logger.info("Starting Judge Agent evaluation pipeline...")
 
-        # 1. Normalize Detector Inputs
-        detector_prob = detector_output.get("hallucination_probability", 0.3)
-        detector_conf = detector_output.get("confidence_score", 0.8)
-        detector_risk = detector_output.get("risk_level", "MEDIUM")
+        # Check Circuit Breaker
+        if self._circuit_open:
+            logger.warning("Circuit Breaker is OPEN due to past errors. Returning graceful fallback decision.")
+            return self._graceful_fallback(user_query, draft_response, "CIRCUIT_BREAKER_ACTIVE")
 
-        # 2. Extract Verifier Claims & Evidence
-        raw_pairs = verifier_output.get("claim_evidence_pairs", [])
-        if not raw_pairs and "claims" in verifier_output and "evidence" in verifier_output:
-            # Reformat if provided as separate lists
-            claims = verifier_output.get("claims", [])
-            evidence = verifier_output.get("evidence", [])
-            raw_pairs = [
-                {"claim": c, "evidence": e if i < len(evidence) else "", "evidence_confidence": 0.85, "rank": i+1}
-                for i, c in enumerate(claims)
-            ]
+        try:
+            # 1. Normalize Inputs
+            detector_prob = detector_output.get("hallucination_probability", 0.3)
+            detector_conf = detector_output.get("confidence_score", 0.8)
+            domain_name = verifier_output.get("domain", "General Knowledge")
 
-        # 3. NLI Engine Inference (Evidence -> Claim entailment/contradiction)
-        evaluated_pairs = self.nli_engine.batch_predict(raw_pairs)
+            # 2. Domain Policy Lookup
+            domain_policy = self.domain_registry.get_policy(domain_name)
 
-        # 4. Confidence Calibration & Risk Assessment
-        calibration_results = self.calibrator.calibrate(
-            detector_prob=detector_prob,
-            detector_confidence=detector_conf,
-            evaluated_pairs=evaluated_pairs
-        )
+            # 3. Extract Claim-Evidence Pairs
+            raw_pairs = verifier_output.get("claim_evidence_pairs", [])
+            if not raw_pairs and "claims" in verifier_output and "evidence" in verifier_output:
+                claims = verifier_output.get("claims", [])
+                evidence = verifier_output.get("evidence", [])
+                raw_pairs = [
+                    {"claim": c, "evidence": e if i < len(evidence) else "", "evidence_confidence": 0.85, "rank": i+1}
+                    for i, c in enumerate(claims)
+                ]
 
-        # 5. Decision & Action Selection
-        decision_payload = self.decision_engine.evaluate_decision(
-            calibration_results=calibration_results,
-            evaluated_pairs=evaluated_pairs,
-            user_query=user_query,
-            draft_response=draft_response
-        )
+            # 4. NLI Inference
+            evaluated_pairs = self.nli_engine.batch_predict(raw_pairs)
 
-        execution_latency_ms = round((time.time() - start_time) * 1000, 2)
+            # 5. Evidence Intelligence (Authority, Freshness, Diversity, Graph)
+            evidence_intel = self.evidence_intel_engine.analyze_evidence_set(evaluated_pairs, domain_name)
 
-        # Combine complete standardized Judge Agent output schema
-        full_judge_output = {
+            # 6. Source Consensus Engine
+            consensus_data = self.consensus_engine.evaluate_consensus(evaluated_pairs)
+
+            # 7. Contradiction Taxonomy & Primary Contradiction
+            contradiction_data = {"has_contradiction": False, "risk_weight": 0.0}
+            for p in evaluated_pairs:
+                ct = self.contradiction_analyzer.classify_contradiction(
+                    p.get("claim", ""), p.get("evidence", ""), p.get("nli_scores", {})
+                )
+                if ct["has_contradiction"] and ct["risk_weight"] > contradiction_data["risk_weight"]:
+                    contradiction_data = ct
+
+            # 8. Claim Criticality Assessment
+            criticality_data = self.criticality_assessor.evaluate_criticality(draft_response, domain_name)
+
+            # 9. Memory Signals Integration
+            sources = [p.get("source", "Unknown") for p in evaluated_pairs]
+            memory_data = self.memory_engine.evaluate_memory_signals(draft_response, sources, memory_context)
+
+            # 10. Dynamic 11-Signal Calibration
+            calibration_results = self.calibrator.calibrate_11_signal(
+                detector_prob=detector_prob,
+                detector_confidence=detector_conf,
+                evidence_intel=evidence_intel,
+                consensus_data=consensus_data,
+                memory_data=memory_data,
+                contradiction_data=contradiction_data,
+                criticality_data=criticality_data,
+                domain_policy=domain_policy
+            )
+
+            # 11. Decision Intelligence Engine
+            decision_results = self.decision_engine.evaluate_decision(
+                calibration_results=calibration_results,
+                evidence_intel=evidence_intel,
+                consensus_data=consensus_data,
+                memory_data=memory_data,
+                criticality_data=criticality_data,
+                domain_policy=domain_policy,
+                user_query=user_query,
+                draft_response=draft_response
+            )
+
+            execution_latency_ms = round((time.time() - start_time) * 1000, 2)
+            self._consecutive_errors = 0 # Reset error count
+
+            # Standardized Enterprise Response Payload
+            full_judge_output = {
+                "agent": "JUDGE_AGENT",
+                "status": "SUCCESS",
+                "decision": decision_results["judge_decision"],
+                "severity": decision_results["severity"],
+                "reason": decision_results["reason"],
+                "explanation": decision_results["explanation"],
+                "next_action": decision_results["next_action"],
+                "domain_policy_enforced": domain_policy.domain_name,
+                "metrics": {
+                    "calibrated_confidence": calibration_results["calibrated_confidence"],
+                    "risk_score": calibration_results["risk_score"],
+                    "overall_entailment": calibration_results["overall_entailment"],
+                    "overall_contradiction": calibration_results["overall_contradiction"],
+                    "source_authority": evidence_intel["overall_authority"],
+                    "evidence_freshness": evidence_intel["overall_freshness"],
+                    "diversity_index": evidence_intel["diversity_index"],
+                    "consensus_score": consensus_data["consensus_score"],
+                    "conflict_index": consensus_data["conflict_index"],
+                    "latency_ms": execution_latency_ms
+                },
+                "evidence_intelligence": evidence_intel,
+                "source_consensus": consensus_data,
+                "contradiction_taxonomy": decision_results["contradiction_taxonomy"],
+                "claim_criticality": criticality_data,
+                "corrector_payload": decision_results["corrector_payload"],
+                "negotiation_protocol": decision_results["negotiation_protocol"],
+                "audit_record": decision_results["audit_record"],
+                "observability_bus_signal": {
+                    "event": "ENTERPRISE_JUDGE_DECISION_EMITTED",
+                    "decision": decision_results["judge_decision"],
+                    "severity": decision_results["severity"],
+                    "domain": domain_policy.domain_name,
+                    "calibrated_conf": calibration_results["calibrated_confidence"],
+                    "timestamp_ms": time.time()
+                }
+            }
+
+            return full_judge_output
+
+        except Exception as e:
+            logger.error(f"Error during Judge Agent evaluation: {e}", exc_info=True)
+            self._consecutive_errors += 1
+            if self._consecutive_errors >= self.config.circuit_breaker_error_threshold:
+                self._circuit_open = True
+                logger.error("Circuit breaker triggered! Opening circuit.")
+            return self._graceful_fallback(user_query, draft_response, str(e))
+
+    def _graceful_fallback(self, user_query: str, draft_response: str, error_reason: str) -> Dict[str, Any]:
+        """
+        Provides safe fallback response during system failure or circuit breaker events.
+        """
+        return {
             "agent": "JUDGE_AGENT",
-            "status": "SUCCESS",
-            "decision": decision_payload["judge_decision"],
-            "severity": decision_payload["severity"],
-            "reason": decision_payload["reason"],
-            "explanation": decision_payload["explanation"],
-            "next_action": decision_payload["next_action"],
-            "metrics": {
-                "calibrated_confidence": calibration_results["calibrated_confidence"],
-                "risk_score": calibration_results["risk_score"],
-                "overall_entailment": calibration_results["overall_entailment"],
-                "overall_contradiction": calibration_results["overall_contradiction"],
-                "evidence_strength": calibration_results["evidence_strength"],
-                "detector_hallucination_prob": detector_prob,
-                "latency_ms": execution_latency_ms
-            },
-            "claim_evidence_analysis": evaluated_pairs,
-            "corrector_payload": decision_payload,
-            "observability_bus_signal": {
-                "event": "JUDGE_DECISION_EMITTED",
-                "decision": decision_payload["judge_decision"],
-                "severity": decision_payload["severity"],
-                "hallucinated_claim_count": len(decision_payload["hallucinated_claims"]),
-                "timestamp_ms": time.time()
+            "status": "FALLBACK_MODE",
+            "decision": "ABSTAIN",
+            "severity": "HIGH",
+            "reason": f"System in fallback state ({error_reason}).",
+            "explanation": "Runtime exception occurred; returning safe fallback abstain decision.",
+            "next_action": "Retry verification via fallback agent",
+            "metrics": {"calibrated_confidence": 0.0, "latency_ms": 0.0},
+            "corrector_payload": {
+                "judge_decision": "ABSTAIN",
+                "severity": "HIGH",
+                "reason": "System fallback mode",
+                "hallucinated_claims": [],
+                "trusted_evidence": [],
+                "user_query": user_query,
+                "original_draft_response": draft_response
             }
         }
 
-        logger.info(f"Evaluation complete. Decision: {decision_payload['judge_decision']} (Severity: {decision_payload['severity']}) in {execution_latency_ms}ms.")
-        return full_judge_output
-
-
-if __name__ == "__main__":
-    # Quick sanity check
-    agent = JudgeAgent()
-    sample_detector = {"hallucination_probability": 0.75, "confidence_score": 0.88, "risk_level": "HIGH"}
-    sample_verifier = {
-        "claim_evidence_pairs": [
-            {
-                "claim": "Metformin is used to treat Type 1 Diabetes as first-line therapy.",
-                "evidence": "Metformin is indicated as first-line therapy for Type 2 Diabetes mellitus, not Type 1.",
-                "evidence_confidence": 0.95,
-                "rank": 1,
-                "source": "PubMed / NIH"
-            }
-        ]
-    }
-    res = agent.evaluate(sample_detector, sample_verifier, user_query="What is Metformin used for?", draft_response="Metformin is first-line for Type 1.")
-    print("Decision:", res["decision"])
-    print("Reason:", res["reason"])
+    async def evaluate_async(
+        self,
+        detector_output: Dict[str, Any],
+        verifier_output: Dict[str, Any],
+        user_query: str = "",
+        draft_response: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Async thread-safe execution interface.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self.evaluate, detector_output, verifier_output, user_query, draft_response
+        )
