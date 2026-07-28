@@ -7,6 +7,8 @@ from typing import Dict, List, Tuple
 
 from claims.entity_resolver import EntityResolver, EntityResolution
 
+logger = logging.getLogger(__name__)
+
 
 class QueryExpander:
     """Expands queries with entity resolution, domain-specific synonyms, and terms."""
@@ -20,7 +22,7 @@ class QueryExpander:
     def _load_configs(self) -> None:
         config_dir = Path(__file__).parent.parent / "config" / "query_expansion"
         if not config_dir.exists():
-            logging.warning(f"Query expansion config dir not found at {config_dir}")
+            logger.warning(f"Query expansion config dir not found at {config_dir}")
             return
 
         for json_file in config_dir.glob("*.json"):
@@ -31,7 +33,7 @@ class QueryExpander:
                     self.synonyms[domain] = data.get("synonyms", {})
                     self.domain_terms[domain] = data.get("domain_terms", [])
             except Exception as e:
-                logging.warning(f"Failed to load query expansion config {json_file}: {e}")
+                logger.warning(f"Failed to load query expansion config {json_file}: {e}")
 
     def resolve_and_expand(self, query: str, domain: str) -> Tuple[str, EntityResolution]:
         """
