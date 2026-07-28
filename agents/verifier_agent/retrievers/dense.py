@@ -15,6 +15,7 @@ class DenseRetriever:
         self.index = None
         self.passages: List[Passage] = []
         self._is_available = True
+        self._index_built = False
         
     def _load_model(self) -> None:
         if self.model is not None or not self._is_available:
@@ -56,9 +57,11 @@ class DenseRetriever:
             dim = embeddings.shape[1]
             self.index = faiss.IndexFlatIP(dim)
             self.index.add(embeddings)
+            self._index_built = True
+            logging.info("Built FAISS index with %d passages, dim=%d", len(passages), dim)
             
         except ImportError:
-            logging.warning("faiss not installed. DenseRetriever falling back.")
+            logging.warning("FAISS not available. Dense retrieval disabled for this request.")
             self._is_available = False
 
     def retrieve(self, query: str, k: int) -> List[Tuple[Passage, float]]:
@@ -74,6 +77,8 @@ class DenseRetriever:
         """
         self._load_model()
         if not self._is_available or self.index is None or not self.passages:
+            if self.index is None:
+                logging.debug("Dense retrieval skipped: no index available")
             return []
             
         query_embedding = self.model.encode([query], convert_to_numpy=True, normalize_embeddings=True)

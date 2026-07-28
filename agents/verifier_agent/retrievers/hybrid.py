@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import List
+import logging
 
 from schemas.models import Passage
 from .sparse import BM25Retriever
@@ -50,11 +51,13 @@ class HybridRetriever:
                 passage_map[passage_id] = passage
                 rrf_scores[passage_id] = rrf_scores.get(passage_id, 0.0) + 1.0 / (rank + 1 + 60)
                 
-            if getattr(self.dense, '_is_available', False):
+            if self.dense._is_available and self.dense.index is not None:
                 for rank, (passage, _) in enumerate(dense_results):
                     passage_id = passage.source_id or passage.snippet
                     passage_map[passage_id] = passage
                     rrf_scores[passage_id] = rrf_scores.get(passage_id, 0.0) + 1.0 / (rank + 1 + 60)
+
+            logging.debug("RRF fusion: %d unique passages from %d sparse + %d dense", len(rrf_scores), len(sparse_results), len(dense_results))
 
             if not rrf_scores:
                 return passages[:k]
@@ -79,7 +82,8 @@ class HybridRetriever:
                     
             return final_results if final_results else passages[:k]
 
-        except Exception:
+        except Exception as e:
+            logging.warning("Hybrid retrieval failed: %s. Returning raw passages.", e)
             return passages[:k]
         
     def _compute_overlap(self, text1: str, text2: str) -> float:
