@@ -35,8 +35,8 @@ class ClaimDecomposer:
                 logger.debug("Decomposed '%s' into %d sub-claims (numbered list)", text[:80], len(claims))
                 return claims[:5]
         
-        # Don't split short claims
-        if len(text) < 80:
+        # Don't split extremely short claims
+        if len(text) < 15:
             return [text]
         
         # Split on conjunctions and punctuation, but not within quotes or parens
@@ -60,7 +60,7 @@ class ClaimDecomposer:
                 start = pos
             end = start + len(part_stripped)
             original_part = text[start:end].strip()
-            if len(original_part) >= 10:
+            if len(original_part) >= 3:
                 claims.append(original_part)
             pos = end
         
