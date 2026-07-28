@@ -92,9 +92,9 @@ class ModelManager:
                     free_mem,
                     _GPU_MEMORY_THRESHOLD_MB,
                 )
-            except Exception:
-                logger.info("CUDA device detected")
-                return "cuda"
+            except Exception as e:
+                logger.warning("CUDA available but mem_get_info failed: %s. Defaulting to CPU.", e)
+                return "cpu"
         return "cpu"
 
     def get_device(self) -> str:
@@ -261,13 +261,26 @@ class ModelManager:
             self._evict_if_needed()
             settings = get_settings()
             t0 = time.monotonic()
-            model = hf_pipeline(
-                "zero-shot-classification",
-                model=model_name,
-                device=self._hf_device,
-                model_kwargs={"local_files_only": not settings.allow_model_downloads},
-                tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
-            )
+            try:
+                model = hf_pipeline(
+                    "zero-shot-classification",
+                    model=model_name,
+                    device=self._hf_device,
+                    model_kwargs={"local_files_only": not settings.allow_model_downloads},
+                    tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
+                )
+            except Exception as primary_err:
+                if self.device == "cuda":
+                    logger.warning("GPU load failed for zero-shot '%s': %s — retrying on CPU", model_name, primary_err)
+                    model = hf_pipeline(
+                        "zero-shot-classification",
+                        model=model_name,
+                        device=-1,
+                        model_kwargs={"local_files_only": not settings.allow_model_downloads},
+                        tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
+                    )
+                else:
+                    raise
             elapsed = time.monotonic() - t0
             self._models[model_name] = model
             self._model_load_times[model_name] = elapsed
@@ -289,14 +302,28 @@ class ModelManager:
             self._evict_if_needed()
             settings = get_settings()
             t0 = time.monotonic()
-            model = hf_pipeline(
-                task,
-                model=model_name,
-                top_k=None,
-                device=self._hf_device,
-                model_kwargs={"local_files_only": not settings.allow_model_downloads},
-                tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
-            )
+            try:
+                model = hf_pipeline(
+                    task,
+                    model=model_name,
+                    top_k=None,
+                    device=self._hf_device,
+                    model_kwargs={"local_files_only": not settings.allow_model_downloads},
+                    tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
+                )
+            except Exception as primary_err:
+                if self.device == "cuda":
+                    logger.warning("GPU load failed for pipeline '%s' (%s): %s — retrying on CPU", model_name, task, primary_err)
+                    model = hf_pipeline(
+                        task,
+                        model=model_name,
+                        top_k=None,
+                        device=-1,
+                        model_kwargs={"local_files_only": not settings.allow_model_downloads},
+                        tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
+                    )
+                else:
+                    raise
             elapsed = time.monotonic() - t0
             self._models[cache_key] = model
             self._model_load_times[cache_key] = elapsed
@@ -384,8 +411,9 @@ class ModelManager:
                 "domain_profiles": f"{len(registry.list_domains())}_configured",
                 "domain_model_ids": str(len(registry.unique_model_ids())),
             }
-        except Exception:
-            domain_info = {"domain_profiles": "unavailable"}
+        except Exception as e:
+            logger.warning("Failed to get domain intelligence info: %s", e)
+            domain_info = {"domain_profiles": "unavailable", "domain_model_ids": "unavailable"}
 
         gpu_info: Dict[str, Any] = {"device": self.device}
         if self.device == "cuda":
@@ -393,8 +421,10 @@ class ModelManager:
                 free, total = torch.cuda.mem_get_info()
                 gpu_info["gpu_free_mb"] = round(free / (1024 ** 2), 1)
                 gpu_info["gpu_total_mb"] = round(total / (1024 ** 2), 1)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to get GPU mem info: %s", e)
+                gpu_info["gpu_free_mb"] = -1.0
+                gpu_info["gpu_total_mb"] = -1.0
 
         return {
             **model_status,

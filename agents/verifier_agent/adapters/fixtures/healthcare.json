@@ -1,21 +1,21 @@
 {
   "passages": [
     {
-      "text": "Metformin is a common first-line medication for the treatment of type 2 diabetes.",
+      "snippet": "Metformin is a common first-line medication for the treatment of type 2 diabetes.",
       "source_id": "pubmed_12345",
-      "source_url": "https://pubmed.ncbi.nlm.nih.gov/12345/",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/12345/",
       "relevance_score": 0.95
     },
     {
-      "text": "GLUCOPHAGE: indicated as an adjunct to diet and exercise to improve glycemic control in adults with type 2 diabetes mellitus.",
+      "snippet": "GLUCOPHAGE: indicated as an adjunct to diet and exercise to improve glycemic control in adults with type 2 diabetes mellitus.",
       "source_id": "openfda_glucophage",
-      "source_url": "https://api.fda.gov/drug/label.json",
+      "url": "https://api.fda.gov/drug/label.json",
       "relevance_score": 0.90
     },
     {
-      "text": "Title: Efficacy of Metformin in Type 2 Diabetes\nStatus: Completed\nSummary: A study to evaluate the long-term effects of metformin on blood glucose levels.",
+      "snippet": "Title: Efficacy of Metformin in Type 2 Diabetes\nStatus: Completed\nSummary: A study to evaluate the long-term effects of metformin on blood glucose levels.",
       "source_id": "clinicaltrials_NCT00001",
-      "source_url": "https://clinicaltrials.gov/study/NCT00001",
+      "url": "https://clinicaltrials.gov/study/NCT00001",
       "relevance_score": 0.88
     }
   ],

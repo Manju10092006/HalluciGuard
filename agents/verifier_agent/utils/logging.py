@@ -1,7 +1,7 @@
 import logging
 import json
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 @dataclass
@@ -19,7 +19,7 @@ class VerificationLogRecord:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.utcnow().isoformat()
+            self.timestamp = datetime.now(timezone.utc).isoformat()
 
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:

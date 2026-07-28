@@ -112,7 +112,7 @@ class CybersecurityAdapter:
             data = res.json().get("vulnerabilities", [])
             return self._parse_nvd_vulnerabilities(data)
         except Exception as e:
-            logger.error(f"NVD search error: {e}")
+            logger.warning(f"NVD search search failed. URL: unknown. Error: {e}")
             return []
 
     def _parse_nvd_vulnerabilities(self, data: List[Dict[str, Any]]) -> List[Passage]:
@@ -122,7 +122,7 @@ class CybersecurityAdapter:
             cve_id = cve.get("id", "CVE-Unknown")
             descriptions = cve.get("descriptions", [])
             desc_text = descriptions[0].get("value", "") if descriptions else ""
-            published = cve.get("published", "2023")
+            published = cve.get("published", "unknown")
 
             if desc_text:
                 passages.append(
@@ -133,7 +133,7 @@ class CybersecurityAdapter:
                         publication_date=str(published)[:10],
                         snippet=f"Vulnerability {cve_id}: {desc_text[:400]}",
                         source_id=f"nvd_{cve_id}",
-                        relevance_score=0.95,
+                        relevance_score=0.5,
                     )
                 )
         return passages
@@ -189,18 +189,18 @@ class CybersecurityAdapter:
                                 if ext_id
                                 else "https://attack.mitre.org/",
                                 publication_date=str(
-                                    obj.get("modified", obj.get("created", "2024"))
+                                    obj.get("modified", obj.get("created", "unknown"))
                                 )[:10],
                                 snippet=f"Technique [{ext_id}]: {obj.get('description', '')[:350]}",
                                 source_id=f"mitre_{ext_id}",
-                                relevance_score=0.90,
+                                relevance_score=0.5,
                             )
                         )
                         if len(passages) >= k:
                             break
             return passages
         except Exception as e:
-            logger.error(f"MITRE search error: {e}")
+            logger.warning(f"MITRE search search failed. URL: unknown. Error: {e}")
             return []
 
     async def _search_cisa(
@@ -241,16 +241,16 @@ class CybersecurityAdapter:
                                 source="cisa",
                                 url="https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
                                 publication_date=str(
-                                    item.get("dateAdded", "2024")
+                                    item.get("dateAdded", "unknown")
                                 )[:10],
                                 snippet=f"CISA KEV [{cve}] {item.get('vendorProject')} {item.get('product')}: {item.get('shortDescription', '')[:350]}",
                                 source_id=f"cisa_{cve}",
-                                relevance_score=0.92,
+                                relevance_score=0.5,
                             )
                         )
                         if len(passages) >= k:
                             break
             return passages
         except Exception as e:
-            logger.error(f"CISA search error: {e}")
+            logger.warning(f"CISA search search failed. URL: unknown. Error: {e}")
             return []

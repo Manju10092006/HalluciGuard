@@ -41,7 +41,13 @@ class AdapterRegistry:
             return self._adapters[canonical_domain]
         if domain in self._adapters:
             return self._adapters[domain]
-        return self._adapters.get("general")  # type: ignore
+        adapter = self._adapters.get("general")
+        if adapter is None:
+            import logging
+            logging.getLogger(__name__).warning(f"No adapter found for {domain} and 'general' fallback is missing")
+            from .stub_adapter import StubAdapter
+            return StubAdapter(domain)
+        return adapter
 
     def list_domains(self) -> List[str]:
         """Lists all registered domain names."""
