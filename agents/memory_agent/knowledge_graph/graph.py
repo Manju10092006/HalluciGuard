@@ -11,8 +11,10 @@ import networkx as nx
 
 from ..schemas.models import (
     Edge,
+    EntityImportance,
     EntityType,
     EntityNode,
+    GraphAnalytics,
     KnowledgeGraphStats,
     RelationType,
 )
@@ -281,6 +283,75 @@ class KnowledgeGraph:
 
     def save(self) -> None:
         self._save()
+
+    # ------------------------------------------------------------------
+    # Analytics
+    # ------------------------------------------------------------------
+
+    def analyze(self, top_k: int = 10) -> GraphAnalytics:
+        """PageRank, centrality, and community detection over the graph."""
+        if self._graph.number_of_nodes() == 0:
+            return GraphAnalytics(
+                total_nodes=0, total_edges=0, connected_components=0,
+                most_important=[], communities=0, top_communities=[],
+            )
+
+        undirected = self._graph.to_undirected()
+        try:
+            pagerank = nx.pagerank(undirected)
+        except Exception:
+            pagerank = {n: 1.0 / undirected.number_of_nodes() for n in undirected.nodes()}
+
+        try:
+            betweenness = nx.betweenness_centrality(undirected)
+        except Exception:
+            betweenness = {n: 0.0 for n in undirected.nodes()}
+
+        importance = []
+        for nid in undirected.nodes():
+            node = self._entity_index.get(nid)
+            if node is None:
+                continue
+            importance.append(
+                EntityImportance(
+                    entity_id=nid,
+                    name=node.name,
+                    entity_type=node.entity_type,
+                    page_rank=round(pagerank.get(nid, 0.0), 6),
+                    degree=undirected.degree(nid),
+                    betweenness=round(betweenness.get(nid, 0.0), 6),
+                )
+            )
+        importance.sort(key=lambda i: (i.page_rank, i.betweenness), reverse=True)
+
+        connected = nx.number_connected_components(undirected)
+        try:
+            communities = nx.community.greedy_modularity_communities(undirected)
+        except Exception:
+            communities = []
+
+        community_summaries = []
+        for i, community in enumerate(sorted(communities, key=len, reverse=True)[:5]):
+            members = [
+                self._entity_index[c].name for c in community
+                if c in self._entity_index
+            ]
+            community_summaries.append(
+                {
+                    "community_id": i,
+                    "size": len(community),
+                    "members": members[:20],
+                }
+            )
+
+        return GraphAnalytics(
+            total_nodes=undirected.number_of_nodes(),
+            total_edges=undirected.number_of_edges(),
+            connected_components=connected,
+            most_important=importance[:top_k],
+            communities=len(communities),
+            top_communities=community_summaries,
+        )
 
     def clear(self) -> None:
         self._graph.clear()

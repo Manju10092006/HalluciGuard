@@ -10,7 +10,10 @@ from ..config.settings import Settings, get_settings
 from ..knowledge_graph.graph import KnowledgeGraph
 from ..patterns.pattern_learner import PatternLearner
 from ..schemas.models import (
+    BatchStoreResponse,
     CacheStats,
+    CachedVerification,
+    ContradictionAlert,
     EntityType,
     HallucinationPattern,
     MemoryStatsResponse,
@@ -90,9 +93,63 @@ class MemoryAgent:
     # Store
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _verdict_conflicts(verdict_a: str, verdict_b: str) -> bool:
+        positive = {"verified", "likely_verified"}
+        negative = {"likely_hallucinated", "contradicted"}
+        return (verdict_a in positive and verdict_b in negative) or (
+            verdict_a in negative and verdict_b in positive
+        )
+
     async def store_fact(self, request: StoreFactRequest) -> StoreFactResponse:
         fact_id = str(uuid.uuid4())
         now = datetime.utcnow()
+        contradictions: list[ContradictionAlert] = []
+
+        # Duplicate + contradiction detection against existing memory
+        similar = self.vectors.search(
+            query=request.claim_text,
+            top_k=self._settings.contradiction_top_k,
+            metadata_filter={"domain": request.domain} if request.domain else None,
+        )
+        duplicate_of: Optional[str] = None
+        for res in similar:
+            if (
+                res.score >= self._settings.duplicate_similarity_threshold
+                and res.metadata.get("verdict") == request.verdict
+            ):
+                duplicate_of = res.entry_id
+            if (
+                res.score >= self._settings.contradiction_similarity_threshold
+                and self._verdict_conflicts(
+                    request.verdict, str(res.metadata.get("verdict", ""))
+                )
+            ):
+                contradictions.append(
+                    ContradictionAlert(
+                        existing_fact_id=res.entry_id,
+                        existing_claim_text=res.text,
+                        similarity_score=res.score,
+                        existing_verdict=str(res.metadata.get("verdict", "unknown")),
+                        reason=(
+                            f"New verdict '{request.verdict}' conflicts with stored "
+                            f"verdict '{res.metadata.get('verdict')}' for similar claim"
+                        ),
+                    )
+                )
+
+        if duplicate_of:
+            logger.info("Duplicate claim detected, reusing fact %s", duplicate_of)
+            return StoreFactResponse(
+                fact_id=duplicate_of,
+                entities_created=0,
+                edges_created=0,
+                pattern_updated=False,
+                trust_updates=[],
+                duplicate_of=duplicate_of,
+                contradictions=contradictions,
+                stored=False,
+            )
 
         claim_node = self.kg.add_entity(
             name=request.claim_text[:120],
@@ -194,6 +251,41 @@ class MemoryAgent:
             edges_created=edges_created,
             pattern_updated=pattern_updated,
             trust_updates=trust_updates,
+            duplicate_of=None,
+            contradictions=contradictions,
+            stored=True,
+        )
+
+    async def store_facts_batch(
+        self, requests: list[StoreFactRequest]
+    ) -> BatchStoreResponse:
+        results: list[StoreFactResponse] = []
+        errors: list[dict[str, str]] = []
+        stored = duplicates = failed = 0
+
+        for request in requests:
+            try:
+                response = await self.store_fact(request)
+                results.append(response)
+                if response.duplicate_of:
+                    duplicates += 1
+                elif response.stored:
+                    stored += 1
+                else:
+                    failed += 1
+            except Exception as e:
+                failed += 1
+                errors.append(
+                    {"claim_text": request.claim_text[:120], "error": str(e)}
+                )
+
+        return BatchStoreResponse(
+            total=len(requests),
+            stored=stored,
+            duplicates=duplicates,
+            failed=failed,
+            results=results,
+            errors=errors,
         )
 
     # ------------------------------------------------------------------
@@ -201,7 +293,8 @@ class MemoryAgent:
     # ------------------------------------------------------------------
 
     async def recall(self, request: RecallRequest) -> RecallResponse:
-        cached: Optional[CacheStats] = None
+        cached_verification: Optional[CachedVerification] = None
+        fuzzy_cache_hits: list[CachedVerification] = []
         similar_facts: list[VectorSearchResult] = []
         related_entities = []
         relevant_patterns: list[HallucinationPattern] = []
@@ -220,6 +313,19 @@ class MemoryAgent:
             top_k=request.top_k,
             metadata_filter={"domain": request.domain} if request.domain else None,
         )
+
+        # Fuzzy cache: near-duplicate claims that were verified before
+        if request.include_cache and request.fuzzy_cache:
+            for fact in similar_facts:
+                if fact.score >= self._settings.fuzzy_cache_threshold:
+                    hit = await self.cache.get(
+                        domain=request.domain or "general",
+                        claim_text=fact.text,
+                    )
+                    if hit and hit.cache_key not in {
+                        h.cache_key for h in fuzzy_cache_hits
+                    }:
+                        fuzzy_cache_hits.append(hit)
 
         if request.include_graph_context:
             claim_nodes = self.kg.find_entity_by_name(request.query[:120])
@@ -241,13 +347,73 @@ class MemoryAgent:
                 min_trust=0.3,
             )
 
+        reranked = False
+        if request.rerank and similar_facts:
+            similar_facts = await self._rerank_results(similar_facts, request.domain)
+            reranked = True
+
+        if request.min_similarity > 0:
+            similar_facts = [
+                f for f in similar_facts
+                if f.score >= request.min_similarity
+            ]
+
         return RecallResponse(
             cached_verification=cached_verification,
+            fuzzy_cache_hits=fuzzy_cache_hits,
             similar_facts=similar_facts,
             related_entities=related_entities,
             relevant_patterns=relevant_patterns,
             source_trust=source_trust,
+            reranked=reranked,
         )
+
+    async def _rerank_results(
+        self,
+        results: list[VectorSearchResult],
+        domain: Optional[str],
+    ) -> list[VectorSearchResult]:
+        """Blend vector similarity with source trust and recency."""
+        reranked: list[VectorSearchResult] = []
+        for result in results:
+            trust_score = 0.5
+            try:
+                ts = result.metadata.get("timestamp")
+                if ts:
+                    age_days = (datetime.utcnow() - datetime.fromisoformat(ts)).total_seconds() / 86400
+                    recency = max(0.0, 1.0 - age_days / 365.0)
+                else:
+                    recency = 0.5
+            except Exception:
+                recency = 0.5
+
+            # Nearest similar sources' trust, if any
+            if domain:
+                domain_sources = await self.trust.get_domain_sources(
+                    domain=domain, min_trust=0.0
+                )
+                if domain_sources:
+                    trust_score = sum(
+                        s.trust_score for s in domain_sources
+                    ) / len(domain_sources)
+
+            blended = (
+                self._settings.rerank_alpha * result.score
+                + self._settings.rerank_beta * trust_score
+                + self._settings.rerank_gamma * recency
+            )
+            reranked.append(
+                VectorSearchResult(
+                    entry_id=result.entry_id,
+                    text=result.text,
+                    score=result.score,
+                    metadata=result.metadata,
+                    reranked_score=round(min(1.0, blended), 4),
+                )
+            )
+
+        reranked.sort(key=lambda r: r.reranked_score or 0.0, reverse=True)
+        return reranked
 
     # ------------------------------------------------------------------
     # Cache operations

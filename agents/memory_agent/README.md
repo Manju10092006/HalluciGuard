@@ -1,6 +1,6 @@
 # 🧠 Memory Agent — HalluciGuard
 
-## Status: ✅ Implemented (v1.0.0)
+## Status: ✅ Implemented (v1.1.0)
 
 The Memory Agent is the **knowledge persistence layer** in the HalluciGuard pipeline. It stores verified facts, learns from hallucination patterns, tracks source reliability, and provides historical context to all other agents.
 
@@ -55,7 +55,7 @@ The Memory Agent is the **knowledge persistence layer** in the HalluciGuard pipe
 | **Schemas** | `schemas/models.py` | 16 Pydantic V2 models, 4 enums. Full request/response contracts. |
 | **Entry Point** | `__main__.py` | `python -m agents.memory_agent` starts uvicorn. |
 
-### Tests (75 passing)
+### Tests (94 passing)
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -65,6 +65,8 @@ The Memory Agent is the **knowledge persistence layer** in the HalluciGuard pipe
 | `test_patterns.py` | 12 | Claim classification, pattern learning, queries |
 | `test_memory_agent.py` | 8 | Integration: store, recall, cache, patterns |
 | `test_api.py` | 17 | All 14 HTTP endpoints |
+| `test_v11_features.py` | 12 | Dedup, contradictions, batch, analytics, re-ranking, fuzzy cache |
+| `test_api_v11.py` | 7 | Batch/analytics/metrics endpoints, API key auth |
 
 ---
 
@@ -73,6 +75,7 @@ The Memory Agent is the **knowledge persistence layer** in the HalluciGuard pipe
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/store` | Store a verified fact (creates KG nodes, vectors, patterns, cache, trust updates) |
+| `POST` | `/store/batch` | Bulk store multiple facts in one request |
 | `POST` | `/recall` | Semantic recall with graph context, patterns, and trust scores |
 | `GET` | `/health` | Health check with component status and stats |
 | `GET` | `/stats` | Full system statistics |
@@ -86,9 +89,11 @@ The Memory Agent is the **knowledge persistence layer** in the HalluciGuard pipe
 | `POST` | `/patterns/query` | Query hallucination patterns |
 | `GET` | `/patterns/domain/{domain}` | Get pattern summary for a domain |
 | `GET` | `/knowledge-graph/stats` | Knowledge graph statistics |
+| `GET` | `/knowledge-graph/analytics` | PageRank, centrality, community detection |
 | `GET` | `/knowledge-graph/entity/{id}` | Get an entity node |
 | `GET` | `/knowledge-graph/entity/{id}/neighbors` | Get entity neighbors |
 | `GET` | `/vectors/search` | Semantic vector search |
+| `GET` | `/metrics` | Prometheus metrics (counters + histograms) |
 
 ---
 
@@ -187,11 +192,15 @@ agents/memory_agent/
 ├── vector_store/
 │   └── faiss_store.py          # FAISS semantic search
 │
+├── monitoring/
+│   ├── metrics.py              # Prometheus counters + histograms
+│   └── __init__.py
+│
 ├── memory/
 │   └── memory_agent.py         # Orchestrator
 │
 ├── api/
-│   └── main.py                 # FastAPI app (14 endpoints)
+│   └── main.py                 # FastAPI app (20 endpoints)
 │
 └── tests/
     ├── test_knowledge_graph.py  # 17 tests
@@ -199,7 +208,9 @@ agents/memory_agent/
     ├── test_trust.py            # 13 tests
     ├── test_patterns.py         # 12 tests
     ├── test_memory_agent.py     # 8 tests
-    └── test_api.py              # 17 tests
+    ├── test_api.py              # 17 tests
+    ├── test_v11_features.py     # 12 tests
+    └── test_api_v11.py          # 7 tests
 ```
 
 ---
@@ -213,12 +224,22 @@ agents/memory_agent/
 - [x] Source Trust Evolution (Bayesian updates, audit history, decay)
 - [x] Vector Store with FAISS (semantic search, metadata filtering)
 - [x] Memory Agent orchestrator (store + recall flows)
-- [x] FastAPI HTTP interface (14 endpoints, port 8005)
+- [x] FastAPI HTTP interface (20 endpoints, port 8005)
 - [x] DI Container and singleton patterns
 - [x] Pydantic V2 schemas for all data contracts
 - [x] pydantic-settings configuration with .env
-- [x] 75 passing tests (unit + integration + API)
+- [x] 94 passing tests (unit + integration + API)
 - [x] JSON persistence for knowledge graph
+
+### 🆕 v1.1 Advancements
+- [x] **Duplicate detection** — identical/near-identical claims reuse the existing fact instead of duplicating memory
+- [x] **Contradiction detection** — storing a claim whose verdict conflicts with a similar stored fact returns `contradictions` alerts
+- [x] **Batch store** — `/store/batch` ingests multiple facts per request with per-item error isolation
+- [x] **Graph analytics** — PageRank importance, degree/betweenness centrality, community detection via `/knowledge-graph/analytics`
+- [x] **Recall re-ranking** — vector similarity blended with source trust + recency (`reranked_score`); optional `min_similarity` filter
+- [x] **Fuzzy cache recall** — near-duplicate claims surface cached verdicts as `fuzzy_cache_hits`
+- [x] **API key auth** — `X-API-Key` header enforcement via `MEMORY_AGENT_API_KEY` (disabled when empty)
+- [x] **Prometheus monitoring** — `/metrics` endpoint with request latency histograms + counters (stores, recalls, cache hits/misses, contradictions)
 
 ### 🔲 Next Steps (Future Work)
 - [ ] **Wire into Verifier Agent** — Have the Verifier Agent call Memory Agent's `/recall` before running its 9-stage pipeline (cache-first verification)
@@ -242,6 +263,7 @@ agents/memory_agent/
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MEMORY_AGENT_PORT` | `8005` | Server port |
+| `MEMORY_AGENT_API_KEY` | *(empty)* | API key auth; empty = disabled |
 | `KG_PERSISTENCE_PATH` | `data/knowledge_graph.json` | Graph save location |
 | `KG_MAX_NODES` | `100000` | Max entities before eviction |
 | `CACHE_DB_PATH` | `data/verification_cache.db` | Cache database |
@@ -253,6 +275,14 @@ agents/memory_agent/
 | `TRUST_PRIOR` | `0.5` | Default trust score |
 | `TRUST_LEARNING_RATE` | `0.1` | How fast trust changes |
 | `TRUST_DECAY_RATE` | `0.01` | Global trust decay rate |
+| `DUPLICATE_SIMILARITY_THRESHOLD` | `0.95` | Min vector sim to treat as duplicate |
+| `CONTRADICTION_SIMILARITY_THRESHOLD` | `0.75` | Min vector sim to check for conflict |
+| `FUZZY_CACHE_THRESHOLD` | `0.85` | Min sim for fuzzy cache hits |
+| `CONTRADICTION_TOP_K` | `5` | Candidates scanned for conflicts |
+| `RERANK_ALPHA` | `0.6` | Vector similarity weight in rerank |
+| `RERANK_BETA` | `0.3` | Source trust weight in rerank |
+| `RERANK_GAMMA` | `0.1` | Recency weight in rerank |
+| `RECALL_MIN_SIMILARITY` | `0.0` | Global min-similarity recall filter |
 
 ---
 

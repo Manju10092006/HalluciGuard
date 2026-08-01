@@ -91,6 +91,28 @@ class KnowledgeGraphStats(BaseModel):
     domains_covered: list[str]
 
 
+class EntityImportance(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    entity_id: str
+    name: str
+    entity_type: EntityType
+    page_rank: float
+    degree: int
+    betweenness: float
+
+
+class GraphAnalytics(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    total_nodes: int
+    total_edges: int
+    connected_components: int
+    most_important: list[EntityImportance] = Field(default_factory=list)
+    communities: int
+    top_communities: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Verification Cache Models
 # ---------------------------------------------------------------------------
@@ -196,11 +218,22 @@ class VectorSearchResult(BaseModel):
     text: str
     score: float = Field(ge=0.0, le=1.0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    reranked_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 # ---------------------------------------------------------------------------
 # Memory Agent API Models
 # ---------------------------------------------------------------------------
+
+class ContradictionAlert(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    existing_fact_id: str
+    existing_claim_text: str
+    similarity_score: float = Field(ge=0.0, le=1.0)
+    existing_verdict: str
+    reason: str
+
 
 class StoreFactRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -222,6 +255,20 @@ class StoreFactResponse(BaseModel):
     edges_created: int
     pattern_updated: bool
     trust_updates: list[TrustUpdate] = Field(default_factory=list)
+    duplicate_of: Optional[str] = None
+    contradictions: list[ContradictionAlert] = Field(default_factory=list)
+    stored: bool = True
+
+
+class BatchStoreResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    total: int
+    stored: int
+    duplicates: int
+    failed: int
+    results: list[StoreFactResponse] = Field(default_factory=list)
+    errors: list[dict[str, str]] = Field(default_factory=list)
 
 
 class RecallRequest(BaseModel):
@@ -233,16 +280,21 @@ class RecallRequest(BaseModel):
     include_graph_context: bool = True
     include_cache: bool = True
     include_patterns: bool = True
+    fuzzy_cache: bool = True
+    rerank: bool = True
+    min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class RecallResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     cached_verification: Optional[CachedVerification] = None
+    fuzzy_cache_hits: list[CachedVerification] = Field(default_factory=list)
     similar_facts: list[VectorSearchResult] = Field(default_factory=list)
     related_entities: list[EntityNode] = Field(default_factory=list)
     relevant_patterns: list[HallucinationPattern] = Field(default_factory=list)
     source_trust: list[SourceTrustRecord] = Field(default_factory=list)
+    reranked: bool = False
 
 
 class MemoryStatsResponse(BaseModel):

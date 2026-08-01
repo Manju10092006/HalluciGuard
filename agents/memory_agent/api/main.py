@@ -1,14 +1,30 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from fastapi.security import APIKeyHeader
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from ..config.settings import get_settings
 from ..memory.memory_agent import MemoryAgent, get_memory_agent
+from ..monitoring import (
+    cache_hit_total,
+    cache_miss_total,
+    contradiction_total,
+    recall_duration,
+    recall_total,
+    request_duration,
+    store_duration,
+    store_total,
+)
 from ..schemas.models import (
+    BatchStoreResponse,
+    GraphAnalytics,
     HealthResponse,
     MemoryStatsResponse,
     PatternQueryRequest,
@@ -27,6 +43,14 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def _require_api_key(api_key: str | None = Depends(_api_key_header)) -> None:
+    expected = settings.memory_agent_api_key
+    if expected and api_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,6 +68,7 @@ app = FastAPI(
     description="Knowledge persistence layer for verified facts, patterns, and source trust.",
     version=MEMORY_AGENT_VERSION,
     lifespan=lifespan,
+    dependencies=[Depends(_require_api_key)],
 )
 
 app.add_middleware(
@@ -53,6 +78,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _observe_request(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    request_duration.labels(request.url.path).observe(
+        time.perf_counter() - start
+    )
+    return response
 
 
 def _get_agent(request: Request) -> MemoryAgent:
@@ -66,18 +101,50 @@ def _get_agent(request: Request) -> MemoryAgent:
 @app.post("/store", response_model=StoreFactResponse)
 async def store_fact(request: Request, body: StoreFactRequest):
     agent = _get_agent(request)
+    start = time.perf_counter()
     try:
-        return await agent.store_fact(body)
+        result = await agent.store_fact(body)
+        store_duration.observe(time.perf_counter() - start)
+        store_total.labels(
+            verdict=body.verdict,
+            duplicate="true" if result.duplicate_of else "false",
+        ).inc()
+        for _ in result.contradictions:
+            contradiction_total.labels(body.domain).inc()
+        return result
     except Exception as e:
         logger.exception("Failed to store fact")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/store/batch", response_model=BatchStoreResponse)
+async def store_batch(request: Request, body: list[StoreFactRequest]):
+    agent = _get_agent(request)
+    try:
+        return await agent.store_facts_batch(body)
+    except Exception as e:
+        logger.exception("Failed to store fact batch")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/recall", response_model=RecallResponse)
 async def recall(request: Request, body: RecallRequest):
     agent = _get_agent(request)
+    start = time.perf_counter()
     try:
-        return await agent.recall(body)
+        result = await agent.recall(body)
+        recall_duration.observe(time.perf_counter() - start)
+        recall_total.labels(
+            cached="true" if result.cached_verification else "false",
+            reranked="true" if result.reranked else "false",
+        ).inc()
+        if body.include_cache:
+            label = body.domain or "general"
+            if result.cached_verification:
+                cache_hit_total.labels(label).inc()
+            else:
+                cache_miss_total.labels(label).inc()
+        return result
     except Exception as e:
         logger.exception("Failed to recall")
         raise HTTPException(status_code=500, detail=str(e))
@@ -156,6 +223,12 @@ async def kg_stats(request: Request):
     return agent.kg.get_stats()
 
 
+@app.get("/knowledge-graph/analytics", response_model=GraphAnalytics)
+async def kg_analytics(request: Request, top_k: int = 10):
+    agent = _get_agent(request)
+    return agent.kg.analyze(top_k=top_k)
+
+
 @app.get("/knowledge-graph/entity/{entity_id}")
 async def get_entity(request: Request, entity_id: str):
     agent = _get_agent(request)
@@ -222,3 +295,11 @@ async def save(request: Request):
     agent = _get_agent(request)
     await agent.save_all()
     return {"status": "saved"}
+
+
+@app.get("/metrics")
+async def metrics():
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
