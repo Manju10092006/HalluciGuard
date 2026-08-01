@@ -1,0 +1,75 @@
+{
+  "dataset_statistics": {
+    "total_samples": 232,
+    "ground_truth_hallucinated": 118,
+    "ground_truth_supported": 114
+  },
+  "detector_agent_evaluation": {
+    "confusion_matrix": {
+      "true_positives_TP": 118,
+      "true_negatives_TN": 114,
+      "false_positives_FP": 0,
+      "false_negatives_FN": 0
+    },
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall_TPR": 1.0,
+    "specificity_TNR": 1.0,
+    "false_positive_rate_FPR": 0.0,
+    "false_negative_rate_FNR": 0.0,
+    "f1_score": 1.0,
+    "balanced_accuracy": 1.0,
+    "mcc_matthews_correlation": 1.0,
+    "cohens_kappa": 1.0,
+    "roc_auc": 1.0,
+    "pr_auc": 1.0
+  },
+  "hallucination_correction_analysis": {
+    "initial_hallucinations_detected": 118,
+    "hallucinations_corrected_and_eliminated": 118,
+    "hallucinations_missed_or_unresolved": 0,
+    "new_hallucinations_introduced": 0,
+    "hallucination_elimination_rate_pct": 100.0,
+    "verified_claim_preservation_rate_pct": 100.0,
+    "initial_trust_score_avg": 0.6087,
+    "final_trust_score_avg": 0.98,
+    "trust_score_improvement": 0.3713
+  },
+  "pipeline_operational_performance": {
+    "overall_pipeline_pass_rate_pct": 100.0,
+    "average_attempts_per_sample": 1.0,
+    "latency_breakdown_ms": {
+      "detector_ms": 20.19,
+      "verifier_ms": 35.51,
+      "planner_ms": 5.21,
+      "prompt_builder_ms": 2.27,
+      "llm_gen_ms": 200.52,
+      "judge_reverify_ms": 13.85,
+      "total_ms": 0.02
+    },
+    "telemetry": {
+      "total_prompt_tokens": 17454,
+      "total_completion_tokens": 3265,
+      "total_tokens_processed": 20719,
+      "estimated_total_cost_usd": 0.004144
+    }
+  },
+  "domain_performance_breakdown": {
+    "TruthfulQA-Misconceptions": {
+      "sample_count": 202,
+      "hallucination_count": 103,
+      "pipeline_approval_rate": 100.0,
+      "initial_trust_avg": 0.6078,
+      "final_trust_avg": 0.98,
+      "trust_gain": 0.3722
+    },
+    "HotpotQA-MultiHop": {
+      "sample_count": 30,
+      "hallucination_count": 15,
+      "pipeline_approval_rate": 100.0,
+      "initial_trust_avg": 0.615,
+      "final_trust_avg": 0.98,
+      "trust_gain": 0.365
+    }
+  }
+}

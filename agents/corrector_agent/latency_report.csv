@@ -1,0 +1,8 @@
+Pipeline Stage,Avg Latency (ms)
+Detector Agent,16.84
+Verifier Agent,30.14
+Correction Planner,4.16
+Prompt Builder,2.07
+LLM Inference Engine,180.02
+Judge Re-verification,10.5
+Total Pipeline Latency,0.05
