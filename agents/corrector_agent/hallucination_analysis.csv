@@ -1,0 +1,9 @@
+Metric,Value
+Total Ground Truth Hallucinated Responses,118
+Detected and Corrected Hallucinations,95
+Uncaught Hallucinations (False Negatives),23
+Overall Hallucination Elimination Rate (%),80.51%
+Verified Claims Preservation Rate (%),100.00%
+Initial Mean Trust Score,0.6219
+Final Mean Trust Score,0.9407
+Mean Trust Gain,+0.3188

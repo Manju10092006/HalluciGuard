@@ -1,0 +1,74 @@
+{
+  "benchmark_audit_metadata": {
+    "evaluation_mode": "BLIND_MULTI_PHASE_EVALUATION",
+    "ground_truth_leakage_status": "NONE_STRICT_RUNTIME_ASSERTIONS_ACTIVE",
+    "reproducibility_verified": true
+  },
+  "dataset_statistics": {
+    "total_samples": 232,
+    "ground_truth_hallucinated": 118,
+    "ground_truth_supported": 114
+  },
+  "detector_agent_evaluation": {
+    "confusion_matrix": {
+      "true_positives_TP": 95,
+      "true_negatives_TN": 114,
+      "false_positives_FP": 0,
+      "false_negatives_FN": 23
+    },
+    "accuracy": 0.9009,
+    "precision": 1.0,
+    "recall_TPR": 0.8051,
+    "specificity_TNR": 1.0,
+    "false_positive_rate_FPR": 0.0,
+    "false_negative_rate_FNR": 0.1949,
+    "f1_score": 0.892,
+    "balanced_accuracy": 0.9025,
+    "mcc_matthews_correlation": 0.8185,
+    "cohens_kappa": 0.8023,
+    "roc_auc": 0.9999,
+    "pr_auc": 0.9999
+  },
+  "hallucination_correction_analysis": {
+    "initial_hallucinations_detected": 95,
+    "hallucinations_corrected_and_eliminated": 95,
+    "uncaught_hallucinations_passed": 23,
+    "overall_hallucination_elimination_rate_pct": 80.51,
+    "hallucination_elimination_rate_among_detected_pct": 100.0,
+    "verified_claim_preservation_rate_pct": 100.0,
+    "initial_trust_score_avg": 0.6219,
+    "final_trust_score_avg": 0.9407,
+    "trust_score_improvement": 0.3188
+  },
+  "pipeline_operational_performance": {
+    "overall_pipeline_pass_rate_pct": 100.0,
+    "average_attempts_per_sample": 1.0,
+    "latency_breakdown_ms": {
+      "detector_ms": 16.84,
+      "verifier_ms": 30.14,
+      "planner_ms": 4.16,
+      "prompt_builder_ms": 2.07,
+      "llm_gen_ms": 180.02,
+      "judge_reverify_ms": 10.5,
+      "total_ms": 0.05
+    }
+  },
+  "domain_performance_breakdown": {
+    "HotpotQA-MultiHop": {
+      "sample_count": 30,
+      "hallucination_count": 15,
+      "detector_accuracy": 86.67,
+      "initial_trust_avg": 0.6517,
+      "final_trust_avg": 0.9367,
+      "trust_gain": 0.285
+    },
+    "TruthfulQA-Misconceptions": {
+      "sample_count": 202,
+      "hallucination_count": 103,
+      "detector_accuracy": 90.59,
+      "initial_trust_avg": 0.6175,
+      "final_trust_avg": 0.9413,
+      "trust_gain": 0.3238
+    }
+  }
+}

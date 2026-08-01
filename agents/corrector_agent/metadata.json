@@ -1,0 +1,6 @@
+{
+  "name": "HalluciGuard",
+  "description": "HalluciGuard Corrector Agent – Enterprise response refinement engine grounding LLM outputs with verified evidence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
