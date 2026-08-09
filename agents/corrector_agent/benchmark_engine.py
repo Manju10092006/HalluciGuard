@@ -240,47 +240,65 @@ class CorrectionPlanner:
         latency_ms = (time.time() - start_time) * 1000 + random.uniform(5.0, 12.0)
         return plan, latency_ms
 
+from app.models import JudgeVerificationPayload, AtomicClaim, EvidencePassage, ClaimStatus, CorrectionPlan, ClaimToEdit
+from app.prompt_builder import PromptBuilder as RealPromptBuilder
+from app.model_client import QwenCorrectorClient
+
 class PromptBuilder:
-    def build(self, payload, plan, attempt_number, feedback):
+    def __init__(self):
+        self.real_builder = RealPromptBuilder()
+        
+    def build(self, payload_dict, plan_dict, attempt_number, feedback):
         start_time = time.time()
-        prompt = (
-            f"--- HALLUCIGUARD ENTERPRISE CORRECTION PROMPT (Attempt {attempt_number}) ---\n"
-            f"User Query: {payload['query']}\n"
-            f"Original Response: {payload['originalResponse']}\n"
-            f"Correction Instructions: {payload['correctionInstructions']}\n"
-            f"Verified Evidence: {[e['passageText'] for e in payload['supportingEvidence']]}\n"
-            f"Feedback: {feedback or 'None'}\n"
-            f"Output a concise, completely factual answer grounded strictly in the verified evidence."
+        
+        def map_claim(c):
+            st = ClaimStatus.HALLUCINATED if c["status"]=="HALLUCINATED" else (ClaimStatus.VERIFIED if c["status"]=="VERIFIED" else ClaimStatus.CONTRADICTED)
+            return AtomicClaim(id=c["id"], text=c["text"], status=st, confidenceScore=c.get("confidenceScore", 0.9), evidenceIds=c.get("evidenceIds", []))
+            
+        def map_ev(e):
+            return EvidencePassage(id=e["id"], sourceTitle=e["sourceTitle"], passageText=e["passageText"])
+            
+        payload = JudgeVerificationPayload(
+            query=payload_dict["query"],
+            originalResponse=payload_dict["originalResponse"],
+            claims=[map_claim(c) for c in payload_dict["claims"]],
+            supportingEvidence=[map_ev(e) for e in payload_dict["supportingEvidence"]],
+            contradictionEvidence=[map_ev(e) for e in payload_dict["contradictionEvidence"]],
+            trustScore=payload_dict["trustScore"],
+            correctionInstructions=payload_dict["correctionInstructions"]
         )
-        latency_ms = (time.time() - start_time) * 1000 + random.uniform(2.0, 5.0)
+        
+        plan = CorrectionPlan(
+            preservedClaims=[map_claim(c) for c in plan_dict["preservedClaims"]],
+            claimsToRewrite=[ClaimToEdit(claim=map_claim(r["claim"]), reason=r["reason"], matchedEvidence=[map_ev(e) for e in r["matchedEvidence"]], matchedContradictions=[map_ev(e) for e in r["matchedContradictions"]]) for r in plan_dict["claimsToRewrite"]],
+            unsupportedClaims=[map_claim(c) for c in plan_dict["unsupportedClaims"]],
+            strategyNotes=plan_dict["strategyNotes"]
+        )
+        
+        prompt = self.real_builder.buildCorrectionPrompt(payload, plan, attempt_number, feedback, [])
+        latency_ms = (time.time() - start_time) * 1000
         return prompt, latency_ms
 
 class ModelManagerClient:
+    def __init__(self):
+        self.client = QwenCorrectorClient()
+        self.client._load_model()
+        print("LoRA model loaded successfully for benchmark.")
+        
     def generate(self, prompt, plan, sample):
         start_time = time.time()
         
-        # Grounded rewrite synthesis
-        knowledge = sample["knowledge"]
-        correct_ans = sample["correct_answer"]
-        gt_verdict = sample["ground_truth_verdict"]
-
-        if gt_verdict == "hallucinated":
-            if correct_ans in knowledge:
-                response_text = f"{correct_ans}. {knowledge}"
-            else:
-                response_text = knowledge
-        else:
-            response_text = sample["llm_response"]
-
-        gen_time_ms = random.uniform(180.0, 320.0)
-
+        response_text = self.client.generate_correction(prompt)
+        
+        gen_time_ms = (time.time() - start_time) * 1000
+        
         prompt_tokens = len(prompt) // 4
         comp_tokens = len(response_text) // 4
         tot_tokens = prompt_tokens + comp_tokens
 
         observability = {
-            "provider": "Hugging Face OpenAI Router",
-            "model": "Qwen/Qwen3-8B:nscale",
+            "provider": "Local",
+            "model": "Qwen2.5-1.5B-Instruct-LoRA",
             "promptTokens": prompt_tokens,
             "completionTokens": comp_tokens,
             "totalTokens": tot_tokens,
@@ -288,7 +306,7 @@ class ModelManagerClient:
             "retryCount": 0,
             "temperature": 0.1,
             "topP": 0.9,
-            "estimatedCostUsd": tot_tokens * 0.0000002,
+            "estimatedCostUsd": tot_tokens * 0.00012,
             "circuitBreakerStatus": "CLOSED_HEALTHY"
         }
 
@@ -339,12 +357,38 @@ def run_benchmark():
     print("  HALLUCIGUARD ENTERPRISE BENCHMARK EXECUTION HARNESS    ")
     print("==========================================================")
 
-    dataset_path = "/app/dataset.json"
-    if not os.path.exists(dataset_path):
-        dataset_path = "/app/applet/dataset.json"
-
-    with open(dataset_path, "r") as f:
-        dataset = json.load(f)
+    dataset_path = r"C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets\halluciguard_dataset.jsonl"
+    dataset = []
+    with open(dataset_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                raw = json.loads(line)
+                sample_id = raw.get("id", f"sample_{len(dataset)}")
+                if "input" in raw:
+                    inp = raw["input"]
+                    judge_info = inp.get("judge", {})
+                    user_prompt = inp.get("user_prompt", "")
+                    llm_response = inp.get("llm_response", "")
+                    gt_verdict = judge_info.get("overall_verdict", "supported")
+                    knowledge = ""
+                    claims = judge_info.get("claims", [])
+                    if claims and claims[0].get("evidence"):
+                        knowledge = claims[0]["evidence"][0].get("text", "")
+                    correct_answer = ""
+                    target = raw.get("target", {})
+                    if isinstance(target, dict) and "actions" in target and "replace" in target["actions"] and target["actions"]["replace"]:
+                        correct_answer = target["actions"]["replace"][0].get("new", "")
+                    dataset.append({
+                        "id": sample_id,
+                        "domain": "general",
+                        "user_prompt": user_prompt,
+                        "llm_response": llm_response,
+                        "ground_truth_verdict": gt_verdict,
+                        "knowledge": knowledge,
+                        "correct_answer": correct_answer
+                    })
+                else:
+                    dataset.append(raw)
 
     print(f"Loaded {len(dataset)} evaluation samples from {dataset_path}.\n")
 
@@ -929,7 +973,7 @@ The following plots have been generated and included in the evaluation package:
 *Report automatically compiled by HalluciGuard Enterprise Empirical Evaluation Engine.*
 """
 
-    with open("evaluation_report.md", "w") as f:
+    with open("evaluation_report.md", "w", encoding="utf-8") as f:
         f.write(report_content)
     print("Exported evaluation_report.md")
 
