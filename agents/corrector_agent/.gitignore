@@ -16,3 +16,13 @@
 local.properties
 .env
 debug.keystore
+
+__pycache__/
+*.py[cod]
+*.class
+*.db
+training/qwen1.5b-corrector-lora/
+training/qwen1.5b-corrector-lora-merged/
+training/qwen1.5b-corrector-lora-smoke/
+*.safetensors
+*.bin
