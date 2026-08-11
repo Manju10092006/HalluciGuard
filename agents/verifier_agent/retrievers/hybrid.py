@@ -47,10 +47,13 @@ class HybridRetriever:
 
     @staticmethod
     def _key(passage: Passage) -> str:
+        # source_id is often the provider name (e.g. "pubmed") and is shared
+        # by many documents, so it must never be used as the sole identity key.
+        if passage.url:
+            return passage.url
         return (
-            passage.source_id
-            or passage.url
-            or f"{passage.title}|{passage.source}|{passage.snippet}"
+            f"{passage.source_id or passage.source}|"
+            f"{passage.title}|{passage.snippet}"
         )
 
     @staticmethod
@@ -86,8 +89,8 @@ class HybridRetriever:
         if not passages or k <= 0:
             return []
 
-        # Remove exact duplicates before retrieval so one source cannot occupy
-        # several ranking slots with the same content.
+        # Remove exact duplicates without collapsing distinct documents from
+        # the same provider.
         unique: Dict[str, Passage] = {}
         for passage in passages:
             key = self._key(passage)
@@ -126,8 +129,8 @@ class HybridRetriever:
                 passage_map[key] = passage
                 rank_scores[key] = rank_scores.get(key, 0.0) + 1.0 / (60 + rank)
 
-            # Always keep the original candidate pool available. This prevents
-            # a retrieval backend failure from turning into an empty result.
+            # Keep the complete adapter candidate pool available when one
+            # ranking backend fails or returns fewer candidates.
             for passage in passages:
                 passage_map.setdefault(self._key(passage), passage)
 
@@ -149,14 +152,8 @@ class HybridRetriever:
                         + 0.05 * rrf
                     )
                 else:
-                    fused = (
-                        0.65 * sparse
-                        + 0.25 * lexical
-                        + 0.10 * rrf
-                    )
+                    fused = 0.65 * sparse + 0.25 * lexical + 0.10 * rrf
 
-                # Preserve a small amount of the adapter's own relevance signal
-                # when it is already meaningful.
                 adapter_signal = max(
                     0.0, min(1.0, float(getattr(passage, "relevance_score", 0.0)))
                 )
@@ -169,8 +166,6 @@ class HybridRetriever:
 
             final: List[Passage] = []
             for passage, score in scored:
-                # Suppress near-identical passages while keeping independent
-                # sources with genuinely different wording.
                 duplicate = False
                 for selected in final:
                     if self._compute_overlap(passage.snippet, selected.snippet) >= 0.92:
@@ -180,9 +175,7 @@ class HybridRetriever:
                     continue
 
                 final.append(
-                    passage.model_copy(
-                        update={"relevance_score": round(score, 6)}
-                    )
+                    passage.model_copy(update={"relevance_score": round(score, 6)})
                 )
                 if len(final) >= k:
                     break
@@ -190,8 +183,8 @@ class HybridRetriever:
             return final if final else passages[:k]
 
         except Exception:
-            # Retrieval must be fail-soft: verification should still receive
-            # evidence rather than crashing because one ranking backend failed.
+            # Retrieval is fail-soft: lexical ranking still gives NLI usable
+            # evidence when BM25, FAISS, or an embedding model is unavailable.
             fallback = sorted(
                 passages,
                 key=lambda p: self._lexical_score(query, p),
@@ -200,9 +193,7 @@ class HybridRetriever:
             return [
                 p.model_copy(
                     update={
-                        "relevance_score": round(
-                            self._lexical_score(query, p), 6
-                        )
+                        "relevance_score": round(self._lexical_score(query, p), 6)
                     }
                 )
                 for p in fallback[:k]
