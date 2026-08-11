@@ -24,22 +24,29 @@ def _tokens(text: str) -> List[str]:
     ]
 
 
-def _normalize_scores(items: List[Tuple[str, float]]) -> Dict[str, float]:
-    if not items:
+def _rank_signal(rank: int) -> float:
+    """Monotonic rank signal used instead of mixing incompatible raw scores."""
+    return 1.0 / (60.0 + rank)
+
+
+def _normalize_rank_fusion(
+    rank_scores: Dict[str, float],
+    max_rank_sources: int,
+) -> Dict[str, float]:
+    """Normalize RRF scores to 0..1 without unstable min/max scaling."""
+    if not rank_scores:
         return {}
-    values = [float(score) for _, score in items]
-    lo, hi = min(values), max(values)
-    if hi - lo <= 1e-9:
-        value = 1.0 if hi > 0 else 0.0
-        return {key: value for key, _ in items}
+    maximum = max_rank_sources * _rank_signal(1)
+    if maximum <= 0:
+        return {key: 0.0 for key in rank_scores}
     return {
-        key: max(0.0, min(1.0, (float(score) - lo) / (hi - lo)))
-        for key, score in items
+        key: max(0.0, min(1.0, value / maximum))
+        for key, value in rank_scores.items()
     }
 
 
 class HybridRetriever:
-    """Robust sparse+dense retrieval with lexical-aware score fusion."""
+    """Production hybrid retriever using sparse+dense rank fusion plus lexical checks."""
 
     def __init__(self) -> None:
         self.sparse = BM25Retriever()
@@ -47,31 +54,23 @@ class HybridRetriever:
 
     @staticmethod
     def _key(passage: Passage) -> str:
-        # source_id is often the provider name (e.g. "pubmed") and is shared
-        # by many documents, so it must never be used as the sole identity key.
+        # A provider/source_id is shared by many documents, so never use it
+        # alone as identity. URL is preferred; otherwise use document content.
         if passage.url:
-            return passage.url
+            return passage.url.strip().lower()
         return (
             f"{passage.source_id or passage.source}|"
             f"{passage.title}|{passage.snippet}"
-        )
+        ).strip().lower()
 
     @staticmethod
     def _lexical_score(query: str, passage: Passage) -> float:
+        """Measure query-term coverage in title + snippet."""
         query_tokens = set(_tokens(query))
         if not query_tokens:
             return 0.0
 
-        text_tokens = set(
-            _tokens(
-                " ".join(
-                    [
-                        passage.title or "",
-                        passage.snippet or "",
-                    ]
-                )
-            )
-        )
+        text_tokens = set(_tokens(f"{passage.title or ''} {passage.snippet or ''}"))
         if not text_tokens:
             return 0.0
 
@@ -86,11 +85,9 @@ class HybridRetriever:
         k: int = 5,
         dense_model: str | None = None,
     ) -> List[Passage]:
-        if not passages or k <= 0:
+        if not passages or k <= 0 or not query.strip():
             return []
 
-        # Remove exact duplicates without collapsing distinct documents from
-        # the same provider.
         unique: Dict[str, Passage] = {}
         for passage in passages:
             key = self._key(passage)
@@ -105,60 +102,54 @@ class HybridRetriever:
             self.sparse.build_index(passages)
             self.dense.build_index(passages)
 
-            candidate_k = min(len(passages), max(k * 3, 10))
+            candidate_k = min(len(passages), max(k * 4, 12))
             sparse_results = self.sparse.retrieve(query, candidate_k)
             dense_results = self.dense.retrieve(query, candidate_k)
 
-            sparse_scores = _normalize_scores(
-                [(self._key(p), score) for p, score in sparse_results]
-            )
-            dense_scores = _normalize_scores(
-                [(self._key(p), score) for p, score in dense_results]
-            )
-
+            # BM25 and cosine similarity live on different scales. Fuse their
+            # ranks instead of their raw scores; this remains stable across models.
             rank_scores: Dict[str, float] = {}
             passage_map: Dict[str, Passage] = {}
+            backend_count = 0
 
-            for rank, (passage, _) in enumerate(sparse_results, start=1):
-                key = self._key(passage)
-                passage_map[key] = passage
-                rank_scores[key] = rank_scores.get(key, 0.0) + 1.0 / (60 + rank)
+            for results in (sparse_results, dense_results):
+                if results:
+                    backend_count += 1
+                for rank, (passage, _) in enumerate(results, start=1):
+                    key = self._key(passage)
+                    passage_map[key] = passage
+                    rank_scores[key] = rank_scores.get(key, 0.0) + _rank_signal(rank)
 
-            for rank, (passage, _) in enumerate(dense_results, start=1):
-                key = self._key(passage)
-                passage_map[key] = passage
-                rank_scores[key] = rank_scores.get(key, 0.0) + 1.0 / (60 + rank)
-
-            # Keep the complete adapter candidate pool available when one
-            # ranking backend fails or returns fewer candidates.
+            # Keep all adapter candidates available if one ranking backend fails.
             for passage in passages:
                 passage_map.setdefault(self._key(passage), passage)
 
-            rank_norm = _normalize_scores(list(rank_scores.items()))
-            dense_available = bool(dense_scores)
+            rrf_scores = _normalize_rank_fusion(rank_scores, max(backend_count, 1))
 
             scored: List[Tuple[Passage, float]] = []
             for key, passage in passage_map.items():
                 lexical = self._lexical_score(query, passage)
-                sparse = sparse_scores.get(key, 0.0)
-                dense = dense_scores.get(key, 0.0)
-                rrf = rank_norm.get(key, 0.0)
+                rrf = rrf_scores.get(key, 0.0)
 
-                if dense_available:
-                    fused = (
-                        0.45 * dense
-                        + 0.30 * sparse
-                        + 0.20 * lexical
-                        + 0.05 * rrf
-                    )
+                # Lexical coverage protects precision; RRF protects semantic recall.
+                if backend_count == 2:
+                    fused = 0.60 * rrf + 0.25 * lexical
+                elif backend_count == 1:
+                    fused = 0.55 * rrf + 0.35 * lexical
                 else:
-                    fused = 0.65 * sparse + 0.25 * lexical + 0.10 * rrf
+                    fused = 0.85 * lexical
 
                 adapter_signal = max(
-                    0.0, min(1.0, float(getattr(passage, "relevance_score", 0.0)))
+                    0.0,
+                    min(1.0, float(getattr(passage, "relevance_score", 0.0))),
                 )
                 if adapter_signal > 0:
                     fused = 0.90 * fused + 0.10 * adapter_signal
+
+                # Broad adapter hits with no semantic or lexical signal should
+                # not outrank meaningful evidence merely because they exist.
+                if lexical == 0.0 and rrf == 0.0:
+                    fused *= 0.15
 
                 scored.append((passage, max(0.0, min(1.0, fused))))
 
@@ -166,12 +157,10 @@ class HybridRetriever:
 
             final: List[Passage] = []
             for passage, score in scored:
-                duplicate = False
-                for selected in final:
-                    if self._compute_overlap(passage.snippet, selected.snippet) >= 0.92:
-                        duplicate = True
-                        break
-                if duplicate:
+                if any(
+                    self._compute_overlap(passage.snippet, selected.snippet) >= 0.92
+                    for selected in final
+                ):
                     continue
 
                 final.append(
@@ -180,11 +169,10 @@ class HybridRetriever:
                 if len(final) >= k:
                     break
 
-            return final if final else passages[:k]
+            return final
 
         except Exception:
-            # Retrieval is fail-soft: lexical ranking still gives NLI usable
-            # evidence when BM25, FAISS, or an embedding model is unavailable.
+            # Deterministic fail-soft fallback when BM25/FAISS/embeddings fail.
             fallback = sorted(
                 passages,
                 key=lambda p: self._lexical_score(query, p),
@@ -192,13 +180,13 @@ class HybridRetriever:
             )
             return [
                 p.model_copy(
-                    update={
-                        "relevance_score": round(self._lexical_score(query, p), 6)
-                    }
+                    update={"relevance_score": round(self._lexical_score(query, p), 6)}
                 )
                 for p in fallback[:k]
             ]
-    def _compute_overlap(self, text1: str, text2: str) -> float:
+
+    @staticmethod
+    def _compute_overlap(text1: str, text2: str) -> float:
         set1 = set(_tokens(text1))
         set2 = set(_tokens(text2))
         if not set1 or not set2:
