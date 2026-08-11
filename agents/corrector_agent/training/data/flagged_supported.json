@@ -1,0 +1,80 @@
+[
+  {
+    "index": 5,
+    "file": "halluciguard_dataset.jsonl",
+    "line": 11,
+    "reason": "The query asks for the genus of moth, but the answer provides the family name (Crambidae) instead of the genus (Indogrammodes)."
+  },
+  {
+    "index": 45,
+    "file": "halluciguard_dataset.jsonl",
+    "line": 94,
+    "reason": "The query specifically asks for a year, but the answer provides a full date ('March 28, 1941') instead of just the year ('1941')."
+  },
+  {
+    "index": 78,
+    "file": "halluciguard_dataset.jsonl",
+    "line": 162,
+    "reason": "The query asks for an industry, but 'rock band' is a type of musical group rather than an industry (e.g., music industry)."
+  },
+  {
+    "index": 80,
+    "file": "halluciguard_dataset.jsonl",
+    "line": 166,
+    "reason": "The query asks what Maurice Hines and his brother were famous for (an activity/profession), but the answer provides the name of his brother instead."
+  },
+  {
+    "index": 101,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 14,
+    "reason": "The summary incorrectly states that Iran 'was ultimately awarded the tournament to the United Arab Emirates', which contradicts the evidence stating the tournament was awarded to the United Arab Emirates instead of Iran."
+  },
+  {
+    "index": 115,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 28,
+    "reason": "The answer claims that 'An FBI agent and a task force officer were injured', whereas the evidence explicitly specifies that two agents were injured."
+  },
+  {
+    "index": 117,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 31,
+    "reason": "The answer states the incident occurred in 'November 2015', which is factually incorrect based on the evidence indicating it occurred in November 2014 (Saturday, November 1)."
+  },
+  {
+    "index": 120,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 35,
+    "reason": "The answer incorrectly states that both victims were found with cuts to their necks and buttocks, whereas the evidence specifies that only one woman had those injuries."
+  },
+  {
+    "index": 125,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 40,
+    "reason": "The answer claims that 'residents are concerned about the potential health impacts', which is not supported by the evidence."
+  },
+  {
+    "index": 129,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 44,
+    "reason": "The answer states that the finale of the show is taking place on Sunday, whereas the evidence specifies that the final season/part is beginning (premiering) on Sunday."
+  },
+  {
+    "index": 140,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 62,
+    "reason": "The summary exceeds the requested maximum word count of 35 words (it contains 42 words)."
+  },
+  {
+    "index": 146,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 69,
+    "reason": "The summary states that the tornado trapped several people inside the restaurant, whereas the evidence specifies that only one patron was trapped."
+  },
+  {
+    "index": 154,
+    "file": "halluciguard_ragtruth.jsonl",
+    "line": 81,
+    "reason": "The summary incorrectly states that April 14 was the date the Titanic sank, whereas the evidence explicitly states the Titanic sank on April 15 and April 14 was the date of the sketch."
+  }
+]

@@ -1,17 +1,11 @@
 from typing import Any, Optional
-from agents.verifier_agent.config.settings import get_settings, Settings
-from agents.verifier_agent.models.model_manager import get_model_manager, ModelManager
-from agents.verifier_agent.utils.http_client import get_client, ResilientHttpClient
-
-class MockRegistry:
-    def get_all_adapters(self) -> list:
-        return []
-
-class MockCache:
-    pass
-
-class MockMetrics:
-    pass
+import threading
+from config.settings import get_settings, Settings
+from models.model_manager import get_model_manager, ModelManager
+from utils.http_client import get_client, ResilientHttpClient
+from adapters.registry import get_registry
+from cache import SqliteCache
+from metrics import MetricsCollector
 
 class Container:
     def __init__(self, 
@@ -33,10 +27,9 @@ async def create_container() -> Container:
     http_client = get_client()
     model_manager = get_model_manager()
     
-    # Mocking these for now, assuming they will be implemented fully later or elsewhere
-    registry = MockRegistry()
-    cache = MockCache()
-    metrics_collector = MockMetrics()
+    registry = get_registry()
+    cache = SqliteCache()
+    metrics_collector = MetricsCollector()
     
     return Container(
         settings=settings,
@@ -48,9 +41,12 @@ async def create_container() -> Container:
     )
 
 _container_instance: Optional[Container] = None
+_container_lock = threading.Lock()
 
 async def get_container() -> Container:
     global _container_instance
     if _container_instance is None:
-        _container_instance = await create_container()
+        with _container_lock:
+            if _container_instance is None:
+                _container_instance = await create_container()
     return _container_instance

@@ -138,6 +138,7 @@ class EvidenceScorer:
         elif contradiction_score > support_score and contradiction_score >= 0.30:
             verdict = VerdictLabel.LIKELY_HALLUCINATED
         else:
+            # Evidence scores are too low to make a confident decision
             verdict = VerdictLabel.INSUFFICIENT_EVIDENCE
 
         return {

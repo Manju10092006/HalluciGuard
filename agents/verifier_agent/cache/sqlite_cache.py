@@ -33,10 +33,10 @@ class SqliteCache:
             logging.error(f"Error initializing cache DB: {e}")
 
     def _normalize_key(self, domain: str, query: str) -> str:
-        """Create a normalized hash key for the query."""
-        normalized_query = ' '.join(sorted(query.lower().strip().split()))
-        raw_key = f"{domain.lower()}:{normalized_query}"
-        return hashlib.sha256(raw_key.encode('utf-8')).hexdigest()
+        """Generate a deterministic cache key preserving query semantics."""
+        normalized = query.lower().strip()
+        key_input = f"{domain}:{normalized}"
+        return hashlib.sha256(key_input.encode('utf-8')).hexdigest()
 
     async def get(self, domain: str, query: str) -> Optional[Dict[str, Any]]:
         """Retrieve a cached result if it hasn't expired."""

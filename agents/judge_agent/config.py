@@ -1,41 +1,78 @@
 """
-HalluciGuard - Judge Agent Configuration
-Defines model choices, confidence thresholds, risk parameters, and decision weights.
+HalluciGuard Judge Agent - Central Configuration & Type System
+Defines all enums, dataclasses, and configuration for the AI Decision Intelligence Platform.
+No hardcoded thresholds. Policy-driven behavioral governance.
 """
 
-import os
+import enum
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import List
+
+
+class Decision(enum.Enum):
+    ACCEPT = "ACCEPT"
+    CORRECT = "CORRECT"
+    VERIFY_AGAIN = "VERIFY_AGAIN"
+    REJECT = "REJECT"
+    ABSTAIN = "ABSTAIN"
+    ESCALATE_HUMAN = "ESCALATE_HUMAN"
+
+
+class Severity(enum.Enum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    INFORMATIONAL = "INFORMATIONAL"
+
+
+class EvidenceQuality(enum.Enum):
+    AUTHORITATIVE = "AUTHORITATIVE"
+    STRONG = "STRONG"
+    MODERATE = "MODERATE"
+    WEAK = "WEAK"
+    INSUFFICIENT = "INSUFFICIENT"
+    ABSENT = "ABSENT"
+
+
+class SystemHealth(enum.Enum):
+    HEALTHY = "HEALTHY"
+    DEGRADED = "DEGRADED"
+    PARTIAL_FAILURE = "PARTIAL_FAILURE"
+    CRITICAL_FAILURE = "CRITICAL_FAILURE"
+
+
+class SourceTier(enum.Enum):
+    OFFICIAL_STANDARD = "OFFICIAL_STANDARD"
+    PEER_REVIEWED = "PEER_REVIEWED"
+    ENTERPRISE_VENDOR = "ENTERPRISE_VENDOR"
+    REPUTABLE_NEWS = "REPUTABLE_NEWS"
+    COMMUNITY = "COMMUNITY"
+    UNVERIFIED = "UNVERIFIED"
+
+
+class ConflictType(enum.Enum):
+    DIRECT_REFUTATION = "DIRECT_REFUTATION"
+    NUMERIC_MISMATCH = "NUMERIC_MISMATCH"
+    TEMPORAL_MISMATCH = "TEMPORAL_MISMATCH"
+    ENTITY_MISMATCH = "ENTITY_MISMATCH"
+    SAFETY_VIOLATION = "SAFETY_VIOLATION"
+    PARTIAL_DISAGREEMENT = "PARTIAL_DISAGREEMENT"
+    NO_CONFLICT = "NO_CONFLICT"
+
 
 @dataclass
 class JudgeConfig:
-    # NLI Model Settings
-    # Primary model options: 'cross-encoder/nli-deberta-v3-base', 'facebook/bart-large-mnli'
-    default_nli_model: str = "cross-encoder/nli-deberta-v3-base"
-    fallback_nli_model: str = "facebook/bart-large-mnli"
-    use_huggingface: bool = True
-    device: str = "cpu"  # 'cuda' or 'cpu'
-
-    # Decision Thresholds
-    accept_confidence_threshold: float = 0.82
-    correct_contradiction_threshold: float = 0.45
-    reject_contradiction_threshold: float = 0.75
-    verify_again_confidence_range: tuple = (0.50, 0.81)
-
-    # Weights for Confidence Calibration
-    weight_nli_entailment: float = 0.50
-    weight_verifier_evidence: float = 0.30
-    weight_detector_signal: float = 0.20
-
-    # Severity Thresholds (0.0 to 1.0)
-    severity_critical: float = 0.80
-    severity_high: float = 0.60
-    severity_medium: float = 0.35
-    severity_low: float = 0.0
-
-    # Default Domain Contexts
-    supported_domains: list = field(default_factory=lambda: [
-        "Healthcare", "Finance", "Law", "Cybersecurity", "General"
+    supported_domains: List[str] = field(default_factory=lambda: [
+        "Healthcare", "Cybersecurity", "Finance", "Law",
+        "Scientific Research", "General Knowledge", "Entertainment"
     ])
+    enable_audit: bool = True
+    enable_observability: bool = True
+    max_verification_retries: int = 2
+    log_level: str = "INFO"
+    nli_model: str = "cross-encoder/nli-deberta-v3-base"
+    use_huggingface: bool = True
+
 
 DEFAULT_CONFIG = JudgeConfig()

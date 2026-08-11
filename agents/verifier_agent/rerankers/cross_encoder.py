@@ -13,19 +13,28 @@ class CrossEncoderReranker:
         self.model = None
         self.tokenizer = None
         self._is_available = True
+        self._load_attempts = 0
         
     def _load_model(self) -> None:
         if self.model is not None or not self._is_available:
             return
             
+        if self._load_attempts >= 2:
+            self._is_available = False
+            return
+            
+        self._load_attempts += 1
+            
         try:
             self.model = get_model_manager().load_reranker_model(self.model_name)
+            self._load_attempts = 0
         except ImportError:
             logging.warning("transformers not installed. CrossEncoderReranker falling back.")
             self._is_available = False
         except Exception as e:
             logging.warning(f"Error loading cross-encoder model: {e}. Falling back.")
-            self._is_available = False
+            if self._load_attempts >= 2:
+                self._is_available = False
 
     def rerank(
         self,
@@ -52,7 +61,8 @@ class CrossEncoderReranker:
         self._load_model()
         
         if not self._is_available or not passages:
-            return passages[:k]
+            logging.warning("Reranking skipped (model unavailable or empty passages). Returning unsorted.")
+            return [p.model_copy(update={"relevance_score": 0.0}) for p in passages[:k]]
             
         try:
             pairs = [(claim, p.snippet) for p in passages]
@@ -67,5 +77,5 @@ class CrossEncoderReranker:
             ]
             
         except Exception as e:
-            logging.warning(f"Error during reranking: {e}. Returning original passages.")
-            return passages[:k]
+            logging.warning("Reranking failed for %d passages: %s. Returning unsorted.", len(passages), e)
+            return [p.model_copy(update={"relevance_score": 0.0}) for p in passages[:k]]
