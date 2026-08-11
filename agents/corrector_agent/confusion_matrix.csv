@@ -1,0 +1,5 @@
+Metric,Count,Description
+True Positives (TP),96,Correctly detected hallucinated response
+True Negatives (TN),91,Correctly identified factual supported response
+False Positives (FP),0,Factual response wrongly flagged as hallucinated
+False Negatives (FN),0,Hallucinated response missed by Detector

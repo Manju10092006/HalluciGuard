@@ -28,14 +28,18 @@ class CitationFormatter:
             else:
                 label = EntailmentLabel.NEUTRAL
 
+        source_name = getattr(passage, 'source', '') or getattr(passage, 'source_id', '') or "unknown"
+        if nli_result.get('degraded', False):
+            source_name += " [estimated]"
+
         return EvidenceItem(
             title=getattr(passage, 'title', '') or "Reference Passage",
-            source=getattr(passage, 'source', '') or getattr(passage, 'source_id', '') or "unknown",
+            source=source_name,
             snippet=snippet,
             url=url,
             publication_date=pub_date,
             entailment_label=label,
-            entailment_score=float(nli_result.get('entailment_score', 0.5)),
+            entailment_score=float(nli_result.get('entailment_score', 0.0)),
             credibility_score=float(credibility)
         )
 

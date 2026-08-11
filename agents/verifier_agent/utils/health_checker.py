@@ -1,8 +1,8 @@
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
-from agents.verifier_agent.schemas.models import AdapterHealthStatus
+from schemas.models import AdapterHealthStatus
 
 class AdapterHealthChecker:
     def __init__(self) -> None:
@@ -33,7 +33,7 @@ class AdapterHealthChecker:
         status = AdapterHealthStatus(
             adapter_name=adapter.name,
             is_healthy=is_healthy,
-            last_check=datetime.utcnow().isoformat(),
+            last_check=datetime.now(timezone.utc).isoformat(),
             response_time_ms=duration,
             error=error_msg
         )

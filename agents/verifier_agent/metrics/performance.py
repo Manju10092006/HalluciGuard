@@ -41,14 +41,18 @@ class PerformanceTracker:
         for name, duration in self.timings.items():
             try:
                 enum_stage = PipelineStage(name)
+                details_msg = f"Completed in {duration}ms"
             except ValueError:
+                import logging
+                logging.warning("Unknown pipeline stage name: %s", name)
                 enum_stage = PipelineStage.RETRIEVAL
+                details_msg = f"Unknown stage '{name}' completed in {duration}ms"
             stages.append(
                 PipelineStageStatus(
                     stage=enum_stage,
                     status="completed",
                     duration_ms=duration,
-                    details=f"Completed in {duration}ms"
+                    details=details_msg
                 )
             )
         return stages

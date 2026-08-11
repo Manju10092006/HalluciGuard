@@ -32,16 +32,19 @@ class MockAdapter:
                     
                     # Simple mock search filtering by query if possible
                     query_lower = query.lower()
-                    filtered = [p for p in passages_data if query_lower in p.get("text", "").lower()]
+                    filtered = [p for p in passages_data if query_lower in p.get("snippet", p.get("text", "")).lower()]
                     
                     if not filtered:
                         filtered = passages_data # Fallback to all if no match
                         
                     return [
                         Passage(
-                            text=p["text"],
-                            source_id=p["source_id"],
-                            source_url=p["source_url"],
+                            snippet=p.get("snippet", p.get("text", "")),
+                            title=p.get("title", "Mock Title"),
+                            source=p.get("source", "Mock Source"),
+                            url=p.get("url", p.get("source_url", "")),
+                            publication_date=p.get("publication_date", "2023-01-01"),
+                            source_id=p.get("source_id", ""),
                             relevance_score=p.get("relevance_score", 0.9)
                         ) for p in filtered[:k]
                     ]
