@@ -54,8 +54,8 @@ class SourceReliabilityManager:
             for api_src in profile.api_sources:
                 if api_src.id.lower() in source_key or source_key in api_src.id.lower():
                     return float(api_src.credibility)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("DomainIntelligence lookup failed for %s/%s: %s", domain, source_id, e)
 
         # 3. Known authoritative source defaults
         if any(s in source_key for s in ["pubmed", "pmc", "openfda", "sec", "nvd", "cisa", "mitre", "clinicaltrials"]):
@@ -85,7 +85,7 @@ class SourceReliabilityManager:
             age_in_years = (datetime.now() - pub_date).days / 365.25
             return max(0.6, 1.0 - (age_in_years * 0.05))
         except (ValueError, TypeError):
-            return 1.0
+            return 0.85
 
     def compute_domain_weight(self, domain: str, source_id: str, publication_date: str) -> float:
         """Compute combined weight from credibility and recency."""

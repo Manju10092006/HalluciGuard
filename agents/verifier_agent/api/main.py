@@ -16,6 +16,7 @@ from version import get_version_info
 from utils.logging import setup_logger, VerificationLogRecord, log_verification_request
 
 logger = setup_logger("api.main")
+_start_time = time.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,6 +45,14 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*']
 )
+
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = int((time.time() - start) * 1000)
+    response.headers["X-Process-Time-Ms"] = str(duration_ms)
+    return response
 
 def _get_pipeline(request: Request) -> VerificationPipeline:
     if not hasattr(request.app.state, 'pipeline') or request.app.state.pipeline is None:
@@ -98,7 +107,7 @@ async def health(request: Request) -> Dict[str, Any]:
         },
         "cache": cache_stats,
         "adapters_registered": registry.list_domains(),
-        "uptime_seconds": round(time.time(), 2)
+        "uptime_seconds": round(time.time() - _start_time, 2)
     }
 
 @app.get("/domains", response_model=List[DomainStatistics])
@@ -138,5 +147,6 @@ async def get_pipeline_info() -> Dict[str, Any]:
     }
 
 @app.get("/metrics")
-async def metrics() -> Dict[str, Any]:
-    return MetricsCollector().get_summary()
+async def metrics(request: Request) -> Dict[str, Any]:
+    pipeline = _get_pipeline(request)
+    return pipeline.metrics.get_summary()

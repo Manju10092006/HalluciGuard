@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from typing import List
 from bs4 import BeautifulSoup
 
@@ -45,16 +46,16 @@ class GeneralAdapter:
                 title = item.get("title", "Wikipedia Article")
                 snippet_html = item.get("excerpt", "") or item.get("description", "")
                 snippet = BeautifulSoup(snippet_html, "html.parser").get_text()
-                title_url = item.get("key", title.replace(" ", "_"))
+                title_url = urllib.parse.quote(title.replace(' ', '_'), safe='')
                 
                 passages.append(Passage(
                     title=f"Wikipedia: {title}",
                     source="wikipedia",
                     url=f"https://en.wikipedia.org/wiki/{title_url}",
-                    publication_date="2024",
+                    publication_date="unknown",
                     snippet=f"Article [{title}]: {snippet[:300]}",
                     source_id=f"wiki_{title_url}",
-                    relevance_score=0.8
+                    relevance_score=0.5
                 ))
         except Exception as e:
             logger.error(f"Failed general search: {e}")

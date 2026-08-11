@@ -1,0 +1,67 @@
+{
+  "dataset_statistics": {
+    "total_samples": 187,
+    "ground_truth_hallucinated": 96,
+    "ground_truth_supported": 91
+  },
+  "detector_agent_evaluation": {
+    "confusion_matrix": {
+      "true_positives_TP": 96,
+      "true_negatives_TN": 91,
+      "false_positives_FP": 0,
+      "false_negatives_FN": 0
+    },
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall_TPR": 1.0,
+    "specificity_TNR": 1.0,
+    "false_positive_rate_FPR": 0.0,
+    "false_negative_rate_FNR": 0.0,
+    "f1_score": 1.0,
+    "balanced_accuracy": 1.0,
+    "mcc_matthews_correlation": 1.0,
+    "cohens_kappa": 1.0,
+    "roc_auc": 1.0,
+    "pr_auc": 1.0
+  },
+  "hallucination_correction_analysis": {
+    "initial_hallucinations_detected": 96,
+    "hallucinations_corrected_and_eliminated": 80,
+    "hallucinations_missed_or_unresolved": 16,
+    "new_hallucinations_introduced": 0,
+    "hallucination_elimination_rate_pct": 83.33,
+    "verified_claim_preservation_rate_pct": 100.0,
+    "initial_trust_score_avg": 0.6052,
+    "final_trust_score_avg": 0.9175,
+    "trust_score_improvement": 0.3123
+  },
+  "pipeline_operational_performance": {
+    "overall_pipeline_pass_rate_pct": 91.44,
+    "average_attempts_per_sample": 1.18,
+    "latency_breakdown_ms": {
+      "detector_ms": 19.35,
+      "verifier_ms": 35.46,
+      "planner_ms": 5.42,
+      "prompt_builder_ms": 0.54,
+      "llm_gen_ms": 2353.86,
+      "judge_reverify_ms": 13.79,
+      "total_ms": 3040.94
+    },
+    "telemetry": {
+      "total_prompt_tokens": 102487,
+      "total_completion_tokens": 5329,
+      "total_tokens_processed": 107816,
+      "estimated_total_cost_usd": 12.93792
+    }
+  },
+  "domain_performance_breakdown": {
+    "general": {
+      "sample_count": 187,
+      "hallucination_count": 96,
+      "pipeline_approval_rate": 91.44,
+      "initial_trust_avg": 0.6052,
+      "final_trust_avg": 0.9175,
+      "trust_gain": 0.3123
+    }
+  }
+}

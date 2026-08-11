@@ -6,6 +6,9 @@ from schemas.models import Passage
 class DuplicateRemover:
     """Removes duplicate or highly overlapping passages."""
 
+    def __init__(self, overlap_threshold: float = 0.85) -> None:
+        self.overlap_threshold = overlap_threshold
+
     def remove_duplicates(self, passages: List[Passage]) -> List[Passage]:
         """
         Deduplicate passages based on URLs, content overlap, and title/source.
@@ -32,26 +35,29 @@ class DuplicateRemover:
             if p.url:
                 if p.url in seen_urls:
                     continue
-                seen_urls.add(p.url)
                 
             # Strategy 3: Same title + same source
             source_val = p.source
+            title_source_key = None
             if p.title and source_val:
                 title_source_key = f"{p.title.lower()}::{source_val.lower()}"
                 if title_source_key in seen_title_sources:
                     continue
-                seen_title_sources.add(title_source_key)
                 
             # Strategy 2: Token overlap >85% between snippets
             is_overlap = False
             for up in unique_passages:
                 overlap = self._compute_token_overlap(p.snippet, up.snippet)
-                if overlap > 0.85:
+                if overlap > self.overlap_threshold:
                     is_overlap = True
                     break
                     
             if not is_overlap:
                 unique_passages.append(p)
+                if p.url:
+                    seen_urls.add(p.url)
+                if title_source_key:
+                    seen_title_sources.add(title_source_key)
                 
         return unique_passages
 

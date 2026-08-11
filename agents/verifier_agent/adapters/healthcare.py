@@ -55,7 +55,7 @@ class HealthcareAdapter:
             results = await gather_results([
                 self._search_pubmed(client, search_query, k),
                 self._search_pubmed_central(client, search_query, k),
-                self._search_openfda(client, drug_name or search_query, k),
+                self._search_openfda(client, drug_name or search_query, query, k),
                 self._search_clinicaltrials(client, search_query, k),
             ])
 
@@ -124,6 +124,30 @@ class HealthcareAdapter:
                 return []
 
             ids_str = ",".join(ids)
+            
+            # Fetch abstracts
+            fetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+            fetch_res = await client.get(
+                fetch_url,
+                adapter_name=self.name,
+                params={"db": "pubmed", "id": ids_str, "retmode": "xml", "rettype": "abstract"}
+            )
+            
+            abstracts = {}
+            if fetch_res and hasattr(fetch_res, "text") and fetch_res.text:
+                import xml.etree.ElementTree as ET
+                try:
+                    root = ET.fromstring(fetch_res.text)
+                    for article in root.findall(".//PubmedArticle"):
+                        pmid_elem = article.find(".//PMID")
+                        if pmid_elem is not None:
+                            pmid = pmid_elem.text
+                            abs_texts = article.findall(".//AbstractText")
+                            if abs_texts:
+                                abstracts[pmid] = " ".join([elem.text for elem in abs_texts if elem.text])
+                except ET.ParseError:
+                    logger.warning("Failed to parse PubMed abstract XML")
+
             summary_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
             summary_res = await client.get(
                 summary_url,
@@ -137,21 +161,23 @@ class HealthcareAdapter:
                 if pm_id in result:
                     item = result[pm_id]
                     title = item.get("title", f"PubMed Article {pm_id}")
-                    pub_date = item.get("pubdate", "2024")
+                    pub_date = item.get("pubdate", "unknown")
+                    abstract_text = abstracts.get(pm_id, "")
+                    snippet = abstract_text if abstract_text else f"{title}. Published in PubMed ({pub_date}). ID: {pm_id}."
                     passages.append(
                         Passage(
                             title=title,
                             source="pubmed",
                             url=f"https://pubmed.ncbi.nlm.nih.gov/{pm_id}/",
                             publication_date=pub_date,
-                            snippet=f"{title}. Published in PubMed ({pub_date}). ID: {pm_id}.",
+                            snippet=snippet,
                             source_id=f"pubmed_{pm_id}",
-                            relevance_score=0.95,
+                            relevance_score=0.5,
                         )
                     )
             return passages
         except Exception as e:
-            logger.error(f"PubMed search error: {e}")
+            logger.warning(f"PubMed search search failed. URL: unknown. Error: {e}")
             return []
 
     async def _search_pubmed_central(
@@ -187,7 +213,7 @@ class HealthcareAdapter:
                 if not item:
                     continue
                 title = item.get("title", f"PubMed Central Article {pmc_uid}")
-                pub_date = item.get("pubdate", "2024")
+                pub_date = item.get("pubdate", "unknown")
                 passages.append(
                     Passage(
                         title=title,
@@ -196,21 +222,24 @@ class HealthcareAdapter:
                         publication_date=pub_date,
                         snippet=f"{title}. Full-text biomedical article indexed in PubMed Central ({pub_date}). PMCID: PMC{pmc_uid}.",
                         source_id=f"pmc_{pmc_uid}",
-                        relevance_score=0.96,
+                        relevance_score=0.5,
                     )
                 )
             return passages
         except Exception as e:
-            logger.error(f"PubMed Central search error: {e}")
+            logger.warning(f"PubMed Central search search failed. URL: https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi. Error: {e}")
             return []
 
     async def _search_openfda(
-        self, client: ResilientHttpClient, term: str, k: int
+        self, client: ResilientHttpClient, term: str, query: str, k: int
     ) -> List[Passage]:
         try:
             # Format openFDA search term properly
-            clean_term = term.split()[0] if term else "metformin"
-            fda_query = f'openfda.generic_name:"{clean_term}"+openfda.brand_name:"{clean_term}"'
+            clean_term = term.split()[0] if term.strip() else query.split()[0] if query.strip() else ""
+            if not clean_term:
+                logger.warning("Empty search term provided for OpenFDA search.")
+                return []
+            fda_query = f'openfda.generic_name:"{clean_term}" OR openfda.brand_name:"{clean_term}"'
 
             params = {"search": fda_query, "limit": k}
             if self.openfda_key:
@@ -241,15 +270,15 @@ class HealthcareAdapter:
                             title=f"FDA Drug Label: {brand}",
                             source="openfda",
                             url="https://api.fda.gov/drug/label.json",
-                            publication_date="2024",
+                            publication_date="unknown",
                             snippet=f"FDA Official Label for {brand}: {desc[:400]}",
                             source_id=f"openfda_{brand.lower()}",
-                            relevance_score=0.98,
+                            relevance_score=0.5,
                         )
                     )
             return passages
         except Exception as e:
-            logger.error(f"OpenFDA search error: {e}")
+            logger.warning(f"OpenFDA search search failed. URL: https://api.fda.gov/drug/label.json. Error: {e}")
             return []
 
     async def _search_clinicaltrials(
@@ -286,13 +315,13 @@ class HealthcareAdapter:
                         title=f"Clinical Trial [{nctId}]: {title}",
                         source="clinicaltrials",
                         url=f"https://clinicaltrials.gov/study/{nctId}",
-                        publication_date="2024",
+                        publication_date="unknown",
                         snippet=f"Clinical Study [{nctId}] - Status [{status}]: {title}. {summary[:350]}",
                         source_id=f"clinicaltrials_{nctId}",
-                        relevance_score=0.94,
+                        relevance_score=0.5,
                     )
                 )
             return passages
         except Exception as e:
-            logger.error(f"ClinicalTrials search error: {e}")
+            logger.warning(f"ClinicalTrials search search failed. URL: https://clinicaltrials.gov/api/v2/studies. Error: {e}")
             return []

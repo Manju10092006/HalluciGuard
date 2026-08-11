@@ -6,6 +6,8 @@ from config.settings import get_settings
 from models.domain_intelligence import get_domain_intelligence_registry
 from models.model_manager import get_model_manager
 
+logger = logging.getLogger(__name__)
+
 class DomainValidator:
     """Validates the domain classification of a claim."""
 
@@ -25,10 +27,10 @@ class DomainValidator:
         try:
             self.pipeline = get_model_manager().load_zero_shot_model()
         except ImportError:
-            logging.warning("transformers not installed. DomainValidator falling back.")
+            logger.warning("transformers not installed. DomainValidator falling back.")
             self._is_available = False
         except Exception as e:
-            logging.warning(f"Error loading DomainValidator model: {e}. Falling back.")
+            logger.warning(f"Error loading DomainValidator model: {e}. Falling back.")
             self._is_available = False
 
     def validate(self, claim_text: str, detector_domain: str) -> Tuple[str, bool]:
@@ -49,7 +51,7 @@ class DomainValidator:
         self._load_model()
         
         if not self._is_available:
-            logging.warning("DomainValidator model not available. Trusting detector domain.")
+            logger.warning("DomainValidator model not available. Trusting detector domain.")
             return (canonical_detector, True)
             
         try:
@@ -61,9 +63,9 @@ class DomainValidator:
             if is_match:
                 return (canonical_detector, True)
             else:
-                logging.warning(f"Domain mismatch: detector={detector_domain}, model={top_domain}")
+                logger.warning(f"Domain mismatch: detector={detector_domain}, model={top_domain}")
                 return (canonical_top, False)
                 
         except Exception as e:
-            logging.warning(f"Domain validation failed: {e}. Trusting detector domain.")
+            logger.warning(f"Domain validation failed: {e}. Trusting detector domain.")
             return (self._canonical_domain(detector_domain), True)

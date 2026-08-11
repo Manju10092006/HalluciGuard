@@ -1,0 +1,9 @@
+Metric,Value
+Initial Hallucinated Responses,96
+Successfully Corrected Responses,80
+Hallucination Elimination Rate (%),83.33%
+Verified Claims Preservation Rate (%),100.00%
+New Hallucinations Introduced,0
+Initial Mean Trust Score,0.6052
+Final Mean Trust Score,0.9175
+Mean Trust Gain,+0.3123

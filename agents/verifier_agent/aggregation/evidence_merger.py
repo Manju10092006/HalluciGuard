@@ -28,10 +28,9 @@ class EvidenceMerger:
                 if i < len(passages):
                     passage = passages[i]
                     # Tag with source_id if not already set
-                    # Note: Using source_name as a fallback
-                    if hasattr(passage, 'metadata'):
-                        passage.metadata = passage.metadata or {}
-                        passage.metadata['source_id'] = source
+                    # Note: Using source as a fallback
+                    if not passage.source_id:
+                        passage = passage.model_copy(update={'source_id': source})
                     merged.append(passage)
                     
         return self.duplicate_remover.remove_duplicates(merged)

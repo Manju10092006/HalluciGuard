@@ -2,8 +2,11 @@ from __future__ import annotations
 import httpx
 import yaml
 import asyncio
+import logging
 from typing import Any, Optional, cast
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 class ResilientHttpClient:
     def __init__(self, config_path: str = "config/retry.yaml") -> None:
@@ -75,9 +78,10 @@ class ResilientHttpClient:
                 response.raise_for_status()
                 
             delay = min(delay, max_delay)
+            logger.warning('Retrying %s %s (attempt %d/%d, delay=%.1fs)', method, url, attempt+1, max_retries, delay)
             await asyncio.sleep(delay)
             
-        raise Exception("Unreachable")
+        raise RuntimeError('HTTP retry loop exhausted without response')
 
     async def get(self, url: str, adapter_name: Optional[str] = None, **kwargs: Any) -> httpx.Response:
         return await self._execute_with_retry("GET", url, adapter_name, **kwargs)
@@ -93,5 +97,6 @@ _shared_client: Optional[ResilientHttpClient] = None
 def get_client() -> ResilientHttpClient:
     global _shared_client
     if _shared_client is None:
+        logger.info('Initializing shared HTTP client')
         _shared_client = ResilientHttpClient()
     return _shared_client

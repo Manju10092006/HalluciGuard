@@ -49,7 +49,13 @@ flowchart TD
 
 ## 🔬 Verifier Agent Deep Dive (`agents/verifier_agent/`)
 
-The **Verifier Agent** executes a 9-stage verification pipeline utilizing entity resolution and domain-specific ML models:
+### Verifier Agent System Architecture
+
+![Verifier Agent System Architecture](agents/verifier_agent/docs/illustrations/verifier_system_architecture.jpg)
+
+### Runtime 9-Stage Verification Pipeline
+
+![Verifier Agent Runtime Pipeline](agents/verifier_agent/docs/illustrations/verifier_runtime_pipeline.jpg)
 
 ```text
 [Stage 1] DOMAIN VALIDATION & ROUTING  ──► Validates request domain & routes to specialized models
@@ -63,18 +69,13 @@ The **Verifier Agent** executes a 9-stage verification pipeline utilizing entity
 [Stage 9] CONFLICT RESOLUTION          ──► 2:1 majority conflict logic, confidence calibration & explanations
 ```
 
-### Specialized Domain ML Model Registry
+### Domain Intelligence & Model Routing Technology Stack
 
-```mermaid
-graph LR
-    Sub[Input Claim] --> Router{Model Router}
-    Router -->|Healthcare| M1[PubMedBERT / BioBERT / SciBERT]
-    Router -->|Cybersecurity| M2[SecBERT]
-    Router -->|Finance| M3[ProsusAI FinBERT / FinBERT-tone]
-    Router -->|Legal| M4[Legal-BERT]
-    Router -->|Programming| M5[CodeBERT / GraphCodeBERT]
-    Router -->|General / Other| M6[BAAI/bge-m3 / DeBERTa-v3]
-```
+![Domain Intelligence & Model Routing Tech Stack](agents/verifier_agent/docs/illustrations/domain_intelligence_stack.jpg)
+
+### Project Evolution & Roadmap
+
+![Project Progress & Evolution](agents/verifier_agent/docs/illustrations/project_evolution.jpg)
 
 ---
 
@@ -166,9 +167,9 @@ HalluciGuard/
 │   │   ├── formatters/                # Citation & Response Formatters
 │   │   └── tests/                     # PyTest Validation Suite
 │   ├── judge_agent/                   # ⚖️ Judge Agent Decision Engine
-│   ├── detector_agent/                # 🔍 Detector Agent (Awaiting)
-│   ├── corrector_agent/               # ✏️ Corrector Agent (Awaiting)
-│   └── memory_agent/                  # 🧠 Memory Agent (Awaiting)
+│   ├── detector_agent/                # 🔍 Detector Agent
+│   ├── corrector_agent/               # ✏️ Corrector Agent
+│   └── memory_agent/                  # 🧠 Memory Agent
 └── halluciguard_judge/                # Standalone Judge Agent Service
 ```
 

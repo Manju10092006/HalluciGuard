@@ -1,0 +1,17 @@
+Sample ID,Domain,Failure Type,Root Cause,Resolution
+sample_23,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_32,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_50,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_66,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_89,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_99,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_108,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_110,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_131,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_133,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_145,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_153,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_159,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_161,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_181,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.
+sample_185,general,Bounded Retry Exhaustion,Judge re-verification rejected correction attempts due to phrasing or incomplete evidence grounding.,Increase max retries or provide richer supporting evidence passages.

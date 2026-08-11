@@ -15,6 +15,11 @@
 
 The **HalluciGuard Verifier Agent** is an autonomous, production-grade evidence retrieval and claim verification service designed for mission-critical Large Language Model (LLM) applications. Serving as the primary factual validation engine within the HalluciGuard multi-agent trust framework, the Verifier Agent evaluates candidate claims against authoritative external databases and specialized domain ML models.
 
+### FAANG-Level Master Technical Infographic
+*(Style Inspiration: `helloianneo/ian-xiaohei-illustrations` — Hand-drawn Editorial Engineering Illustration)*
+
+![HalluciGuard Verifier Agent FAANG Architecture Infographic](docs/illustrations/faang_verifier_architecture_infographic.jpg)
+
 ```mermaid
 flowchart TD
     subgraph Client["Client Layer"]
@@ -59,31 +64,9 @@ flowchart TD
 
 ---
 
-## 🚀 Key Innovations & Engineering Capabilities
-
-### 1. Entity-Aware Query Resolution (`claims/entity_resolver.py`)
-Rather than relying on broad keyword searches, the Verifier Agent performs named entity resolution prior to external retrieval:
-* **Cybersecurity**: Extracts CVE IDs (`CVE-2021-44228`), MITRE ATT&CK technique IDs (`T1059`), CWE references, and threat actor names. Queries NVD API v2 using direct `cveId` parameters.
-* **Finance**: Canonicalizes corporate names to official SEC CIK numbers and stock tickers (*Apple* $\rightarrow$ `AAPL` / `0000320193`, *Tesla* $\rightarrow$ `TSLA` / `0001318605`).
-* **Healthcare / Pharmacy**: Resolves active ingredients, MeSH drug identifiers, and medical conditions (*Metformin*, *Type 2 Diabetes*).
-* **Legal**: Identifies section numbers and statutory acts (*IPC*, *CrPC*, *GDPR Article 17*).
-
-### 2. Specialized Domain Model Wrappers (`models/wrappers/`)
-Supports 10 modular, thread-safe production model wrappers managed by a reentrant `ModelManager` singleton with LRU memory eviction and automatic CPU fallback:
-* **Biomedical**: `BiomedNLP-PubMedBERT`, `BioBERT`, `SciBERT`, `Bio_ClinicalBERT`, `SapBERT`.
-* **Financial**: `ProsusAI/finbert`, `finbert-tone`.
-* **Cybersecurity**: `jackaduma/SecBERT`.
-* **Legal**: `nlpaueb/legal-bert-base-uncased`.
-* **Programming**: `microsoft/codebert-base`, `graphcodebert-base`.
-* **Dense Embeddings & Reranking**: `BAAI/bge-m3`, `e5-large-v2`, `BAAI/bge-reranker-large`, `ms-marco-MiniLM-L-6-v2`.
-* **NLI Inference**: `cross-encoder/nli-deberta-v3-base`, `deberta-v3-large`, `facebook/bart-large-mnli`.
-
-### 3. Hardware-Aware Dynamic Routing (`models/model_router.py`)
-Estimates claim complexity (`simple`, `standard`, `complex`) and selects models dynamically based on available GPU VRAM and configurable latency budgets (`interactive`, `balanced`, `thorough`).
-
----
-
 ## ⚡ The 9-Stage Production Verification Pipeline
+
+![Verifier Agent Runtime Pipeline](docs/illustrations/verifier_runtime_pipeline.jpg)
 
 ```text
 [Stage 1] DOMAIN VALIDATION & ROUTING  ──► Validates request domain and selects specialized models
@@ -96,6 +79,41 @@ Estimates claim complexity (`simple`, `standard`, `complex`) and selects models 
 [Stage 8] SCORING & CITATIONS          ──► Applies dynamic credibility weighting & recency decay
 [Stage 9] CONFLICT RESOLUTION          ──► Applies 2:1 majority conflict logic, calibrates confidence & generates explanations
 ```
+
+---
+
+## 🚀 Key Innovations & Engineering Capabilities
+
+### 1. Entity-Aware Query Resolution (`claims/entity_resolver.py`)
+Rather than relying on broad keyword searches, the Verifier Agent performs named entity resolution prior to external retrieval:
+* **Cybersecurity**: Extracts CVE IDs (`CVE-2021-44228`), MITRE ATT&CK technique IDs (`T1059`), CWE references, and threat actor names. Queries NVD API v2 using direct `cveId` parameters.
+* **Finance**: Canonicalizes corporate names to official SEC CIK numbers and stock tickers (*Apple* $\rightarrow$ `AAPL` / `0000320193`, *Tesla* $\rightarrow$ `TSLA` / `0001318605`).
+* **Healthcare / Pharmacy**: Resolves active ingredients, MeSH drug identifiers, and medical conditions (*Metformin*, *Type 2 Diabetes*).
+* **Legal**: Identifies section numbers and statutory acts (*IPC*, *CrPC*, *GDPR Article 17*).
+
+### 2. Domain Intelligence & Model Routing Tech Stack (`models/wrappers/`)
+
+![Domain Intelligence & Model Routing Tech Stack](docs/illustrations/domain_intelligence_stack.jpg)
+
+Supports 10 modular, thread-safe production model wrappers managed by a reentrant `ModelManager` singleton with LRU memory eviction and automatic CPU fallback:
+* **Biomedical**: `BiomedNLP-PubMedBERT`, `BioBERT`, `SciBERT`, `Bio_ClinicalBERT`, `SapBERT`.
+* **Financial**: `ProsusAI/finbert`, `finbert-tone`.
+* **Cybersecurity**: `jackaduma/SecBERT`.
+* **Legal**: `nlpaueb/legal-bert-base-uncased`.
+* **Programming**: `microsoft/codebert-base`, `graphcodebert-base`.
+* **Dense Embeddings & Reranking**: `BAAI/bge-m3`, `e5-large-v2`, `BAAI/bge-reranker-large`, `ms-marco-MiniLM-L-6-v2`.
+* **NLI Inference**: `cross-encoder/nli-deberta-v3-base`, `deberta-v3-large`, `facebook/bart-large-mnli`.
+
+---
+
+## 📈 Project Progress & Evolution
+
+![Project Progress & Evolution](docs/illustrations/project_evolution.jpg)
+
+* **Phase 1: Foundation Architecture** — Established core schemas, SQLite caching, and initial mock adapters.
+* **Phase 2: Official Integrations** — Integrated live REST APIs (NVD v2, SEC EDGAR EFTS, PubMed Central, OpenFDA) and HuggingFace pipelines.
+* **Phase 3: Operationalization** — Created 10 specialized model wrappers, hardware-aware ModelRouter, and LRU memory manager pool.
+* **Phase 4: Production Readiness** — Added EntityResolver for precision retrieval, NLI label normalization, and validated 45/45 PyTest test cases.
 
 ---
 

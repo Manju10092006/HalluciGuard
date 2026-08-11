@@ -78,11 +78,11 @@ class LegalGeneralAdapter:
                     publication_date=str(date_filed)[:10],
                     snippet=f"Legal opinion [{case_name}]: {snippet[:300]}",
                     source_id=f"courtlistener_{item.get('cluster_id', item.get('id', 'opinion'))}",
-                    relevance_score=0.9
+                    relevance_score=0.5
                 ))
             return passages
         except Exception as e:
-            logger.error(f"CourtListener search error: {e}")
+            logger.warning(f"CourtListener search search failed. URL: https://www.courtlistener.com/api/rest/v4/search/. Error: {e}")
             return []
 
     async def _search_wikipedia(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
@@ -106,12 +106,12 @@ class LegalGeneralAdapter:
                     title=f"Wikipedia Legal: {title}",
                     source="wikipedia",
                     url=f"https://en.wikipedia.org/wiki/{title_url}",
-                    publication_date="2024",
+                    publication_date="unknown",
                     snippet=f"Legal Reference [{title}]: {snippet[:300]}",
                     source_id=f"wiki_{title_url}",
-                    relevance_score=0.8
+                    relevance_score=0.5
                 ))
             return passages
         except Exception as e:
-            logger.error(f"Wikipedia legal search error: {e}")
+            logger.warning(f"Wikipedia legal search search failed. URL: https://en.wikipedia.org/w/rest.php/v1/search/page. Error: {e}")
             return []

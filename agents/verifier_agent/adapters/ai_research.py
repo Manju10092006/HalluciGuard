@@ -80,11 +80,11 @@ class AiResearchAdapter:
                     publication_date=published[:10],
                     snippet=f"Paper Title [{title}]: {summary[:300]}",
                     source_id=f"arxiv_{url_id.split('/')[-1]}",
-                    relevance_score=0.9
+                    relevance_score=0.5
                 ))
             return passages
         except Exception as e:
-            logger.error(f"arXiv search error: {e}")
+            logger.warning(f"arXiv search search failed. URL: https://export.arxiv.org/api/query. Error: {e}")
             return []
 
     async def _search_semanticscholar(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
@@ -103,7 +103,7 @@ class AiResearchAdapter:
                 title = item.get("title", "Paper")
                 abstract = item.get("abstract", "")
                 url_val = item.get("url", "https://semanticscholar.org")
-                year = item.get("year", "2024")
+                year = item.get("year", "unknown")
                 
                 passages.append(Passage(
                     title=f"Semantic Scholar: {title}",
@@ -112,11 +112,11 @@ class AiResearchAdapter:
                     publication_date=str(year),
                     snippet=f"Abstract [{title} ({year})]: {abstract[:300]}",
                     source_id=f"s2_{item.get('paperId', 'paper')}",
-                    relevance_score=0.92
+                    relevance_score=0.5
                 ))
             return passages
         except Exception as e:
-            logger.error(f"Semantic Scholar search error: {e}")
+            logger.warning(f"Semantic Scholar search search failed. URL: https://api.semanticscholar.org/graph/v1/paper/search. Error: {e}")
             return []
 
     async def _search_crossref(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
@@ -146,9 +146,9 @@ class AiResearchAdapter:
                     publication_date=publication_date,
                     snippet=f"Publication [{title}]: {abstract[:300]}",
                     source_id=f"crossref_{url_val.split('/')[-1]}",
-                    relevance_score=0.88
+                    relevance_score=0.5
                 ))
             return passages
         except Exception as e:
-            logger.error(f"Crossref search error: {e}")
+            logger.warning(f"Crossref search search failed. URL: https://api.crossref.org/works. Error: {e}")
             return []

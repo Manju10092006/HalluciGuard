@@ -51,7 +51,7 @@ def _normalize_nli_scores(
                     elif idx == 2:
                         scores["neutral"] = score
             except (ValueError, IndexError):
-                pass
+                logger.debug("Could not parse label index %s", raw_label)
 
     # Softmax normalization if sum > 0
     total = sum(scores.values())
@@ -68,19 +68,28 @@ class NLIEngine:
         self.model_name = model_name
         self.pipeline = None
         self._is_available = True
+        self._load_attempts = 0
 
     def _load_model(self) -> None:
         if self.pipeline is not None or not self._is_available:
             return
+            
+        if self._load_attempts >= 2:
+            self._is_available = False
+            return
+            
+        self._load_attempts += 1
 
         try:
             self.pipeline = get_model_manager().load_nli_model(self.model_name)
+            self._load_attempts = 0
         except ImportError:
             logger.warning("transformers not installed. NLIEngine falling back.")
             self._is_available = False
         except Exception as e:
             logger.warning(f"Error loading NLI model {self.model_name}: {e}. Falling back.")
-            self._is_available = False
+            if self._load_attempts >= 2:
+                self._is_available = False
 
     def _get_id2label(self) -> Optional[Dict[int, str]]:
         if self.pipeline and hasattr(self.pipeline, "model") and hasattr(self.pipeline.model, "config"):
@@ -103,9 +112,11 @@ class NLIEngine:
             "entailment_score": 0.33,
             "contradiction_score": 0.33,
             "neutral_score": 0.34,
+            "degraded": True,
         }
 
         if not self._is_available or self.pipeline is None:
+            logger.warning("Returning fallback results from classify (model %s unavailable or not loaded)", self.model_name)
             return fallback
 
         try:
@@ -133,10 +144,11 @@ class NLIEngine:
                 "entailment_score": entailment,
                 "contradiction_score": contradiction,
                 "neutral_score": neutral,
+                "degraded": False,
             }
 
         except Exception as e:
-            logger.warning(f"Error during NLI classification: {e}. Returning fallback.")
+            logger.warning("Error during NLI classification with model %s: %s. Returning fallback.", self.model_name, e)
             return fallback
 
     def predict(self, claim: str, evidence: str) -> EntailmentLabel:
@@ -164,6 +176,7 @@ class NLIEngine:
         self._load_model()
 
         if not self._is_available or self.pipeline is None:
+            logger.warning("Returning fallback results from batch_classify (model %s unavailable)", self.model_name)
             return [self.classify(claim, ev) for ev in evidences]
 
         try:
@@ -193,9 +206,10 @@ class NLIEngine:
                         "entailment_score": entailment,
                         "contradiction_score": contradiction,
                         "neutral_score": neutral,
+                        "degraded": False,
                     }
                 )
             return outputs
         except Exception as e:
-            logger.warning(f"Error during batched NLI classification: {e}. Falling back.")
+            logger.warning("Error during batched NLI classification with model %s: %s. Falling back.", self.model_name, e)
             return [self.classify(claim, ev) for ev in evidences]

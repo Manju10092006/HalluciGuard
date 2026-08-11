@@ -198,7 +198,6 @@ class HybridRetriever:
                 )
                 for p in fallback[:k]
             ]
-
     def _compute_overlap(self, text1: str, text2: str) -> float:
         set1 = set(_tokens(text1))
         set2 = set(_tokens(text2))

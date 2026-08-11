@@ -33,37 +33,39 @@ class ConflictResolver:
                 label = getattr(item, 'entailment_label', None)
                 credibility = getattr(item, 'credibility_score', 0.5)
 
+            entailment_s = float(item.get('entailment_score', 0.5) if isinstance(item, dict) else getattr(item, 'entailment_score', 0.5))
+
             if label in (EntailmentLabel.ENTAILMENT, 'entailment', 'supports'):
-                support_weight += credibility
+                support_weight += credibility * entailment_s
             elif label in (EntailmentLabel.CONTRADICTION, 'contradiction', 'contradicts'):
-                contradict_weight += credibility
+                contradict_weight += credibility * entailment_s
 
         if contradict_weight == 0 and support_weight > 0:
             return {
                 'resolution_type': 'unanimous_support',
                 'explanation': 'All evidence uniformly supports the claim.',
-                'confidence_adjustment': 0.0
+                'confidence_adjustment': 0.1
             }
 
         if support_weight == 0 and contradict_weight > 0:
             return {
                 'resolution_type': 'unanimous_contradiction',
                 'explanation': 'All evidence uniformly contradicts the claim.',
-                'confidence_adjustment': 0.0
+                'confidence_adjustment': -0.15
             }
 
         if support_weight > (2 * contradict_weight):
             return {
                 'resolution_type': 'majority_support',
                 'explanation': 'Supporting evidence significantly outweighs contradicting evidence.',
-                'confidence_adjustment': 0.0
+                'confidence_adjustment': 0.05
             }
 
         if contradict_weight > (2 * support_weight):
             return {
                 'resolution_type': 'majority_contradiction',
                 'explanation': 'Contradicting evidence significantly outweighs supporting evidence.',
-                'confidence_adjustment': 0.0
+                'confidence_adjustment': -0.1
             }
 
         return {

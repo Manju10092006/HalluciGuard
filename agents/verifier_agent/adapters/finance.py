@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import urllib.parse
 from typing import List, Optional
 
 from config.settings import get_settings
@@ -107,7 +109,7 @@ class FinanceAdapter:
             passages = []
             for item in hits[:k]:
                 source = item.get("_source", {})
-                date = source.get("filing_date", "2024")
+                date = source.get("filing_date", "unknown")
                 entity = (
                     source.get("display_names", ["EDGAR Entity"])[0]
                     if source.get("display_names")
@@ -120,16 +122,16 @@ class FinanceAdapter:
                     Passage(
                         title=f"SEC Filing ({form}): {entity}",
                         source="sec_edgar",
-                        url=f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={entity}",
+                        url=f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={urllib.parse.quote_plus(entity)}",
                         publication_date=str(date)[:10],
                         snippet=f"SEC Form {form} by {entity} ({date}): {desc[:350]}",
                         source_id=f"sec_{entity}",
-                        relevance_score=0.98,
+                        relevance_score=0.5,
                     )
                 )
             return passages
         except Exception as e:
-            logger.error(f"SEC search error: {e}")
+            logger.warning(f"SEC search search failed. URL: https://efts.sec.gov/LATEST/search-index. Error: {e}")
             return []
 
     async def _search_worldbank(
@@ -161,24 +163,30 @@ class FinanceAdapter:
                                 title=f"World Bank Indicator: {item.get('name')}",
                                 source="world_bank",
                                 url=f"https://data.worldbank.org/indicator/{item.get('id')}",
-                                publication_date="2024",
+                                publication_date="unknown",
                                 snippet=f"World Bank indicator {item.get('id')} [{item.get('name')}]: {source_note[:350]}",
                                 source_id=f"wb_{item.get('id')}",
-                                relevance_score=0.92,
+                                relevance_score=0.5,
                             )
                         )
                         if len(passages) >= k:
                             break
             return passages
         except Exception as e:
-            logger.error(f"World Bank search error: {e}")
+            logger.warning(f"World Bank search search failed. URL: https://api.worldbank.org/v2/indicator. Error: {e}")
             return []
 
     async def _search_alphavantage(
         self, client: ResilientHttpClient, query: str, k: int
     ) -> List[Passage]:
         try:
-            ticker = query.split()[0].upper()
+            match = re.search(r'\b[A-Z]{1,5}\b', query)
+            if match:
+                ticker = match.group(0)
+            else:
+                capitalized = [w for w in query.split() if w.istitle()]
+                ticker = capitalized[0].upper() if capitalized else query.split()[0].upper()
+                
             res = await client.get(
                 "https://www.alphavantage.co/query",
                 adapter_name=self.name,
@@ -196,13 +204,13 @@ class FinanceAdapter:
                         title=f"Alpha Vantage: {data['Symbol']} Overview",
                         source="alpha_vantage",
                         url=f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={data['Symbol']}",
-                        publication_date="2024",
+                        publication_date="unknown",
                         snippet=f"Overview for {data.get('Name', data['Symbol'])} ({data['Symbol']}): {data.get('Description', '')[:350]}",
                         source_id=f"alpha_{data['Symbol']}",
-                        relevance_score=0.90,
+                        relevance_score=0.5,
                     )
                 ]
             return []
         except Exception as e:
-            logger.error(f"Alpha Vantage search error: {e}")
+            logger.warning(f"Alpha Vantage search search failed. URL: https://www.alphavantage.co/query. Error: {e}")
             return []
