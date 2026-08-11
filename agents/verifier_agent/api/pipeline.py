@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 from schemas.models import (
     VerifierInputV2, VerifierOutputV2, ClaimReport, EvidenceItem,
@@ -68,26 +68,64 @@ class VerificationPipeline:
         self.logger = setup_logger("pipeline")
 
     # ------------------------------------------------------------------
-    # Confidence Calibration
+    # Evidence gating and confidence calibration
     # ------------------------------------------------------------------
+    @staticmethod
+    def _select_decision_grade_evidence(
+        passages: List[Passage],
+        nli_results: List[Dict[str, Any]],
+    ) -> Tuple[List[Passage], List[Dict[str, Any]]]:
+        """Keep only evidence with a meaningful entailment/contradiction signal."""
+        pairs = list(zip(passages, nli_results))
+        if not pairs:
+            return [], []
+
+        selected = [
+            (passage, result)
+            for passage, result in pairs
+            if max(
+                float(result.get("entailment_score", 0.0)),
+                float(result.get("contradiction_score", 0.0)),
+            ) >= 0.35
+        ]
+
+        # If the model is uncertain about every passage, do not manufacture
+        # evidence. Return empty evidence and let the final verdict be
+        # insufficient_evidence.
+        if not selected:
+            return [], []
+
+        selected.sort(
+            key=lambda pair: max(
+                float(pair[1].get("entailment_score", 0.0)),
+                float(pair[1].get("contradiction_score", 0.0)),
+            ),
+            reverse=True,
+        )
+        selected = selected[:5]
+        return [p for p, _ in selected], [r for _, r in selected]
+
     @staticmethod
     def _calibrate_confidence(
         scores: Dict[str, float],
         evidence_count: int,
         conflict_res: Dict[str, Any],
     ) -> float:
-        """
-        Calibrate confidence by combining trust score with evidence volume
-        and conflict resolution signals.
-        """
-        base = float(scores.get("trust_score", 0.0))
-        volume_factor = min(1.0, evidence_count / 5.0) if evidence_count > 0 else 0.0
+        """Calibrate trust without unfairly penalizing a single strong source."""
+        base = max(0.0, min(1.0, float(scores.get("trust_score", 0.0))))
+        if evidence_count <= 0 or base <= 0.0:
+            return 0.0
+
+        # Quality is already encoded in trust_score. Evidence count is only a
+        # modest stability bonus, so one authoritative source can still yield
+        # high confidence while independent sources increase stability.
+        evidence_factor = 0.75 + 0.25 * min(1.0, evidence_count / 3.0)
         conflict_penalty = (
-            0.85
+            0.80
             if conflict_res.get("resolution_type") == "genuine_conflict"
             else 1.0
         )
-        return round(max(0.0, min(1.0, base * volume_factor * conflict_penalty)), 4)
+        return round(max(0.0, min(1.0, base * evidence_factor * conflict_penalty)), 4)
 
     # ------------------------------------------------------------------
     # Main pipeline entry
@@ -120,7 +158,6 @@ class VerificationPipeline:
         registry = get_registry()
         adapter = registry.get_adapter(validated_domain)
 
-        # Build runtime model metadata for response
         runtime_models = RuntimeModelInfo(
             embedding_model=route.embedding_model,
             reranker_model=route.reranker_model,
@@ -138,10 +175,8 @@ class VerificationPipeline:
         total_retrieved = 0
         any_cache_hit = False
 
-        # ── Process Each Suspicious Claim ────────────────────────────
         for claim in payload.suspicious_claims:
             try:
-                # Cache Lookup
                 cached_data = await self.cache.get(validated_domain, claim.text)
                 if cached_data:
                     self.metrics.record_cache_hit()
@@ -157,7 +192,6 @@ class VerificationPipeline:
                 else:
                     self.metrics.record_cache_miss()
 
-                # ── Stage 2: Claim Decomposition ─────────────────────
                 with tracker.track(PipelineStage.CLAIM_DECOMPOSITION):
                     normalized_text = self.claim_normalizer.normalize(claim.text)
                     sub_claims = self.claim_decomposer.decompose(
@@ -170,13 +204,11 @@ class VerificationPipeline:
                 claim_reranked = 0
 
                 for sub_claim in sub_claims:
-                    # ── Stage 3: Entity Resolution & Query Expansion ──
                     with tracker.track(PipelineStage.QUERY_EXPANSION):
                         expanded_query, resolution = self.query_expander.resolve_and_expand(
                             sub_claim, validated_domain
                         )
 
-                    # ── Stage 4: Multi-Source Entity-Aware Retrieval ──
                     with tracker.track(PipelineStage.RETRIEVAL):
                         retrieval_start = time.time()
                         try:
@@ -189,20 +221,15 @@ class VerificationPipeline:
                             )
                             raw_passages = []
 
-                        retrieval_duration = int(
-                            (time.time() - retrieval_start) * 1000
-                        )
+                        retrieval_duration = int((time.time() - retrieval_start) * 1000)
                         self.metrics.record_retrieval(
                             retrieval_duration, len(raw_passages)
                         )
                         total_retrieved += len(raw_passages)
                         claim_retrieved += len(raw_passages)
 
-                    # ── Stage 5: Aggregation + Hybrid RRF Retrieval ──
                     with tracker.track(PipelineStage.AGGREGATION):
-                        aggregated_passages = self.aggregator.aggregate(
-                            [raw_passages]
-                        )
+                        aggregated_passages = self.aggregator.aggregate([raw_passages])
                         hybrid_passages = self.hybrid_retriever.retrieve(
                             sub_claim,
                             aggregated_passages,
@@ -210,7 +237,6 @@ class VerificationPipeline:
                             dense_model=route.dense_model,
                         )
 
-                    # ── Stage 6: Cross-Encoder Reranking ─────────────
                     with tracker.track(PipelineStage.RERANKING):
                         reranked_passages = self.reranker.rerank(
                             sub_claim,
@@ -220,32 +246,37 @@ class VerificationPipeline:
                         )
                         claim_reranked += len(reranked_passages)
 
-                    # ── Stage 7: NLI Entailment (Batched) ────────────
                     with tracker.track(PipelineStage.NLI):
                         nli_start = time.time()
-                        if reranked_passages:
-                            nli_results = self.nli_engine.batch_classify(
+                        nli_results = (
+                            self.nli_engine.batch_classify(
                                 sub_claim,
                                 [p.snippet for p in reranked_passages],
                                 model_name=route.nli_model,
                             )
-                        else:
-                            nli_results = []
+                            if reranked_passages
+                            else []
+                        )
                         self.metrics.record_nli_inference(
                             int((time.time() - nli_start) * 1000)
                         )
 
-                    # ── Stage 8: Evidence Scoring & Citations ────────
+                    # Only evidence with a meaningful NLI signal is allowed to
+                    # influence scoring, conflict resolution, or final citations.
+                    decision_passages, decision_nli = self._select_decision_grade_evidence(
+                        reranked_passages, nli_results
+                    )
+
                     with tracker.track(PipelineStage.SCORING):
                         scores_dict = self.evidence_scorer.score_evidence(
                             claim=sub_claim,
-                            passages=reranked_passages,
-                            nli_results=nli_results,
+                            passages=decision_passages,
+                            nli_results=decision_nli,
                             domain=validated_domain,
                         )
                         formatted_evidence = self.citation_formatter.format_all(
-                            passages=reranked_passages,
-                            nli_results=nli_results,
+                            passages=decision_passages,
+                            nli_results=decision_nli,
                             domain=validated_domain,
                             reliability_manager=self.reliability_manager,
                         )
@@ -257,7 +288,6 @@ class VerificationPipeline:
                             }
                         )
 
-                # Merge sub-claim results
                 merged_sub_result = self.claim_merger.merge_results(sub_reports)
                 overall_scores = merged_sub_result.get(
                     "scores",
@@ -268,10 +298,8 @@ class VerificationPipeline:
                     },
                 )
 
-                # ── Stage 9: Conflict Resolution & Confidence Calibration ──
                 conflict_res = self.conflict_resolver.resolve(claim_evidence_items)
 
-                # Verdict assignment
                 verdict = merged_sub_result.get("verdict")
                 if isinstance(verdict, str):
                     verdict_map = {
@@ -287,12 +315,10 @@ class VerificationPipeline:
                         else VerdictLabel.MIXED_EVIDENCE
                     )
 
-                # Confidence calibration
                 confidence = self._calibrate_confidence(
                     overall_scores, len(claim_evidence_items), conflict_res
                 )
 
-                # Compute supporting / contradicting source lists
                 supporting_sources = list(
                     {
                         e.source
@@ -308,7 +334,6 @@ class VerificationPipeline:
                     }
                 )
 
-                # ── Formatting ───────────────────────────────────────
                 with tracker.track(PipelineStage.FORMATTING):
                     explanation = self.explanation_generator.generate(
                         claim_text=claim.text,
@@ -322,15 +347,9 @@ class VerificationPipeline:
                         claim_id=claim.claim_id,
                         claim_text=claim.text,
                         verdict=verdict,
-                        support_score=float(
-                            overall_scores.get("support_score", 0.0)
-                        ),
-                        contradiction_score=float(
-                            overall_scores.get("contradiction_score", 0.0)
-                        ),
-                        trust_score=float(
-                            overall_scores.get("trust_score", 0.0)
-                        ),
+                        support_score=float(overall_scores.get("support_score", 0.0)),
+                        contradiction_score=float(overall_scores.get("contradiction_score", 0.0)),
+                        trust_score=float(overall_scores.get("trust_score", 0.0)),
                         confidence_score=confidence,
                         evidence=claim_evidence_items,
                         explanation=explanation,
@@ -341,7 +360,6 @@ class VerificationPipeline:
                         verified_evidence=len(claim_evidence_items),
                     )
 
-                # Cache set (only cache valid non-empty evidence results)
                 if claim_evidence_items:
                     await self.cache.set(
                         validated_domain, claim.text, report.model_dump()
@@ -371,13 +389,11 @@ class VerificationPipeline:
         latency_ms = int((time.time() - start_time) * 1000)
         self.metrics.record_request(validated_domain, latency_ms, success=True)
 
-        # Compute averages for overall confidence
-        if claim_reports:
-            avg_trust = sum(cr.trust_score for cr in claim_reports) / len(
-                claim_reports
-            )
-        else:
-            avg_trust = 0.0
+        avg_trust = (
+            sum(cr.trust_score for cr in claim_reports) / len(claim_reports)
+            if claim_reports
+            else 0.0
+        )
 
         final_response = VerifierOutputV2(
             query_id=payload.query_id,
