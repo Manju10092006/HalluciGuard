@@ -1,17 +1,81 @@
 from __future__ import annotations
-from typing import List
+
+import re
+from typing import Dict, List, Tuple
 
 from schemas.models import Passage
 from .sparse import BM25Retriever
 from .dense import DenseRetriever
 
+
+_STOP_WORDS = {
+    "a", "an", "the", "and", "or", "but", "if", "then", "than", "of", "to",
+    "in", "on", "for", "with", "by", "from", "as", "at", "is", "are", "was",
+    "were", "be", "been", "being", "this", "that", "these", "those", "it",
+    "its", "into", "about", "after", "before", "during", "over", "under",
+}
+
+
+def _tokens(text: str) -> List[str]:
+    return [
+        token
+        for token in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if token not in _STOP_WORDS
+    ]
+
+
+def _normalize_scores(items: List[Tuple[str, float]]) -> Dict[str, float]:
+    if not items:
+        return {}
+    values = [float(score) for _, score in items]
+    lo, hi = min(values), max(values)
+    if hi - lo <= 1e-9:
+        value = 1.0 if hi > 0 else 0.0
+        return {key: value for key, _ in items}
+    return {
+        key: max(0.0, min(1.0, (float(score) - lo) / (hi - lo)))
+        for key, score in items
+    }
+
+
 class HybridRetriever:
-    """Combines BM25 and Dense retrievers using RRF with graceful fallbacks."""
+    """Robust sparse+dense retrieval with lexical-aware score fusion."""
 
     def __init__(self) -> None:
         self.sparse = BM25Retriever()
         self.dense = DenseRetriever()
-        
+
+    @staticmethod
+    def _key(passage: Passage) -> str:
+        return (
+            passage.source_id
+            or passage.url
+            or f"{passage.title}|{passage.source}|{passage.snippet}"
+        )
+
+    @staticmethod
+    def _lexical_score(query: str, passage: Passage) -> float:
+        query_tokens = set(_tokens(query))
+        if not query_tokens:
+            return 0.0
+
+        text_tokens = set(
+            _tokens(
+                " ".join(
+                    [
+                        passage.title or "",
+                        passage.snippet or "",
+                    ]
+                )
+            )
+        )
+        if not text_tokens:
+            return 0.0
+
+        overlap = len(query_tokens & text_tokens) / len(query_tokens)
+        phrase = 1.0 if query.strip().lower() in (passage.snippet or "").lower() else 0.0
+        return min(1.0, 0.85 * overlap + 0.15 * phrase)
+
     def retrieve(
         self,
         query: str,
@@ -19,74 +83,134 @@ class HybridRetriever:
         k: int = 5,
         dense_model: str | None = None,
     ) -> List[Passage]:
-        """
-        Retrieve and fuse results using Reciprocal Rank Fusion (RRF).
-        
-        Args:
-            query: The search query.
-            passages: The pool of passages to retrieve from.
-            k: The number of top passages to return.
-            
-        Returns:
-            List of top-k Passages sorted by fused score.
-        """
-        if not passages:
+        if not passages or k <= 0:
             return []
-            
+
+        # Remove exact duplicates before retrieval so one source cannot occupy
+        # several ranking slots with the same content.
+        unique: Dict[str, Passage] = {}
+        for passage in passages:
+            key = self._key(passage)
+            if key not in unique:
+                unique[key] = passage
+        passages = list(unique.values())
+
         try:
             if dense_model and dense_model != self.dense.model_name:
                 self.dense = DenseRetriever(model_name=dense_model)
+
             self.sparse.build_index(passages)
             self.dense.build_index(passages)
-            
-            sparse_results = self.sparse.retrieve(query, k * 2)
-            dense_results = self.dense.retrieve(query, k * 2)
-            
-            rrf_scores: dict[str, float] = {}
-            passage_map: dict[str, Passage] = {}
-            
-            for rank, (passage, _) in enumerate(sparse_results):
-                passage_id = passage.source_id or passage.snippet
-                passage_map[passage_id] = passage
-                rrf_scores[passage_id] = rrf_scores.get(passage_id, 0.0) + 1.0 / (rank + 1 + 60)
-                
-            if getattr(self.dense, '_is_available', False):
-                for rank, (passage, _) in enumerate(dense_results):
-                    passage_id = passage.source_id or passage.snippet
-                    passage_map[passage_id] = passage
-                    rrf_scores[passage_id] = rrf_scores.get(passage_id, 0.0) + 1.0 / (rank + 1 + 60)
 
-            if not rrf_scores:
-                return passages[:k]
+            candidate_k = min(len(passages), max(k * 3, 10))
+            sparse_results = self.sparse.retrieve(query, candidate_k)
+            dense_results = self.dense.retrieve(query, candidate_k)
 
-            sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-            
-            final_results = []
-            for passage_id, score in sorted_items:
-                passage = passage_map[passage_id]
-                
-                is_duplicate = False
-                for selected in final_results:
-                    if self._compute_overlap(passage.snippet, selected.snippet) > 0.90:
-                        is_duplicate = True
+            sparse_scores = _normalize_scores(
+                [(self._key(p), score) for p, score in sparse_results]
+            )
+            dense_scores = _normalize_scores(
+                [(self._key(p), score) for p, score in dense_results]
+            )
+
+            rank_scores: Dict[str, float] = {}
+            passage_map: Dict[str, Passage] = {}
+
+            for rank, (passage, _) in enumerate(sparse_results, start=1):
+                key = self._key(passage)
+                passage_map[key] = passage
+                rank_scores[key] = rank_scores.get(key, 0.0) + 1.0 / (60 + rank)
+
+            for rank, (passage, _) in enumerate(dense_results, start=1):
+                key = self._key(passage)
+                passage_map[key] = passage
+                rank_scores[key] = rank_scores.get(key, 0.0) + 1.0 / (60 + rank)
+
+            # Always keep the original candidate pool available. This prevents
+            # a retrieval backend failure from turning into an empty result.
+            for passage in passages:
+                passage_map.setdefault(self._key(passage), passage)
+
+            rank_norm = _normalize_scores(list(rank_scores.items()))
+            dense_available = bool(dense_scores)
+
+            scored: List[Tuple[Passage, float]] = []
+            for key, passage in passage_map.items():
+                lexical = self._lexical_score(query, passage)
+                sparse = sparse_scores.get(key, 0.0)
+                dense = dense_scores.get(key, 0.0)
+                rrf = rank_norm.get(key, 0.0)
+
+                if dense_available:
+                    fused = (
+                        0.45 * dense
+                        + 0.30 * sparse
+                        + 0.20 * lexical
+                        + 0.05 * rrf
+                    )
+                else:
+                    fused = (
+                        0.65 * sparse
+                        + 0.25 * lexical
+                        + 0.10 * rrf
+                    )
+
+                # Preserve a small amount of the adapter's own relevance signal
+                # when it is already meaningful.
+                adapter_signal = max(
+                    0.0, min(1.0, float(getattr(passage, "relevance_score", 0.0)))
+                )
+                if adapter_signal > 0:
+                    fused = 0.90 * fused + 0.10 * adapter_signal
+
+                scored.append((passage, max(0.0, min(1.0, fused))))
+
+            scored.sort(key=lambda item: item[1], reverse=True)
+
+            final: List[Passage] = []
+            for passage, score in scored:
+                # Suppress near-identical passages while keeping independent
+                # sources with genuinely different wording.
+                duplicate = False
+                for selected in final:
+                    if self._compute_overlap(passage.snippet, selected.snippet) >= 0.92:
+                        duplicate = True
                         break
-                        
-                if not is_duplicate:
-                    final_results.append(passage)
-                    
-                if len(final_results) >= k:
+                if duplicate:
+                    continue
+
+                final.append(
+                    passage.model_copy(
+                        update={"relevance_score": round(score, 6)}
+                    )
+                )
+                if len(final) >= k:
                     break
-                    
-            return final_results if final_results else passages[:k]
+
+            return final if final else passages[:k]
 
         except Exception:
-            return passages[:k]
-        
+            # Retrieval must be fail-soft: verification should still receive
+            # evidence rather than crashing because one ranking backend failed.
+            fallback = sorted(
+                passages,
+                key=lambda p: self._lexical_score(query, p),
+                reverse=True,
+            )
+            return [
+                p.model_copy(
+                    update={
+                        "relevance_score": round(
+                            self._lexical_score(query, p), 6
+                        )
+                    }
+                )
+                for p in fallback[:k]
+            ]
+
     def _compute_overlap(self, text1: str, text2: str) -> float:
-        set1 = set(text1.lower().split())
-        set2 = set(text2.lower().split())
+        set1 = set(_tokens(text1))
+        set2 = set(_tokens(text2))
         if not set1 or not set2:
             return 0.0
-        intersection = set1.intersection(set2)
-        union = set1.union(set2)
-        return len(intersection) / len(union)
+        return len(set1.intersection(set2)) / len(set1.union(set2))
