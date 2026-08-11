@@ -1,2 +1,2 @@
 """Natural Language Inference engine."""
-from .entailment import NLIEngine
+from .robust_entailment import NLIEngine
