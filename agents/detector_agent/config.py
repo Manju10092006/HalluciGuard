@@ -9,100 +9,55 @@ except ImportError:
 
 
 class SignalWeights(BaseModel):
-    """Configurable weights assigned to each detection signal for score aggregation."""
-    token_probability: float = Field(
-        default=0.40,
-        ge=0.0,
-        le=1.0,
-        description="Weight assigned to Token Probability signal."
-    )
-    entropy: float = Field(
-        default=0.30,
-        ge=0.0,
-        le=1.0,
-        description="Weight assigned to Predictive Entropy signal."
-    )
-    semantic_similarity: float = Field(
-        default=0.30,
-        ge=0.0,
-        le=1.0,
-        description="Weight assigned to Semantic Similarity signal."
-    )
-    self_consistency: float = Field(
-        default=0.00,
-        ge=0.0,
-        le=1.0,
-        description="Weight assigned to Self-Consistency signal."
-    )
+    """Legacy signal-weight model retained for config compatibility."""
+    token_probability: float = Field(default=0.0, ge=0.0, le=1.0)
+    entropy: float = Field(default=0.0, ge=0.0, le=1.0)
+    semantic_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+    self_consistency: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_weights_sum(self):
-        """Validate that all weights are in [0, 1] and sum to exactly 1.0 (within 1e-4 tolerance)."""
-        weights_dict = self.model_dump()
-        for name, val in weights_dict.items():
-            if val < 0.0 or val > 1.0:
-                raise ValueError(f"Signal weight '{name}' must be between 0.0 and 1.0, got {val}")
-        
-        total_sum = sum(weights_dict.values())
-        if not math.isclose(total_sum, 1.0, abs_tol=1e-4):
-            raise ValueError(
-                f"Signal weights must sum to 1.0. Current sum is {total_sum:.4f} for configuration: {weights_dict}"
-            )
+        total = sum(self.model_dump().values())
+        if not math.isclose(total, 0.0, abs_tol=1e-4):
+            raise ValueError("Legacy detector signal weights must be zero; HaluEval is the sole detector.")
         return self
 
 
 class DetectorConfig(ConfigBase):
-    """Configuration settings for the Detector Agent."""
+    """Configuration for the HaluEval-based Detector Agent."""
     low_risk_threshold: float = Field(
         default=0.40,
-        description="Calibrated hallucination probability threshold at or below which risk is LOW."
+        ge=0.0,
+        le=1.0,
+        description="Hallucination probability at or below which the response is LOW risk."
     )
     high_risk_threshold: float = Field(
-        default=0.55,
-        description="Calibrated hallucination probability threshold at or above which risk is HIGH."
+        default=0.70,
+        ge=0.0,
+        le=1.0,
+        description="Hallucination probability at or above which the Verifier Agent is invoked."
     )
-    default_confidence_score: float = Field(
-        default=0.95,
-        description="Baseline dummy confidence score for Phase 1 fallback."
+    halueval_model_path: str = Field(
+        default="./artifacts/halueval-detector",
+        description="Path to the fine-tuned HaluEval classifier. Override with HALUEVAL_MODEL_PATH."
     )
-    default_hallucination_prob: float = Field(
-        default=0.05,
-        description="Baseline dummy hallucination probability for Phase 1 fallback."
+    halueval_base_model: str = Field(
+        default="distilbert-base-uncased",
+        description="Base encoder used when training the HaluEval classifier."
     )
+    halueval_dataset: str = Field(
+        default="pminervini/HaluEval",
+        description="Hugging Face HaluEval dataset used for detector training."
+    )
+    default_confidence_score: float = Field(default=0.95, ge=0.0, le=1.0)
+    default_hallucination_prob: float = Field(default=0.05, ge=0.0, le=1.0)
     model_name: str = Field(
         default="Qwen/Qwen2.5-0.5B-Instruct",
-        description="HuggingFace causal language model for computing token log probabilities and sampling."
+        description="Legacy field retained for compatibility; not used by the HaluEval detector."
     )
-    low_confidence_logprob_threshold: float = Field(
-        default=-2.0,
-        description="Log probability threshold below which a token is considered low-confidence."
-    )
-    signal_weights: SignalWeights = Field(
-        default_factory=SignalWeights,
-        description="Signal weighting configuration for score aggregation."
-    )
-    # Self-Consistency Sampling Parameters
-    num_samples: int = Field(
-        default=5,
-        ge=2,
-        le=20,
-        description="Number of candidate responses to sample for self-consistency evaluation."
-    )
-    temperature: float = Field(
-        default=0.7,
-        gt=0.0,
-        le=2.0,
-        description="Sampling temperature for stochastic decoding."
-    )
-    top_p: float = Field(
-        default=0.9,
-        gt=0.0,
-        le=1.0,
-        description="Top-p nucleus sampling threshold."
-    )
-    max_new_tokens: int = Field(
-        default=100,
-        ge=1,
-        le=512,
-        description="Maximum new tokens to generate per candidate response."
-    )
+    low_confidence_logprob_threshold: float = Field(default=-2.0)
+    signal_weights: SignalWeights = Field(default_factory=SignalWeights)
+    num_samples: int = Field(default=5, ge=2, le=20)
+    temperature: float = Field(default=0.7, gt=0.0, le=2.0)
+    top_p: float = Field(default=0.9, gt=0.0, le=1.0)
+    max_new_tokens: int = Field(default=100, ge=1, le=512)
