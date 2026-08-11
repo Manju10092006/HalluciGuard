@@ -49,6 +49,37 @@ def test_hybrid_retrieval_keeps_semantically_and_lexically_relevant_sources():
     assert all(0.0 <= item.relevance_score <= 1.0 for item in results)
 
 
+def test_hybrid_retrieval_remains_useful_when_dense_backend_is_unavailable():
+    relevant = _passage("source_a", "Python lists preserve insertion order.")
+    unrelated = _passage("source_b", "Mars has two small moons.")
+
+    class FakeSparse:
+        def build_index(self, passages):
+            self.passages = passages
+
+        def retrieve(self, query, k):
+            return [(relevant, 4.0), (unrelated, 0.0)]
+
+    class DisabledDense:
+        model_name = "fake"
+
+        def build_index(self, passages):
+            self.passages = passages
+
+        def retrieve(self, query, k):
+            return []
+
+    retriever = HybridRetriever()
+    retriever.sparse = FakeSparse()
+    retriever.dense = DisabledDense()
+
+    results = retriever.retrieve("Python lists insertion order", [relevant, unrelated], k=1)
+
+    assert len(results) == 1
+    assert results[0].source_id == "source_a"
+    assert results[0].relevance_score > 0.0
+
+
 def test_nli_label_mapping_handles_label_ids():
     scores = _normalize_scores(
         [
@@ -100,9 +131,9 @@ def test_nli_batch_preserves_input_alignment():
 
 def test_evidence_scorer_accepts_one_strong_authoritative_source():
     scorer = EvidenceScorer()
-    passage = _passage("pubmed", "The study reports that the treatment reduced symptoms.").model_copy(
-        update={"relevance_score": 0.9}
-    )
+    passage = _passage(
+        "pubmed", "The study reports that the treatment reduced symptoms."
+    ).model_copy(update={"relevance_score": 0.9})
     nli = [
         {
             "label": EntailmentLabel.ENTAILMENT,
@@ -112,7 +143,9 @@ def test_evidence_scorer_accepts_one_strong_authoritative_source():
         }
     ]
 
-    result = scorer.score_evidence("The treatment reduced symptoms", [passage], nli, "healthcare")
+    result = scorer.score_evidence(
+        "The treatment reduced symptoms", [passage], nli, "healthcare"
+    )
 
     assert result["support_score"] > 0.5
     assert result["trust_score"] > 0.5
@@ -121,9 +154,9 @@ def test_evidence_scorer_accepts_one_strong_authoritative_source():
 
 def test_evidence_scorer_flags_strong_contradiction():
     scorer = EvidenceScorer()
-    passage = _passage("pubmed", "The study found no evidence that the treatment works.").model_copy(
-        update={"relevance_score": 0.9}
-    )
+    passage = _passage(
+        "pubmed", "The study found no evidence that the treatment works."
+    ).model_copy(update={"relevance_score": 0.9})
     nli = [
         {
             "label": EntailmentLabel.CONTRADICTION,
@@ -133,7 +166,32 @@ def test_evidence_scorer_flags_strong_contradiction():
         }
     ]
 
-    result = scorer.score_evidence("The treatment always works", [passage], nli, "healthcare")
+    result = scorer.score_evidence(
+        "The treatment always works", [passage], nli, "healthcare"
+    )
 
     assert result["contradiction_score"] > 0.5
     assert result["verdict"] == VerdictLabel.LIKELY_HALLUCINATED
+
+
+def test_evidence_scorer_does_not_treat_strong_neutral_as_support():
+    scorer = EvidenceScorer()
+    passage = _passage(
+        "general", "The article discusses treatment options without measuring outcomes."
+    ).model_copy(update={"relevance_score": 0.9})
+    nli = [
+        {
+            "label": EntailmentLabel.NEUTRAL,
+            "entailment_score": 0.08,
+            "contradiction_score": 0.07,
+            "neutral_score": 0.85,
+        }
+    ]
+
+    result = scorer.score_evidence(
+        "The treatment reduces mortality", [passage], nli, "general"
+    )
+
+    assert result["support_score"] == 0.0
+    assert result["contradiction_score"] == 0.0
+    assert result["verdict"] == VerdictLabel.INSUFFICIENT_EVIDENCE
