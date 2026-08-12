@@ -4,29 +4,27 @@ from typing import Any, TypedDict
 
 
 class HalluciGuardState(TypedDict, total=False):
-    # Immutable request/draft context
     request_id: str
     user_query: str
     llm_response: str
     domain: str
 
-    # Detector
     detector: dict[str, Any]
     route: str
+    claims: list[dict[str, Any]]
 
-    # Verifier
     verifier: dict[str, Any]
+    judge_pairs: list[dict[str, Any]]
+    evidence: list[dict[str, Any]]
+    retrieval_results: list[dict[str, Any]]
+    reranking_results: list[dict[str, Any]]
+    nli_results: list[dict[str, Any]]
 
-    # Judge
     judge: dict[str, Any]
-
-    # Corrector
     corrector: dict[str, Any]
-
-    # Memory / knowledge graph
     memory: dict[str, Any]
+    knowledge_graph_context: dict[str, Any]
 
-    # Final output and observability
     final_response: str
     trace: list[dict[str, Any]]
     retry_count: int
