@@ -5,9 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, TypedDict
 
 AgentStatus = Literal["started", "completed", "failed", "skipped", "scheduled"]
-TerminalStatus = Literal[
-    "accepted", "corrected", "rejected", "human_review", "fallback"
-]
+TerminalStatus = Literal["success", "partial_success", "failed", "human_review"]
 
 
 class AgentError(TypedDict, total=False):
@@ -29,7 +27,6 @@ class ExecutionEvent(TypedDict, total=False):
 
 
 class HalluciGuardState(TypedDict, total=False):
-    # Request / Base LLM draft
     execution_id: str
     request_id: str
     user_query: str
@@ -38,36 +35,39 @@ class HalluciGuardState(TypedDict, total=False):
     created_at: str
     updated_at: str
 
-    # Shared inter-agent contract
     detector: dict[str, Any]
     route: str
     claims: list[dict[str, Any]]
     hallucination_probability: float
     confidence: float
     verification_status: str
+
     verifier: dict[str, Any]
-    judge_pairs: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
     retrieved_evidence: list[dict[str, Any]]
     ranked_evidence: list[dict[str, Any]]
     nli_results: list[dict[str, Any]]
-    judge: dict[str, Any]
-    judge_decision: str
-    corrector: dict[str, Any]
+
     memory: dict[str, Any]
     memory_context: dict[str, Any]
     knowledge_graph_context: dict[str, Any]
 
-    # Control plane
+    inter_agent_bus: list[dict[str, Any]]
+
+    # Explicitly retained but disabled until independently validated.
+    judge: dict[str, Any]
+    corrector: dict[str, Any]
+
     final_response: str
     terminal_status: TerminalStatus
     retry_count: int
     max_retries: int
     current_node: str
+    supervisor_phase: str
+    supervisor_route: str
     errors: list[AgentError]
     error: str
 
-    # Observability / audit
     trace: list[ExecutionEvent]
     audit: dict[str, Any]
 
