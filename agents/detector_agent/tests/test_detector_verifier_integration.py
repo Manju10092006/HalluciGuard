@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from agents.detector_agent import app as detector_app_module
+import agents.detector_agent.app as detector_app_module
 from agents.detector_agent.models import DetectionResult, NextAction, RiskLevel
 from agents.detector_agent.verifier_client import VerifierUnavailableError
 
@@ -31,9 +31,7 @@ def _result(action: NextAction, risk: RiskLevel) -> DetectionResult:
 
 def test_low_risk_does_not_invoke_verifier(monkeypatch):
     calls = []
-    detector_app_module.agent = FakeDetector(
-        _result(NextAction.ACCEPT, RiskLevel.LOW)
-    )
+    detector_app_module.agent = FakeDetector(_result(NextAction.ACCEPT, RiskLevel.LOW))
 
     async def fake_verify(**kwargs):
         calls.append(kwargs)
@@ -59,9 +57,7 @@ def test_low_risk_does_not_invoke_verifier(monkeypatch):
 
 def test_medium_risk_does_not_invoke_verifier(monkeypatch):
     calls = []
-    detector_app_module.agent = FakeDetector(
-        _result(NextAction.ACCEPT, RiskLevel.MEDIUM)
-    )
+    detector_app_module.agent = FakeDetector(_result(NextAction.ACCEPT, RiskLevel.MEDIUM))
 
     async def fake_verify(**kwargs):
         calls.append(kwargs)
@@ -84,9 +80,7 @@ def test_medium_risk_does_not_invoke_verifier(monkeypatch):
 
 
 def test_high_risk_invokes_verifier_exactly_once(monkeypatch):
-    detector_app_module.agent = FakeDetector(
-        _result(NextAction.VERIFY, RiskLevel.HIGH)
-    )
+    detector_app_module.agent = FakeDetector(_result(NextAction.VERIFY, RiskLevel.HIGH))
     calls = []
 
     async def fake_verify(**kwargs):
@@ -127,9 +121,7 @@ def test_high_risk_invokes_verifier_exactly_once(monkeypatch):
 
 
 def test_high_risk_fails_closed_when_verifier_unavailable(monkeypatch):
-    detector_app_module.agent = FakeDetector(
-        _result(NextAction.VERIFY, RiskLevel.HIGH)
-    )
+    detector_app_module.agent = FakeDetector(_result(NextAction.VERIFY, RiskLevel.HIGH))
 
     async def fake_verify(**kwargs):
         raise VerifierUnavailableError("connection refused")
@@ -150,9 +142,7 @@ def test_high_risk_fails_closed_when_verifier_unavailable(monkeypatch):
 
 
 def test_original_detect_endpoint_remains_detector_only(monkeypatch):
-    detector_app_module.agent = FakeDetector(
-        _result(NextAction.VERIFY, RiskLevel.HIGH)
-    )
+    detector_app_module.agent = FakeDetector(_result(NextAction.VERIFY, RiskLevel.HIGH))
 
     async def fail_if_called(**kwargs):
         raise AssertionError("/detect must not invoke Verifier")
