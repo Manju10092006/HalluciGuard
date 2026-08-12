@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .graph import run_verification
+from .graph import ACTIVE_AGENTS, DISABLED_AGENTS, run_verification
 from .runtime_validation import validate_orchestration_startup
 
 
@@ -16,8 +16,8 @@ class VerificationRequest(BaseModel):
 
 app = FastAPI(
     title="HalluciGuard Verification Engine",
-    version="1.0.0",
-    description="LangGraph supervisor for the five-agent HalluciGuard verification workflow.",
+    version="2.0.0",
+    description="LangGraph supervisor for the active Detector → Verifier → Memory trust path.",
 )
 
 
@@ -27,7 +27,10 @@ async def health() -> dict:
     return {
         "status": "ok" if validation["ok"] else "degraded",
         "engine": "langgraph",
-        "agents": ["detector", "verifier", "judge", "corrector", "memory"],
+        "active_agents": list(ACTIVE_AGENTS),
+        "disabled_agents": list(DISABLED_AGENTS),
+        "judge": {"enabled": False, "status": "not_executed"},
+        "corrector": {"enabled": False, "status": "not_executed"},
         "runtime_validation": validation,
     }
 
@@ -47,14 +50,17 @@ async def verify(request: VerificationRequest) -> dict:
             "final_response": result.get("final_response", result.get("llm_response")),
             "terminal_status": result.get("terminal_status"),
             "verification_status": result.get("verification_status"),
+            "active_agents": list(ACTIVE_AGENTS),
+            "disabled_agents": list(DISABLED_AGENTS),
+            "judge": {"enabled": False, "status": "not_executed"},
+            "corrector": {"enabled": False, "status": "not_executed"},
             "detector": result.get("detector"),
             "verifier": result.get("verifier"),
-            "judge": result.get("judge"),
-            "corrector": result.get("corrector"),
             "memory": result.get("memory"),
             "retry_count": result.get("retry_count", 0),
             "errors": result.get("errors", []),
             "audit": result.get("audit", {}),
+            "inter_agent_bus": result.get("inter_agent_bus", []),
             "trace": result.get("trace", []),
         }
     except Exception as exc:
