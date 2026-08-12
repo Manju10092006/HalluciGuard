@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import uuid
@@ -11,20 +10,32 @@ from langgraph.graph import END, START, StateGraph
 
 from .state import HalluciGuardState, add_trace
 
-
 MAX_VERIFICATION_RETRIES = int(os.getenv("HALLUCIGUARD_MAX_VERIFICATION_RETRIES", "2"))
+
+
+def _dump(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, dict):
+        return {k: _dump(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_dump(v) for v in value]
+    return value
 
 
 def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
     from agents.detector_agent.detector import DetectorAgent
 
     result = DetectorAgent().detect(state["user_query"], state["llm_response"])
-    detector = result.model_dump() if hasattr(result, "model_dump") else result.dict()
-    route = "verify" if str(detector.get("next_action", "")).lower().endswith("verify") else "accept"
+    detector = _dump(result)
+    next_action = str(detector.get("next_action", ""))
+    route = "verify" if next_action.lower().endswith("verify") else "accept"
     return {
         "detector": detector,
         "route": route,
-        "trace": add_trace(state, "detector", "completed", result=detector),
+        "trace": add_trace(state, "detector", "completed", route=route, hallucination_probability=detector.get("hallucination_probability")),
     }
 
 
@@ -32,31 +43,61 @@ def _detector_route(state: HalluciGuardState) -> str:
     return state.get("route", "accept")
 
 
+def _verifier_imports():
+    """Load the existing verifier package using its current internal import contract."""
+    verifier_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent"))
+    if verifier_dir not in sys.path:
+        sys.path.insert(0, verifier_dir)
+    from api.pipeline import VerificationPipeline
+    from schemas.models import SuspiciousClaim, VerifierInputV2
+    return VerificationPipeline, SuspiciousClaim, VerifierInputV2
+
+
 async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
-    # Import the verifier's existing production pipeline; LangGraph owns routing,
-    # while the Verifier keeps its existing 9-stage retrieval/NLI implementation.
-    from agents.verifier_agent.api.pipeline import VerificationPipeline
-    from agents.verifier_agent.schemas.models import SuspiciousClaim, VerifierInputV2
+    VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
 
     pipeline = VerificationPipeline()
-    claim = SuspiciousClaim(claim_id="c1", text=state["llm_response"])
     payload = VerifierInputV2(
         query_id=state.get("request_id") or str(uuid.uuid4()),
         domain=state.get("domain", "general"),
-        suspicious_claims=[claim],
+        suspicious_claims=[SuspiciousClaim(claim_id="c1", text=state["llm_response"])],
     )
     result = await pipeline.verify(payload)
-    verifier = result.model_dump() if hasattr(result, "model_dump") else result.dict()
+    verifier = _dump(result)
+
+    # The Judge consumes claim/evidence pairs. Build that contract from the
+    # real verifier ClaimReport/EvidenceItem output rather than inventing data.
+    judge_pairs: list[dict[str, Any]] = []
+    for report in verifier.get("claim_evidence", []):
+        evidence_items = report.get("evidence", [])
+        for evidence in evidence_items:
+            judge_pairs.append({
+                "claim": report.get("claim_text", ""),
+                "evidence": evidence.get("snippet", ""),
+                "source": evidence.get("source", ""),
+                "url": evidence.get("url", ""),
+                "entailment_label": evidence.get("entailment_label", "neutral"),
+                "entailment_score": evidence.get("entailment_score", 0.0),
+                "credibility_score": evidence.get("credibility_score", 0.0),
+            })
+        if not evidence_items:
+            judge_pairs.append({"claim": report.get("claim_text", ""), "evidence": "", "source": "None (Unverified)"})
+
     return {
         "verifier": verifier,
-        "trace": add_trace(state, "verifier", "completed", verdicts=[c.get("verdict") for c in verifier.get("claim_evidence", [])]),
+        "judge_pairs": judge_pairs,
+        "trace": add_trace(
+            state,
+            "verifier",
+            "completed",
+            retrieved_sources=verifier.get("retrieved_sources", 0),
+            verified_sources=verifier.get("verified_sources", 0),
+            claim_count=len(verifier.get("claim_evidence", [])),
+        ),
     }
 
 
-def _judge_imports() -> Any:
-    # The existing Judge code uses directory-local absolute imports. Add only its
-    # package directory to sys.path so we reuse the production implementation
-    # without rewriting the Judge internals.
+def _judge_imports():
     judge_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents", "judge_agent"))
     if judge_dir not in sys.path:
         sys.path.insert(0, judge_dir)
@@ -67,17 +108,20 @@ def _judge_imports() -> Any:
 def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
     DecisionIntelligenceEngine = _judge_imports()
     engine = DecisionIntelligenceEngine()
+    verifier_for_judge = dict(state.get("verifier", {}))
+    verifier_for_judge["claim_evidence_pairs"] = state.get("judge_pairs", [])
+
     verdict = engine.evaluate(
         user_query=state["user_query"],
         draft_response=state["llm_response"],
         detector_output=state.get("detector", {}),
-        verifier_output=state.get("verifier", {}),
+        verifier_output=verifier_for_judge,
         domain=state.get("domain", ""),
         memory_context=state.get("memory"),
         retry_count=state.get("retry_count", 0),
     )
-    judge = asdict(verdict) if is_dataclass(verdict) else verdict
-    action = judge.get("workflow_action", {}).get("type") or judge.get("workflow_action", {}).get("action_type")
+    judge = _dump(verdict)
+    action = judge.get("workflow_action", {}).get("type", "")
     return {
         "judge": judge,
         "trace": add_trace(state, "judge", "completed", decision=judge.get("decision"), action=action),
@@ -93,17 +137,11 @@ def _judge_route(state: HalluciGuardState) -> str:
     return "finish"
 
 
-def _corrector_imports() -> Any:
+def _corrector_imports():
     corrector_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents", "corrector_agent"))
     if corrector_dir not in sys.path:
         sys.path.insert(0, corrector_dir)
-    from app.models import (
-        AtomicClaim,
-        ClaimStatus,
-        EvidencePassage,
-        JudgeVerificationPayload,
-        SourceMetadata,
-    )
+    from app.models import AtomicClaim, ClaimStatus, EvidencePassage, JudgeVerificationPayload, SourceMetadata
     from app.orchestrator import CorrectorOrchestrator
     return CorrectorOrchestrator, AtomicClaim, ClaimStatus, EvidencePassage, JudgeVerificationPayload, SourceMetadata
 
@@ -133,7 +171,6 @@ def _build_corrector_payload(state: HalluciGuardState) -> Any:
             else ClaimStatus.INSUFFICIENT_EVIDENCE
         )
         claim_id = str(report.get("claim_id", f"c{report_index + 1}"))
-        claim_text = str(report.get("claim_text", ""))
         evidence_ids = []
         for evidence_index, item in enumerate(report.get("evidence", [])):
             evidence_id = f"{claim_id}-e{evidence_index + 1}"
@@ -157,16 +194,15 @@ def _build_corrector_payload(state: HalluciGuardState) -> Any:
         claims.append(
             AtomicClaim(
                 id=claim_id,
-                text=claim_text,
+                text=str(report.get("claim_text", "")),
                 status=status,
                 confidenceScore=float(report.get("confidence_score", report.get("trust_score", 0.0))),
                 evidenceIds=evidence_ids,
             )
         )
 
-    judge = state.get("judge", {})
-    reasoning = judge.get("reasoning_chain", [])
-    instructions = "\n".join(reasoning) if reasoning else "Correct only claims contradicted by the verified evidence. Preserve verified claims. Do not invent facts."
+    reasoning = state.get("judge", {}).get("reasoning_chain", [])
+    instructions = "\n".join(reasoning) if reasoning else "Correct only claims contradicted by verified evidence. Preserve verified claims. Do not invent facts."
     return JudgeVerificationPayload(
         query=state["user_query"],
         originalResponse=state["llm_response"],
@@ -181,13 +217,11 @@ def _build_corrector_payload(state: HalluciGuardState) -> Any:
 
 async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
     CorrectorOrchestrator, *_ = _corrector_imports()
-    payload = _build_corrector_payload(state)
-    result = await CorrectorOrchestrator().executeCorrectionPipeline(payload)
-    corrector = result.model_dump() if hasattr(result, "model_dump") else result.dict()
-    final_response = corrector.get("finalResponse") or state["llm_response"]
+    result = await CorrectorOrchestrator().executeCorrectionPipeline(_build_corrector_payload(state))
+    corrector = _dump(result)
     return {
         "corrector": corrector,
-        "final_response": final_response,
+        "final_response": corrector.get("finalResponse") or state["llm_response"],
         "trace": add_trace(state, "corrector", "completed", approved=corrector.get("isFullyApproved"), attempts=corrector.get("attemptsCount")),
     }
 
@@ -199,100 +233,70 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
     memory_agent = MemoryAgent()
     await memory_agent.initialize()
     try:
-        verifier = state.get("verifier", {})
-        reports = verifier.get("claim_evidence", [])
         stored = []
-        for report in reports:
-            verdict = str(report.get("verdict", "insufficient_evidence")).lower()
+        for report in state.get("verifier", {}).get("claim_evidence", []):
             evidence = report.get("evidence", [])
             sources = [str(e.get("source", "")) for e in evidence if e.get("source")]
             request = StoreFactRequest(
                 claim_text=str(report.get("claim_text", "")),
                 domain=state.get("domain", "general"),
-                verdict=verdict,
+                verdict=str(report.get("verdict", "insufficient_evidence")),
                 evidence=[
-                    {"source_id": e.get("source", ""), "title": e.get("title", ""), "url": e.get("url")}
+                    {"source_id": e.get("source", ""), "title": e.get("title", ""), "url": e.get("url"), "snippet": e.get("snippet", "")}
                     for e in evidence
                 ],
                 source_ids=sources,
                 confidence=float(report.get("confidence_score", report.get("trust_score", 0.0))),
-                metadata={"request_id": state.get("request_id", ""), "detector": state.get("detector", {})},
+                metadata={"request_id": state.get("request_id", ""), "detector": state.get("detector", {}), "judge": state.get("judge", {})},
             )
-            stored.append((await memory_agent.store_fact(request)).model_dump())
-
-        memory = {"stored": stored, "count": len(stored)}
+            stored.append(_dump(await memory_agent.store_fact(request)))
     finally:
         await memory_agent.close()
 
-    final_response = state.get("final_response") or state["llm_response"]
+    memory = {"stored": stored, "count": len(stored), "knowledge_graph": True, "vector_memory": True}
     return {
         "memory": memory,
-        "final_response": final_response,
-        "trace": add_trace(state, "memory", "completed", stored_count=memory["count"]),
+        "final_response": state.get("final_response") or state["llm_response"],
+        "trace": add_trace(state, "memory", "completed", stored_count=len(stored)),
     }
 
 
 def _accept_node(state: HalluciGuardState) -> dict[str, Any]:
-    return {
-        "final_response": state["llm_response"],
-        "trace": add_trace(state, "accept", "completed", reason="Detector risk was not HIGH"),
-    }
+    return {"final_response": state["llm_response"], "trace": add_trace(state, "accept", "completed", reason="Detector route accepted")}
 
 
 def _finish_node(state: HalluciGuardState) -> dict[str, Any]:
-    final_response = state.get("final_response") or state["llm_response"]
-    return {
-        "final_response": final_response,
-        "trace": add_trace(state, "finish", "completed", decision=state.get("judge", {}).get("decision")),
-    }
+    return {"final_response": state.get("final_response") or state["llm_response"], "trace": add_trace(state, "finish", "completed", decision=state.get("judge", {}).get("decision"))}
 
 
 def _retry_node(state: HalluciGuardState) -> dict[str, Any]:
     count = state.get("retry_count", 0) + 1
-    return {
-        "retry_count": count,
-        "trace": add_trace(state, "verify_retry", "scheduled", retry_count=count),
-    }
+    return {"retry_count": count, "trace": add_trace(state, "verify_retry", "scheduled", retry_count=count)}
 
 
 def build_verification_graph():
-    """Build the production HalluciGuard graph.
-
-    Graph topology:
-      START -> Detector
-      Detector -- LOW/MEDIUM -> Accept -> Memory -> END
-      Detector -- HIGH -> Verifier -> Judge
-      Judge -- VERIFY_AGAIN -> Retry -> Verifier
-      Judge -- CORRECT -> Corrector -> Memory -> END
-      Judge -- ACCEPT/REJECT/ABSTAIN/HUMAN -> Finish -> Memory -> END
-
-    The five existing agents remain independent specialists. LangGraph is the
-    stateful supervisor and routing layer; it does not replace their logic.
-    """
     graph = StateGraph(HalluciGuardState)
-    graph.add_node("detector", _detector_node)
-    graph.add_node("accept", _accept_node)
-    graph.add_node("verifier", _verifier_node)
-    graph.add_node("judge", _judge_node)
-    graph.add_node("retry", _retry_node)
-    graph.add_node("corrector", _corrector_node)
-    graph.add_node("finish", _finish_node)
-    graph.add_node("memory", _memory_node)
+    for name, fn in {
+        "detector": _detector_node,
+        "accept": _accept_node,
+        "verifier": _verifier_node,
+        "judge": _judge_node,
+        "retry": _retry_node,
+        "corrector": _corrector_node,
+        "finish": _finish_node,
+        "memory": _memory_node,
+    }.items():
+        graph.add_node(name, fn)
 
     graph.add_edge(START, "detector")
     graph.add_conditional_edges("detector", _detector_route, {"verify": "verifier", "accept": "accept"})
     graph.add_edge("accept", "memory")
     graph.add_edge("verifier", "judge")
-    graph.add_conditional_edges(
-        "judge",
-        _judge_route,
-        {"verify_again": "retry", "correct": "corrector", "finish": "finish"},
-    )
+    graph.add_conditional_edges("judge", _judge_route, {"verify_again": "retry", "correct": "corrector", "finish": "finish"})
     graph.add_edge("retry", "verifier")
     graph.add_edge("corrector", "memory")
     graph.add_edge("finish", "memory")
     graph.add_edge("memory", END)
-
     return graph.compile()
 
 
@@ -306,19 +310,12 @@ def get_verification_graph():
     return _GRAPH
 
 
-async def run_verification(
-    user_query: str,
-    llm_response: str,
-    domain: str = "general",
-    request_id: str | None = None,
-) -> HalluciGuardState:
-    graph = get_verification_graph()
-    initial: HalluciGuardState = {
+async def run_verification(user_query: str, llm_response: str, domain: str = "general", request_id: str | None = None) -> HalluciGuardState:
+    return await get_verification_graph().ainvoke({
         "request_id": request_id or str(uuid.uuid4()),
         "user_query": user_query,
         "llm_response": llm_response,
         "domain": domain,
         "retry_count": 0,
         "trace": [],
-    }
-    return await graph.ainvoke(initial)
+    })
