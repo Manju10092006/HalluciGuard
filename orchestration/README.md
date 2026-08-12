@@ -100,3 +100,46 @@ The pytest suite validates graph construction, state/trace contracts, all condit
 ## Current local E2E note
 
 In this checkout, the real Detector cannot load because `artifacts/halueval-detector-final` is absent and `HALUEVAL_MODEL_PATH` is not set. The real E2E therefore exercises the Detector failure path and reaches `detector -> human_escalation -> memory` rather than the full Detector → Verifier → Judge chain. Install/provide the Detector artifact to run the complete real-agent path.
+
+## Detector artifact setup and startup validation
+
+The Detector is intentionally not mocked by the graph. Real execution requires a fine-tuned HaluEval sequence-classification artifact.
+
+By default the Detector expects:
+
+```text
+artifacts/halueval-detector-final/
+```
+
+The path is read from `HALUEVAL_MODEL_PATH` by `agents.detector_agent.config.DetectorConfig`, and the inference loader validates the reference before loading. A local directory must contain at least:
+
+- `config.json`
+- `model.safetensors` or `pytorch_model.bin`
+- `tokenizer.json` or `vocab.txt`
+
+Create the artifact with the repository's trainer:
+
+```bash
+python -m agents.detector_agent.halueval_trainer --output-dir artifacts/halueval-detector-final
+```
+
+Or point to an externally hosted Hugging Face artifact by prefixing the repo id with `hf://`:
+
+```bash
+export HALUEVAL_MODEL_PATH=hf://ORG/HALUEVAL_DETECTOR_REPO
+```
+
+The prefix is stripped before calling `transformers.from_pretrained(...)`; load errors from Hugging Face are surfaced as real startup/runtime failures. Large model binaries remain excluded from Git by `.gitignore`, so developers must either train, download, or configure the artifact explicitly.
+
+The `/health` endpoint runs startup validation and reports `status: degraded` with an actionable error when the Detector artifact is missing. It does not substitute fake Detector scores.
+
+## Real vs deterministic tests
+
+- `orchestration/tests/test_graph_contract.py`: contract/unit tests for schema helpers and routing functions.
+- `orchestration/tests/test_graph_execution.py`: deterministic graph routing tests using node overrides; these are not called real E2E tests.
+- `orchestration/tests/test_runtime_validation.py`: startup/model-path and degraded-NLI regression tests.
+- `python -m orchestration.scripts.verify_e2e`: real graph entrypoint that attempts to execute the real Detector first and reports the actual path and errors.
+
+## NLI degradation rule
+
+Verifier NLI fallbacks are no longer represented as successful uniform `0.33/0.33/0.34` scores. If the real NLI model cannot load or inference fails, the NLI result is marked `degraded` with neutral-only scores. Degraded NLI outputs are excluded from decision-grade evidence, so fallback scores cannot be converted into successful verification evidence.

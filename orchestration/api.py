@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .graph import run_verification
+from .runtime_validation import validate_orchestration_startup
 
 
 class VerificationRequest(BaseModel):
@@ -22,7 +23,13 @@ app = FastAPI(
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "engine": "langgraph", "agents": ["detector", "verifier", "judge", "corrector", "memory"]}
+    validation = validate_orchestration_startup()
+    return {
+        "status": "ok" if validation["ok"] else "degraded",
+        "engine": "langgraph",
+        "agents": ["detector", "verifier", "judge", "corrector", "memory"],
+        "runtime_validation": validation,
+    }
 
 
 @app.post("/verify")
@@ -51,4 +58,7 @@ async def verify(request: VerificationRequest) -> dict:
             "trace": result.get("trace", []),
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Verification engine failed: {type(exc).__name__}: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=f"Verification engine failed: {type(exc).__name__}: {exc}",
+        ) from exc

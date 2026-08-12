@@ -9,6 +9,7 @@ Runtime flow:
   Source Reliability → Trust Score → Confidence Calibration →
   Citation Generation → Structured Response
 """
+
 from __future__ import annotations
 
 import uuid
@@ -17,9 +18,17 @@ import logging
 from typing import List, Dict, Any, Tuple
 
 from schemas.models import (
-    VerifierInputV2, VerifierOutputV2, ClaimReport, EvidenceItem,
-    SuspiciousClaim, Passage, EntailmentLabel, VerdictLabel,
-    PipelineStage, PipelineStageStatus, RuntimeModelInfo,
+    VerifierInputV2,
+    VerifierOutputV2,
+    ClaimReport,
+    EvidenceItem,
+    SuspiciousClaim,
+    Passage,
+    EntailmentLabel,
+    VerdictLabel,
+    PipelineStage,
+    PipelineStageStatus,
+    RuntimeModelInfo,
 )
 from adapters.registry import get_registry
 from claims import ClaimDecomposer, ClaimNormalizer, ClaimMerger, EntityResolver
@@ -83,10 +92,12 @@ class VerificationPipeline:
         selected = [
             (passage, result)
             for passage, result in pairs
-            if max(
+            if not result.get("degraded", False)
+            and max(
                 float(result.get("entailment_score", 0.0)),
                 float(result.get("contradiction_score", 0.0)),
-            ) >= 0.35
+            )
+            >= 0.35
         ]
 
         # If the model is uncertain about every passage, do not manufacture
@@ -121,9 +132,7 @@ class VerificationPipeline:
         # high confidence while independent sources increase stability.
         evidence_factor = 0.75 + 0.25 * min(1.0, evidence_count / 3.0)
         conflict_penalty = (
-            0.80
-            if conflict_res.get("resolution_type") == "genuine_conflict"
-            else 1.0
+            0.80 if conflict_res.get("resolution_type") == "genuine_conflict" else 1.0
         )
         return round(max(0.0, min(1.0, base * evidence_factor * conflict_penalty)), 4)
 
@@ -144,9 +153,7 @@ class VerificationPipeline:
         # ── Stage 1: Domain Validation & Model Routing ──────────────
         with tracker.track(PipelineStage.DOMAIN_VALIDATION):
             first_claim_text = (
-                payload.suspicious_claims[0].text
-                if payload.suspicious_claims
-                else ""
+                payload.suspicious_claims[0].text if payload.suspicious_claims else ""
             )
             validated_domain, is_domain_correct = self.domain_validator.validate(
                 claim_text=first_claim_text,
@@ -206,8 +213,10 @@ class VerificationPipeline:
 
                 for sub_claim in sub_claims:
                     with tracker.track(PipelineStage.QUERY_EXPANSION):
-                        expanded_query, resolution = self.query_expander.resolve_and_expand(
-                            sub_claim, validated_domain
+                        expanded_query, resolution = (
+                            self.query_expander.resolve_and_expand(
+                                sub_claim, validated_domain
+                            )
                         )
 
                     with tracker.track(PipelineStage.RETRIEVAL):
@@ -220,7 +229,9 @@ class VerificationPipeline:
                                 expanded_query,
                                 e,
                             )
-                            adapter_failures.append(f"{validated_domain}:{str(e)[:100]}")
+                            adapter_failures.append(
+                                f"{validated_domain}:{str(e)[:100]}"
+                            )
                             raw_passages = []
 
                         retrieval_duration = int((time.time() - retrieval_start) * 1000)
@@ -265,8 +276,10 @@ class VerificationPipeline:
 
                     # Only evidence with a meaningful NLI signal is allowed to
                     # influence scoring, conflict resolution, or final citations.
-                    decision_passages, decision_nli = self._select_decision_grade_evidence(
-                        reranked_passages, nli_results
+                    decision_passages, decision_nli = (
+                        self._select_decision_grade_evidence(
+                            reranked_passages, nli_results
+                        )
                     )
 
                     with tracker.track(PipelineStage.SCORING):
@@ -350,7 +363,9 @@ class VerificationPipeline:
                         claim_text=claim.text,
                         verdict=verdict,
                         support_score=float(overall_scores.get("support_score", 0.0)),
-                        contradiction_score=float(overall_scores.get("contradiction_score", 0.0)),
+                        contradiction_score=float(
+                            overall_scores.get("contradiction_score", 0.0)
+                        ),
                         trust_score=float(overall_scores.get("trust_score", 0.0)),
                         confidence_score=confidence,
                         evidence=claim_evidence_items,
@@ -404,7 +419,16 @@ class VerificationPipeline:
                     stage=PipelineStage.RETRIEVAL,
                     status="failed",
                     duration_ms=0,
-                    details=f"Adapter failures: {', '.join(adapter_failures)}"
+                    details=f"Adapter failures: {', '.join(adapter_failures)}",
+                )
+            )
+        elif total_retrieved == 0:
+            pipeline_stages_list.append(
+                PipelineStageStatus(
+                    stage=PipelineStage.RETRIEVAL,
+                    status="degraded",
+                    duration_ms=0,
+                    details="No passages were retrieved; downstream reranking, NLI, and evidence scoring had no real evidence to process.",
                 )
             )
 
