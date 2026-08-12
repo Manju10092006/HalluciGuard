@@ -16,5 +16,7 @@ jobs:
           python-version: '3.11'
       - name: Install orchestration dependencies
         run: pip install -r orchestration/requirements.txt pytest
+      - name: Compile orchestration modules
+        run: python -m compileall -q orchestration
       - name: Run graph contract tests
         run: pytest orchestration/tests/test_graph_contract.py -q
