@@ -179,13 +179,13 @@ class ModelManager:
             self._evict_if_needed()
             settings = get_settings()
             t0 = time.monotonic()
+            ce_kwargs: Dict[str, Any] = {"device": self.device}
+            if not os.path.isdir(model_name) and not settings.allow_model_downloads:
+                ce_kwargs["model_kwargs"] = {"local_files_only": True}
+                ce_kwargs["tokenizer_kwargs"] = {"local_files_only": True}
+
             try:
-                model = CrossEncoder(
-                    model_name,
-                    device=self.device,
-                    automodel_args={"local_files_only": not settings.allow_model_downloads},
-                    tokenizer_args={"local_files_only": not settings.allow_model_downloads},
-                )
+                model = CrossEncoder(model_name, **ce_kwargs)
             except Exception as primary_err:
                 if self.device == "cuda":
                     logger.warning(
@@ -193,12 +193,8 @@ class ModelManager:
                         model_name,
                         primary_err,
                     )
-                    model = CrossEncoder(
-                        model_name,
-                        device="cpu",
-                        automodel_args={"local_files_only": not settings.allow_model_downloads},
-                        tokenizer_args={"local_files_only": not settings.allow_model_downloads},
-                    )
+                    ce_kwargs["device"] = "cpu"
+                    model = CrossEncoder(model_name, **ce_kwargs)
                 else:
                     raise
             elapsed = time.monotonic() - t0
@@ -210,22 +206,33 @@ class ModelManager:
 
     def load_nli_model(self, model_name: Optional[str] = None) -> Any:
         """Load and cache an NLI text-classification pipeline."""
-        model_name = model_name or get_settings().nli_model
+        settings = get_settings()
+        default_nli = settings.nli_model
+        if not model_name:
+            model_name = default_nli
+        elif not settings.allow_model_downloads and os.path.isdir(default_nli) and not os.path.isdir(model_name):
+            logger.info("Using configured local NLI model '%s' instead of remote '%s'", default_nli, model_name)
+            model_name = default_nli
+
         with self._lock:
             if model_name in self._models:
                 self._touch(model_name)
                 return self._models[model_name]
             self._evict_if_needed()
-            settings = get_settings()
             t0 = time.monotonic()
+
+            kwargs: Dict[str, Any] = {
+                "task": "text-classification",
+                "model": model_name,
+                "top_k": None,
+                "device": self._hf_device,
+            }
+            if not os.path.isdir(model_name) and not settings.allow_model_downloads:
+                kwargs["model_kwargs"] = {"local_files_only": True}
+                kwargs["tokenizer_kwargs"] = {"local_files_only": True}
+
             try:
-                local_only = not settings.allow_model_downloads
-                model = hf_pipeline(
-                    "text-classification",
-                    model=model_name,
-                    top_k=None,
-                    device=self._hf_device,
-                )
+                model = hf_pipeline(**kwargs)
             except Exception as primary_err:
                 if self.device == "cuda":
                     logger.warning(
@@ -233,12 +240,8 @@ class ModelManager:
                         model_name,
                         primary_err,
                     )
-                    model = hf_pipeline(
-                        "text-classification",
-                        model=model_name,
-                        top_k=None,
-                        device=-1,
-                    )
+                    kwargs["device"] = -1
+                    model = hf_pipeline(**kwargs)
                 else:
                     raise
             elapsed = time.monotonic() - t0
