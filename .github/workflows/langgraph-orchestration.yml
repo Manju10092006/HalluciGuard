@@ -19,4 +19,4 @@ jobs:
       - name: Compile orchestration modules
         run: python -m compileall -q orchestration
       - name: Run graph contract tests
-        run: pytest orchestration/tests/test_graph_contract.py -q
+        run: python -m pytest orchestration/tests/test_graph_contract.py -q
