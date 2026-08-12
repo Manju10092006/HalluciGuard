@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 from typing import Any, Literal, TypedDict
 
 AgentStatus = Literal["started", "completed", "failed", "skipped", "scheduled"]
-TerminalStatus = Literal["accepted", "corrected", "rejected", "human_review", "fallback"]
+TerminalStatus = Literal[
+    "accepted", "corrected", "rejected", "human_review", "fallback"
+]
 
 
 class AgentError(TypedDict, total=False):
@@ -105,7 +107,9 @@ def add_trace(
     return trace
 
 
-def add_error(state: HalluciGuardState, node: str, exc: BaseException, *, retryable: bool = False) -> list[AgentError]:
+def add_error(
+    state: HalluciGuardState, node: str, exc: BaseException, *, retryable: bool = False
+) -> list[AgentError]:
     errors = list(state.get("errors", []))
     errors.append(
         {

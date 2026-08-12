@@ -9,7 +9,12 @@ def test_graph_compiles():
 
 
 def test_state_trace_has_observability_fields():
-    trace = add_trace({"execution_id": "ex-1", "retry_count": 1}, "detector", "completed", latency_ms=7)
+    trace = add_trace(
+        {"execution_id": "ex-1", "retry_count": 1},
+        "detector",
+        "completed",
+        latency_ms=7,
+    )
     assert trace[0]["execution_id"] == "ex-1"
     assert trace[0]["node"] == "detector"
     assert trace[0]["latency_ms"] == 7
@@ -33,15 +38,27 @@ def test_judge_accept_route():
 
 
 def test_judge_correction_routes_to_corrector():
-    assert _judge_route({"judge": {"decision": "CORRECT"}, "retry_count": 0}) == "correct"
+    assert (
+        _judge_route({"judge": {"decision": "CORRECT"}, "retry_count": 0}) == "correct"
+    )
 
 
 def test_judge_retry_routes_back_to_verifier():
-    assert _judge_route({"judge": {"decision": "VERIFY_AGAIN"}, "retry_count": 0, "max_retries": 2}) == "verify_again"
+    assert (
+        _judge_route(
+            {"judge": {"decision": "VERIFY_AGAIN"}, "retry_count": 0, "max_retries": 2}
+        )
+        == "verify_again"
+    )
 
 
 def test_judge_retry_is_bounded():
-    assert _judge_route({"judge": {"decision": "VERIFY_AGAIN"}, "retry_count": 2, "max_retries": 2}) == "retry_exhausted"
+    assert (
+        _judge_route(
+            {"judge": {"decision": "VERIFY_AGAIN"}, "retry_count": 2, "max_retries": 2}
+        )
+        == "retry_exhausted"
+    )
 
 
 def test_judge_reject_route():
@@ -49,8 +66,14 @@ def test_judge_reject_route():
 
 
 def test_judge_human_escalation_route():
-    assert _judge_route({"judge": {"decision": "ESCALATE_HUMAN"}, "retry_count": 0}) == "human_escalate"
+    assert (
+        _judge_route({"judge": {"decision": "ESCALATE_HUMAN"}, "retry_count": 0})
+        == "human_escalate"
+    )
 
 
 def test_judge_abstain_routes_to_human_escalation():
-    assert _judge_route({"judge": {"decision": "ABSTAIN"}, "retry_count": 0}) == "human_escalate"
+    assert (
+        _judge_route({"judge": {"decision": "ABSTAIN"}, "retry_count": 0})
+        == "human_escalate"
+    )

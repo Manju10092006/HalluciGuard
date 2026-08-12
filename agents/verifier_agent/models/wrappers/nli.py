@@ -5,6 +5,7 @@ from models.model_manager import get_model_manager
 
 logger = logging.getLogger(__name__)
 
+
 class NLIWrapper(BaseModelWrapper):
     """
     Wrapper for Natural Language Inference models.
@@ -34,9 +35,16 @@ class NLIWrapper(BaseModelWrapper):
             mapped to their probability scores.
         """
         self.ensure_loaded()
-        fallback = {"entailment": 0.33, "contradiction": 0.33, "neutral": 0.34}
+        fallback = {
+            "entailment": 0.0,
+            "contradiction": 0.0,
+            "neutral": 1.0,
+            "degraded": True,
+        }
         if not self._is_available or self._pipeline is None:
-            logger.warning("Using fallback uniform scores for NLI.")
+            logger.warning(
+                "Using degraded neutral scores for NLI because the real model is unavailable."
+            )
             return fallback
 
         try:
@@ -59,11 +67,18 @@ class NLIWrapper(BaseModelWrapper):
             logger.error(f"Error in NLI predict: {e}")
             return fallback
 
-    def batch_predict(self, premise: str, hypotheses: List[str]) -> List[Dict[str, float]]:
+    def batch_predict(
+        self, premise: str, hypotheses: List[str]
+    ) -> List[Dict[str, float]]:
         """Batch predict for multiple hypotheses against a single premise."""
         self.ensure_loaded()
         if not self._is_available or self._pipeline is None:
-            fallback = {"entailment": 0.33, "contradiction": 0.33, "neutral": 0.34}
+            fallback = {
+                "entailment": 0.0,
+                "contradiction": 0.0,
+                "neutral": 1.0,
+                "degraded": True,
+            }
             return [fallback] * len(hypotheses)
 
         try:

@@ -10,9 +10,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from orchestration.graph import run_verification
+from orchestration.runtime_validation import validate_orchestration_startup
 
 
 async def main() -> None:
+    validation = validate_orchestration_startup()
+    print("RUNTIME VALIDATION:", json.dumps(validation, indent=2, default=str))
     cases = [
         ("What is the capital of France?", "The capital of France is Tokyo."),
         ("What is the capital of France?", "The capital of France is Paris."),
@@ -28,13 +31,22 @@ async def main() -> None:
         print(f"FINAL: {result.get('final_response')}")
         print(f"RETRIES: {result.get('retry_count', 0)}")
         print("TRACE:", " -> ".join(str(node) for node in nodes))
-        print(json.dumps({
-            "detector": result.get("detector"),
-            "verifier_claims": len((result.get("verifier") or {}).get("claim_evidence", [])),
-            "judge_decision": (result.get("judge") or {}).get("decision"),
-            "corrector_called": bool(result.get("corrector")),
-            "memory_records": (result.get("memory") or {}).get("count", 0),
-        }, indent=2, default=str))
+        print(
+            json.dumps(
+                {
+                    "detector": result.get("detector"),
+                    "verifier_claims": len(
+                        (result.get("verifier") or {}).get("claim_evidence", [])
+                    ),
+                    "judge_decision": (result.get("judge") or {}).get("decision"),
+                    "corrector_called": bool(result.get("corrector")),
+                    "memory_records": (result.get("memory") or {}).get("count", 0),
+                    "errors": result.get("errors", []),
+                },
+                indent=2,
+                default=str,
+            )
+        )
 
 
 if __name__ == "__main__":

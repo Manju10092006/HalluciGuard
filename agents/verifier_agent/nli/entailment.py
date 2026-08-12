@@ -73,11 +73,11 @@ class NLIEngine:
     def _load_model(self) -> None:
         if self.pipeline is not None or not self._is_available:
             return
-            
+
         if self._load_attempts >= 2:
             self._is_available = False
             return
-            
+
         self._load_attempts += 1
 
         try:
@@ -87,16 +87,24 @@ class NLIEngine:
             logger.warning("transformers not installed. NLIEngine falling back.")
             self._is_available = False
         except Exception as e:
-            logger.warning(f"Error loading NLI model {self.model_name}: {e}. Falling back.")
+            logger.warning(
+                f"Error loading NLI model {self.model_name}: {e}. Falling back."
+            )
             if self._load_attempts >= 2:
                 self._is_available = False
 
     def _get_id2label(self) -> Optional[Dict[int, str]]:
-        if self.pipeline and hasattr(self.pipeline, "model") and hasattr(self.pipeline.model, "config"):
+        if (
+            self.pipeline
+            and hasattr(self.pipeline, "model")
+            and hasattr(self.pipeline.model, "config")
+        ):
             return getattr(self.pipeline.model.config, "id2label", None)
         return None
 
-    def classify(self, claim: str, evidence: str, model_name: str | None = None) -> Dict[str, Any]:
+    def classify(
+        self, claim: str, evidence: str, model_name: str | None = None
+    ) -> Dict[str, Any]:
         """
         Classify the entailment relationship between claim (Hypothesis) and evidence (Premise).
         Follows standard FEVER/SciFact ordering: Premise=evidence, Hypothesis=claim.
@@ -110,27 +118,35 @@ class NLIEngine:
 
         fallback = {
             "label": EntailmentLabel.NEUTRAL,
-            "entailment_score": 0.33,
-            "contradiction_score": 0.33,
-            "neutral_score": 0.34,
+            "entailment_score": 0.0,
+            "contradiction_score": 0.0,
+            "neutral_score": 1.0,
             "degraded": True,
+            "error": "nli_model_unavailable",
         }
 
         if not self._is_available or self.pipeline is None:
-            logger.warning("Returning fallback results from classify (model %s unavailable or not loaded)", self.model_name)
+            logger.warning(
+                "Returning degraded neutral result from classify (model %s unavailable or not loaded)",
+                self.model_name,
+            )
             return fallback
 
         try:
             # FEVER / SciFact sentence pair pairing: Premise=evidence, Hypothesis=claim
-            logger.debug("[NLI Pipeline Input] Premise(Evidence): %s | Hypothesis(Claim): %s", evidence[:100], claim[:100])
-            
+            logger.debug(
+                "[NLI Pipeline Input] Premise(Evidence): %s | Hypothesis(Claim): %s",
+                evidence[:100],
+                claim[:100],
+            )
+
             result = self.pipeline({"text": evidence, "text_pair": claim})
             if result and isinstance(result[0], list):
                 result = result[0]
 
             id2label = self._get_id2label()
             logger.debug("[NLI Model Config] id2label: %s", id2label)
-            
+
             scores = _normalize_nli_scores(result, id2label)
 
             entailment = round(scores["entailment"], 6)
@@ -138,7 +154,13 @@ class NLIEngine:
             neutral = round(scores["neutral"], 6)
 
             prob_sum = round(entailment + contradiction + neutral, 4)
-            logger.debug("[NLI Softmax Probabilities] E=%.4f, C=%.4f, N=%.4f (sum=%.4f)", entailment, contradiction, neutral, prob_sum)
+            logger.debug(
+                "[NLI Softmax Probabilities] E=%.4f, C=%.4f, N=%.4f (sum=%.4f)",
+                entailment,
+                contradiction,
+                neutral,
+                prob_sum,
+            )
 
             if entailment > contradiction and entailment > neutral:
                 final_label = EntailmentLabel.ENTAILMENT
@@ -156,8 +178,16 @@ class NLIEngine:
             }
 
         except Exception as e:
-            logger.warning("Error during NLI classification with model %s: %s. Returning fallback.", self.model_name, e)
-            return fallback
+            logger.warning(
+                "Error during NLI classification with model %s: %s. Returning degraded neutral result.",
+                self.model_name,
+                e,
+            )
+            degraded = dict(fallback)
+            degraded["error"] = (
+                f"nli_inference_failed: {type(e).__name__}: {str(e)[:200]}"
+            )
+            return degraded
 
     def predict(self, claim: str, evidence: str) -> EntailmentLabel:
         """Helper returning top EntailmentLabel."""
@@ -184,7 +214,10 @@ class NLIEngine:
         self._load_model()
 
         if not self._is_available or self.pipeline is None:
-            logger.warning("Returning fallback results from batch_classify (model %s unavailable)", self.model_name)
+            logger.warning(
+                "Returning degraded neutral results from batch_classify (model %s unavailable)",
+                self.model_name,
+            )
             return [self.classify(claim, ev) for ev in evidences]
 
         try:
@@ -219,5 +252,9 @@ class NLIEngine:
                 )
             return outputs
         except Exception as e:
-            logger.warning("Error during batched NLI classification with model %s: %s. Falling back.", self.model_name, e)
+            logger.warning(
+                "Error during batched NLI classification with model %s: %s. Falling back.",
+                self.model_name,
+                e,
+            )
             return [self.classify(claim, ev) for ev in evidences]
