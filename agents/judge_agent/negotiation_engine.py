@@ -46,8 +46,8 @@ class NegotiationEngine:
                 "target_sources": missing_sources,
                 "search_depth": "deep",
                 "max_results_per_claim": 10,
-                "require_primary_sources": domain_policy.requires_primary_sources,
-                "freshness_constraint": domain_policy.freshness_sensitivity
+                "require_primary_sources": getattr(domain_policy, 'requires_primary_sources', True),
+                "freshness_constraint": getattr(domain_policy, 'freshness_sensitivity', 0.5)
             },
             priority="HIGH",
             reasoning=f"Evidence insufficient for {domain_policy.domain_name} governance. "
@@ -116,3 +116,18 @@ class NegotiationEngine:
             reasoning=escalation_reason,
             timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         )
+
+    def generate_verifier_instruction(
+        self,
+        domain_policy: DomainPolicy,
+        evidence_completeness: str,
+        unverified_claims: List[str],
+        current_sources: List[str]
+    ) -> NegotiationMessage:
+        return self.request_reverification(
+            domain_policy=domain_policy,
+            missing_sources=getattr(domain_policy, 'primary_sources', ["general_kb"]),
+            unverified_claims=unverified_claims
+        )
+
+MultiAgentNegotiationEngine = NegotiationEngine

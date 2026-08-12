@@ -39,8 +39,8 @@ class JudgeAgent:
         self.memory_engine = MemoryIntelligenceEngine()
 
         self.nli_engine = NLIEngine(
-            model_name=self.config.default_nli_model,
-            use_hf=self.config.use_huggingface,
+            model_name=getattr(self.config, 'default_nli_model', getattr(self.config, 'nli_model', 'cross-encoder/nli-deberta-v3-base')),
+            use_hf=getattr(self.config, 'use_huggingface', True),
         )
         self.calibrator = DynamicConfidenceCalibrator(config=self.config)
         self.decision_engine = DecisionIntelligenceEngine(config=self.config)
@@ -249,7 +249,7 @@ class JudgeAgent:
         except Exception as exc:
             logger.error("Error during Judge Agent evaluation: %s", exc, exc_info=True)
             self._consecutive_errors += 1
-            if self._consecutive_errors >= self.config.circuit_breaker_error_threshold:
+            if self._consecutive_errors >= getattr(self.config, 'circuit_breaker_error_threshold', 5):
                 self._circuit_open = True
                 logger.error("Circuit breaker triggered! Opening circuit.")
             return self._graceful_fallback(user_query, draft_response, str(exc))
