@@ -1,12 +1,14 @@
+"""
+Detector Agent Models — Pydantic I/O Schemas.
+
+Defines the input and output data structures for the HalluciGuard Detector Agent.
+The external interface (DetectionInput, DetectionResult, RiskLevel, NextAction)
+is preserved exactly for backward compatibility with Verifier/Judge/Corrector agents.
+"""
+
 from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
-from .utils import init_dll_paths
-init_dll_paths()
-
-from .signals.entropy import EntropyMetrics
-from .signals.semantic_similarity import SemanticSimilarityMetrics
-from .signals.self_consistency import SelfConsistencyMetrics
 
 
 class RiskLevel(str, Enum):
@@ -38,42 +40,12 @@ class DetectionInput(BaseModel):
     )
 
 
-class TokenProbabilityMetrics(BaseModel):
-    """Structured metrics returned by the Token Probability computation module."""
-    avg_logprob: float = Field(
-        ...,
-        description="Average token log probability across response sequence."
-    )
-    min_logprob: float = Field(
-        ...,
-        description="Minimum (worst-case dip) token log probability in response sequence."
-    )
-    low_confidence_ratio: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Ratio of generated tokens whose log probability fell below confidence threshold."
-    )
-
-
-class SignalMetricsDetail(BaseModel):
-    """Detailed per-signal metrics breakdown collected during hallucination detection."""
-    token_probability: Optional[TokenProbabilityMetrics] = Field(
-        default=None, description="Metrics from Token Probability signal."
-    )
-    entropy: Optional[EntropyMetrics] = Field(
-        default=None, description="Metrics from Predictive Entropy signal."
-    )
-    semantic_similarity: Optional[SemanticSimilarityMetrics] = Field(
-        default=None, description="Metrics from Semantic Similarity signal."
-    )
-    self_consistency: Optional[SelfConsistencyMetrics] = Field(
-        default=None, description="Metrics from Self-Consistency signal."
-    )
-
-
 class DetectionResult(BaseModel):
-    """Structured output returned by the Detector Agent."""
+    """Structured output returned by the Detector Agent.
+    
+    This schema is the external contract between the Detector and downstream
+    agents (Verifier, Judge, Corrector). It must be preserved exactly.
+    """
     confidence_score: float = Field(
         ...,
         ge=0.0,
@@ -98,9 +70,9 @@ class DetectionResult(BaseModel):
         description="Recommended action for the HalluciGuard pipeline (Accept or Verify).",
         examples=[NextAction.ACCEPT]
     )
-    metrics: Optional[SignalMetricsDetail] = Field(
-        default=None,
-        description="Detailed breakdown of metrics collected from all active signal modules."
+    model_source: str = Field(
+        default="halueval-distilbert",
+        description="Identifier of the model that produced this result."
     )
 
     class Config:
@@ -109,7 +81,8 @@ class DetectionResult(BaseModel):
                 "confidence_score": 0.95,
                 "hallucination_probability": 0.05,
                 "risk_level": "LOW",
-                "next_action": "Accept"
+                "next_action": "Accept",
+                "model_source": "halueval-distilbert"
             }
         }
 
@@ -118,10 +91,5 @@ __all__ = [
     "RiskLevel",
     "NextAction",
     "DetectionInput",
-    "TokenProbabilityMetrics",
-    "EntropyMetrics",
-    "SemanticSimilarityMetrics",
-    "SelfConsistencyMetrics",
-    "SignalMetricsDetail",
     "DetectionResult",
 ]
