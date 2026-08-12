@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import sys
+import types
+
+decision_engine_stub = types.ModuleType("decision_engine")
+decision_engine_stub.DecisionIntelligenceEngine = object
+sys.modules.setdefault("decision_engine", decision_engine_stub)
 from judge_agent import JudgeAgent
 
 
