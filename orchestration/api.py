@@ -35,14 +35,19 @@ async def verify(request: VerificationRequest) -> dict:
             request_id=request.request_id,
         )
         return {
+            "execution_id": result.get("execution_id"),
             "request_id": result.get("request_id"),
             "final_response": result.get("final_response", result.get("llm_response")),
+            "terminal_status": result.get("terminal_status"),
+            "verification_status": result.get("verification_status"),
             "detector": result.get("detector"),
             "verifier": result.get("verifier"),
             "judge": result.get("judge"),
             "corrector": result.get("corrector"),
             "memory": result.get("memory"),
             "retry_count": result.get("retry_count", 0),
+            "errors": result.get("errors", []),
+            "audit": result.get("audit", {}),
             "trace": result.get("trace", []),
         }
     except Exception as exc:
