@@ -1,0 +1,15 @@
+# LangGraph supervisor
+langgraph>=1.0.0,<2.0.0
+langchain-core>=1.0.0,<2.0.0
+
+# Verification Engine API
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+
+# The five agents retain their own requirements; install those as well:
+# agents/detector_agent/requirements.txt
+# agents/verifier_agent/requirements.txt
+# agents/judge_agent/requirements.txt
+# agents/corrector_agent/requirements.txt
+# agents/memory_agent/requirements.txt
