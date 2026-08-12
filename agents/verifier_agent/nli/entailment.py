@@ -98,7 +98,8 @@ class NLIEngine:
 
     def classify(self, claim: str, evidence: str, model_name: str | None = None) -> Dict[str, Any]:
         """
-        Classify the entailment relationship between claim and evidence.
+        Classify the entailment relationship between claim (Hypothesis) and evidence (Premise).
+        Follows standard FEVER/SciFact ordering: Premise=evidence, Hypothesis=claim.
         """
         if model_name and model_name != self.model_name:
             self.model_name = model_name
@@ -120,18 +121,25 @@ class NLIEngine:
             return fallback
 
         try:
+            # FEVER / SciFact sentence pair pairing: Premise=evidence, Hypothesis=claim
+            logger.debug("[NLI Pipeline Input] Premise(Evidence): %s | Hypothesis(Claim): %s", evidence[:100], claim[:100])
+            
             result = self.pipeline({"text": evidence, "text_pair": claim})
             if result and isinstance(result[0], list):
                 result = result[0]
 
             id2label = self._get_id2label()
+            logger.debug("[NLI Model Config] id2label: %s", id2label)
+            
             scores = _normalize_nli_scores(result, id2label)
 
-            entailment = scores["entailment"]
-            contradiction = scores["contradiction"]
-            neutral = scores["neutral"]
+            entailment = round(scores["entailment"], 6)
+            contradiction = round(scores["contradiction"], 6)
+            neutral = round(scores["neutral"], 6)
 
-            # Heuristic / Threshold label assignment
+            prob_sum = round(entailment + contradiction + neutral, 4)
+            logger.debug("[NLI Softmax Probabilities] E=%.4f, C=%.4f, N=%.4f (sum=%.4f)", entailment, contradiction, neutral, prob_sum)
+
             if entailment > contradiction and entailment > neutral:
                 final_label = EntailmentLabel.ENTAILMENT
             elif contradiction > entailment and contradiction > neutral:

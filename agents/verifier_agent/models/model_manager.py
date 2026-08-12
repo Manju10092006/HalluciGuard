@@ -219,13 +219,12 @@ class ModelManager:
             settings = get_settings()
             t0 = time.monotonic()
             try:
+                local_only = not settings.allow_model_downloads
                 model = hf_pipeline(
                     "text-classification",
                     model=model_name,
                     top_k=None,
                     device=self._hf_device,
-                    model_kwargs={"local_files_only": not settings.allow_model_downloads},
-                    tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
                 )
             except Exception as primary_err:
                 if self.device == "cuda":
@@ -239,8 +238,6 @@ class ModelManager:
                         model=model_name,
                         top_k=None,
                         device=-1,
-                        model_kwargs={"local_files_only": not settings.allow_model_downloads},
-                        tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
                     )
                 else:
                     raise
