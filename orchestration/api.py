@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .graph import run_verification
+from .runtime_validation import validate_orchestration_startup
 
 
 class VerificationRequest(BaseModel):
@@ -22,7 +23,13 @@ app = FastAPI(
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "engine": "langgraph", "agents": ["detector", "verifier", "judge", "corrector", "memory"]}
+    validation = validate_orchestration_startup()
+    return {
+        "status": "ok" if validation["ok"] else "degraded",
+        "engine": "langgraph",
+        "agents": ["detector", "verifier", "judge", "corrector", "memory"],
+        "runtime_validation": validation,
+    }
 
 
 @app.post("/verify")
@@ -35,15 +42,23 @@ async def verify(request: VerificationRequest) -> dict:
             request_id=request.request_id,
         )
         return {
+            "execution_id": result.get("execution_id"),
             "request_id": result.get("request_id"),
             "final_response": result.get("final_response", result.get("llm_response")),
+            "terminal_status": result.get("terminal_status"),
+            "verification_status": result.get("verification_status"),
             "detector": result.get("detector"),
             "verifier": result.get("verifier"),
             "judge": result.get("judge"),
             "corrector": result.get("corrector"),
             "memory": result.get("memory"),
             "retry_count": result.get("retry_count", 0),
+            "errors": result.get("errors", []),
+            "audit": result.get("audit", {}),
             "trace": result.get("trace", []),
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Verification engine failed: {type(exc).__name__}: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=f"Verification engine failed: {type(exc).__name__}: {exc}",
+        ) from exc

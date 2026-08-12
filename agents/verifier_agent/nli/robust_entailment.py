@@ -9,7 +9,9 @@ from models.model_manager import get_model_manager
 logger = logging.getLogger(__name__)
 
 
-def _canonical_label(raw_label: Any, id2label: Optional[Dict[Any, str]] = None) -> Optional[str]:
+def _canonical_label(
+    raw_label: Any, id2label: Optional[Dict[Any, str]] = None
+) -> Optional[str]:
     label = str(raw_label or "").strip().lower()
     if "entail" in label or label in {"supports", "support"}:
         return "entailment"
@@ -100,7 +102,9 @@ class NLIEngine:
         try:
             self.pipeline = get_model_manager().load_nli_model(self.model_name)
         except Exception as exc:
-            logger.warning("NLI model unavailable (%s); using neutral fallback", exc)
+            logger.warning(
+                "NLI model unavailable (%s); using degraded neutral result", exc
+            )
             self._is_available = False
 
     def _get_id2label(self) -> Optional[Dict[Any, str]]:
@@ -115,9 +119,13 @@ class NLIEngine:
             "entailment_score": 0.0,
             "contradiction_score": 0.0,
             "neutral_score": 1.0,
+            "degraded": True,
+            "error": "nli_model_unavailable_or_failed",
         }
 
-    def classify(self, claim: str, evidence: str, model_name: str | None = None) -> Dict[str, Any]:
+    def classify(
+        self, claim: str, evidence: str, model_name: str | None = None
+    ) -> Dict[str, Any]:
         if model_name and model_name != self.model_name:
             self.model_name = model_name
             self.pipeline = None
@@ -164,8 +172,13 @@ class NLIEngine:
             outputs = []
             for raw_item in raw_batch:
                 scores = _normalize_scores(_flatten_predictions(raw_item), id2label)
-                outputs.append(_decision(scores) if sum(scores.values()) > 0 else self._neutral())
+                outputs.append(
+                    _decision(scores) if sum(scores.values()) > 0 else self._neutral()
+                )
             return outputs
         except Exception as exc:
             logger.warning("Batched NLI failed; retrying individually: %s", exc)
-            return [self.classify(claim, evidence, model_name=self.model_name) for evidence in evidences]
+            return [
+                self.classify(claim, evidence, model_name=self.model_name)
+                for evidence in evidences
+            ]
