@@ -9,7 +9,7 @@ import os
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -24,10 +24,69 @@ FALLBACK_MODEL_PATH = "artifacts/halueval-detector"
 from agents.detector_agent.halueval_dataset import format_detector_input
 
 
+def _looks_like_local_path(value: str) -> bool:
+    """Return True when a model reference should be validated as a filesystem path."""
+    path = Path(value).expanduser()
+    return (
+        value.startswith((".", "/", "~"))
+        or os.sep in value
+        or (os.altsep is not None and os.altsep in value)
+        or path.exists()
+    )
+
+
+def validate_halueval_model_reference(model_ref: str) -> str:
+    """Validate and normalize a HaluEval model reference.
+
+    Local model directories must contain the standard Hugging Face files created
+    by ``halueval_trainer.py``. Non-path values are treated as Hugging Face Hub
+    model identifiers and are left for ``transformers.from_pretrained`` to
+    validate at load time. This keeps the production path real while supporting
+    externally hosted artifacts without committing model binaries to Git.
+    """
+    if not model_ref or not model_ref.strip():
+        raise ValueError(
+            "HALUEVAL_MODEL_PATH is empty; set it to a local model directory or Hugging Face model id."
+        )
+
+    if model_ref.startswith("hf://"):
+        return model_ref.removeprefix("hf://")
+
+    if not _looks_like_local_path(model_ref):
+        return model_ref
+
+    resolved = Path(model_ref).expanduser().resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(
+            f"HaluEval detector model directory not found at: {resolved}\n"
+            "Set HALUEVAL_MODEL_PATH to a valid fine-tuned model directory, "
+            "or train/download the artifact with:\n"
+            "  python -m agents.detector_agent.halueval_trainer --output-dir artifacts/halueval-detector-final"
+        )
+    if not resolved.is_dir():
+        raise FileNotFoundError(
+            f"HaluEval detector model path is not a directory: {resolved}"
+        )
+
+    required_any_weight = ["model.safetensors", "pytorch_model.bin"]
+    missing = [name for name in ("config.json",) if not (resolved / name).exists()]
+    if not any((resolved / name).exists() for name in required_any_weight):
+        missing.append("model.safetensors or pytorch_model.bin")
+    if not any((resolved / name).exists() for name in ("tokenizer.json", "vocab.txt")):
+        missing.append("tokenizer.json or vocab.txt")
+    if missing:
+        raise FileNotFoundError(
+            f"Invalid HaluEval detector model directory: {resolved}\n"
+            f"Missing required Hugging Face artifact(s): {', '.join(missing)}\n"
+            "Regenerate the model with agents.detector_agent.halueval_trainer or point HALUEVAL_MODEL_PATH to the complete artifact."
+        )
+    return str(resolved)
+
 
 @dataclass
 class InferenceResult:
     """Raw inference output from the HaluEval model."""
+
     hallucination_probability: float
     confidence_score: float
     predicted_label: int  # 0 = NO_HALLUCINATION, 1 = HALLUCINATION
@@ -67,46 +126,38 @@ class HaluEvalInference:
 
         env_path = os.environ.get("HALUEVAL_MODEL_PATH")
         if env_path:
-            candidates.insert(0, env_path)
+            resolved = validate_halueval_model_reference(env_path)
+            logger.info(
+                "Resolved HaluEval model reference from HALUEVAL_MODEL_PATH: %s",
+                resolved,
+            )
+            return resolved
 
         for candidate in candidates:
-            resolved = os.path.abspath(candidate)
-            if os.path.exists(resolved) and os.path.isdir(resolved):
-                config_file = os.path.join(resolved, "config.json")
-                if os.path.exists(config_file):
-                    logger.info(f"Resolved model path: {resolved}")
-                    return resolved
+            try:
+                resolved = validate_halueval_model_reference(candidate)
+            except FileNotFoundError:
+                continue
+            logger.info("Resolved HaluEval model reference: %s", resolved)
+            return resolved
 
         return os.path.abspath(DEFAULT_MODEL_PATH)
-
 
     def load(self) -> None:
         """Load model and tokenizer from disk."""
         if self._loaded:
             return
 
-        if not os.path.exists(self.model_path):
-            raise FileNotFoundError(
-                f"HaluEval detector model not found at: {self.model_path}\n"
-                f"Run the HaluEval training command first:\n"
-                f"  python -m agents.detector_agent.halueval_trainer\n"
-                f"Or set HALUEVAL_MODEL_PATH environment variable."
-            )
-
-        config_file = os.path.join(self.model_path, "config.json")
-        if not os.path.exists(config_file):
-            raise FileNotFoundError(
-                f"Model config.json not found in: {self.model_path}\n"
-                f"The directory exists but does not contain a valid model.\n"
-                f"Run the training command to generate the model."
-            )
+        self.model_path = validate_halueval_model_reference(self.model_path)
 
         logger.info(f"Loading HaluEval model from: {self.model_path}")
         print(f"[HaluEval] Loading model from: {self.model_path}")
         print(f"[HaluEval] Device: {self.device}")
 
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
+        self._model = AutoModelForSequenceClassification.from_pretrained(
+            self.model_path
+        )
         self._model.to(self.device)
         self._model.eval()
         self._loaded = True
@@ -164,7 +215,6 @@ class HaluEvalInference:
             predicted_label_name=label_name,
         )
 
-
     def is_loaded(self) -> bool:
         """Check if the model is currently loaded."""
         return self._loaded
@@ -178,8 +228,14 @@ if __name__ == "__main__":
     test_cases = [
         ("What is the capital of France?", "The capital of France is Paris."),
         ("What is the capital of France?", "The capital of France is Tokyo, Japan."),
-        ("Who wrote Romeo and Juliet?", "Romeo and Juliet was written by William Shakespeare."),
-        ("Who wrote Romeo and Juliet?", "Romeo and Juliet was written by Albert Einstein in 1920."),
+        (
+            "Who wrote Romeo and Juliet?",
+            "Romeo and Juliet was written by William Shakespeare.",
+        ),
+        (
+            "Who wrote Romeo and Juliet?",
+            "Romeo and Juliet was written by Albert Einstein in 1920.",
+        ),
     ]
 
     for query, response in test_cases:
