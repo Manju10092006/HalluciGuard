@@ -1,220 +1,201 @@
-# HalluciGuard Judge Agent — AI Decision Intelligence Platform
+# ⚖️ HalluciGuard Judge Agent
 
-> **Enterprise AI Operating System & Chief Decision Officer for Hallucination Governance**
+> **Governance, risk and workflow decision layer for the HalluciGuard trust architecture**
 
----
+The Judge Agent is designed to answer a different question from the Detector and Verifier:
 
-## 📌 Executive Summary
+> **“Given the evidence, system health, domain policy and risk, what should HalluciGuard do next?”**
 
-The **HalluciGuard Judge Agent** is the **Chief Decision Officer (CDO)** of the HalluciGuard multi-agent platform. 
-
-Unlike traditional decision engines driven by basic threshold rules or score calculations, the Judge Agent behaves as an **AI Operating System**. It does **not** duplicate the responsibilities of downstream agents (Detector, Verifier, Memory, or Corrector). Instead, it **governs the entire verification workflow**, evaluates evidence quality, system health, policy compliance, multi-source consensus, and domain-specific safety risks before issuing a reproducible, audit-ready decision.
+It is intended to be the **governance layer**, not another search engine and not another hallucination detector.
 
 ---
 
-## 🏛 Core Architectural Philosophy
+## 🧭 Intended Role
 
-| Principle | Description |
-|---|---|
-| **No Duplicate Scoring** | Does **not** re-calculate hallucination probability (Detector's job) or re-fetch evidence (Verifier's job). |
-| **Trust Reasoning** | Evaluates whether the system, evidence, and verification process itself can be trusted. |
-| **Domain Governance** | Enforces behavioral policies per domain (`Healthcare`, `Finance`, `Cybersecurity`, `Law`, `General Knowledge`, `Entertainment`). |
-| **12-Phase Pipeline** | Executes an end-to-end governance pipeline from runtime health inspection to reproducible audit trail generation. |
-| **Claim-Level Granularity** | Automatically extracts claims, aligns evidence, and computes per-claim hallucination risk scores ($0.0\%$–$100.0\%$). |
+```text
+Detector
+   ↓
+Verifier
+   ↓
+Judge
+   ├── ACCEPT
+   ├── CORRECT
+   ├── VERIFY_AGAIN
+   ├── REJECT
+   ├── ESCALATE_HUMAN
+   └── ABSTAIN
+```
+
+The Judge can consider:
+
+- evidence quality;
+- claim coverage;
+- source authority;
+- conflicts;
+- multi-source consensus;
+- historical memory signals;
+- domain policy;
+- runtime health;
+- claim criticality;
+- risk;
+- workflow state.
 
 ---
 
-## 🔄 The 12-Phase Decision Pipeline
+## 🏛 Architecture
 
-```
-  1. GOVERNANCE CONTEXT       → Load domain-specific policy (strictness, required source tiers)
-  2. CLAIM EXTRACTION         → Segment response into claims & align with evidence
-  3. RUNTIME INSPECTION       → Validate pipeline health (API failures, degraded state)
-  4. EVIDENCE GOVERNANCE      → Assess evidence quality, independence & source authority
-  5. COVERAGE ANALYSIS        → Identify ungrounded or partially covered claims
-  6. CONFLICT RESOLUTION      → Classify conflicts (Direct, Numeric, Temporal, Safety)
-  7. CONSENSUS ANALYSIS       → Evaluate agreement among independent evidence sources
-  8. MEMORY INTELLIGENCE      → Query historical hallucination patterns & source reliability
-  9. RISK ASSESSMENT          → Compute non-numeric, policy-driven risk level
- 10. DECISION REASONING       → Execute governance logic to select final verdict
- 11. WORKFLOW ORCHESTRATION   → Determine next action & target agent (Corrector, Verifier, User, Human)
- 12. EXPLAINABILITY & AUDIT   → Generate human-readable reasoning chain & audit record
+The current implementation contains a substantial decision-intelligence subsystem with modules for evidence governance, coverage, consensus, conflict analysis, risk, runtime inspection, memory intelligence, workflow routing, explainability and audit trails.
+
+The central decision engine is:
+
+```text
+agents/judge_agent/decision_intelligence.py
 ```
 
----
+The intended governance flow is:
 
-## 📂 File Architecture (29 Subsystems)
-
-All files reside inside `agents/judge_agent/`:
-
-### 🎯 Core Decision Engine & Governance
-- **`decision_intelligence.py`**: The central orchestrator (Chief Decision Officer) executing the 12-phase pipeline.
-- **`decision_policies.py`**: Domain policy registry defining governance behavior per domain (`Healthcare`, `Finance`, `Cybersecurity`, etc.).
-- **`domain_policies.py`**: Policy definitions, source tier requirements, and strictness levels.
-- **`decision_engine.py`**: High-level interface wrapper for backward compatibility.
-- **`judge_agent.py`**: Multi-agent message handler and orchestration adapter.
-
-### 🛡 Evidence, Coverage & Source Authority
-- **`evidence_governance.py`**: Evaluates evidence quality (`AUTHORITATIVE`, `STRONG`, `MODERATE`, `WEAK`, `ABSENT`).
-- **`evidence_intelligence.py`**: Evidence set analysis and gap identification.
-- **`source_reliability.py`**: Classifies sources into authority tiers (`OFFICIAL_STANDARD`, `PEER_REVIEWED`, `ENTERPRISE_VENDOR`, `COMMUNITY`, `UNVERIFIED`).
-- **`source_consensus.py`**: Multi-source agreement and independence analyzer.
-- **`consensus_analyzer.py`**: Source consensus scoring and discrepancy reporting.
-- **`coverage_analyzer.py`**: Identifies unverified, partially covered, or fully covered claims.
-
-### 🔍 Conflict, NLI & Risk Reasoning
-- **`conflict_resolver.py`**: Detects and categorizes conflict types (`DIRECT_REFUTATION`, `NUMERIC_MISMATCH`, `TEMPORAL_MISMATCH`, `SAFETY_VIOLATION`).
-- **`contradiction_analyzer.py`**: Refutation keyword, negation, and claim-evidence contradiction analysis.
-- **`nli_engine.py`**: Natural Language Inference engine with HuggingFace pipeline and robust heuristic fallback.
-- **`claim_criticality.py`**: Assesses claim domain risk (e.g., drug dosage, revenue figures, CVEs).
-- **`risk_intelligence.py`**: Policy-driven risk evaluator (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFORMATIONAL`).
-
-### 🧠 System Health, Memory & Multi-Agent Routing
-- **`runtime_inspector.py`**: Pipeline health check before trusting results (`HEALTHY`, `DEGRADED`, `CRITICAL_FAILURE`).
-- **`memory_intelligence.py`**: Integrates Memory Agent signals, recurring hallucination flags, and historical outcomes.
-- **`memory_integration.py`**: Adapter layer for querying long-term agent memory.
-- **`workflow_orchestrator.py`**: Routes decisions to target agents (`CORRECTOR`, `VERIFIER`, `HUMAN_REVIEWER`, `USER`).
-- **`negotiation_engine.py`**: Generates structured, traceable cross-agent inter-process messages.
-- **`confidence_calibrator.py`**: Calibrates multi-agent confidence signals.
-
-### 📜 Explainability, Audit & Interface
-- **`explainability.py`**: Generates step-by-step reasoning chains and alternatives considered.
-- **`audit_trail.py`**: Produces immutable, audit-ready decision records with UUIDs and timestamps.
-- **`config.py`**: Centralized enums (`Decision`, `Severity`, `EvidenceQuality`, `SystemHealth`, `SourceTier`) and dataclasses.
-
-### 🌐 Dashboard, Benchmarks & Simulation
-- **`app.py`**: Enterprise Flask web dashboard with live real-time simulation UI.
-- **`benchmark.py`**: 11-scenario ground-truth evaluation suite across 6 domains (100% pass rate).
-- **`simulator.py`**: Interactive CLI simulator with 8 preset domain scenarios.
-- **`test_judge.py`**: Comprehensive unit test suite.
-
----
-
-## ⚡ Decisions & Verdicts Summary
-
-The Judge Agent issues one of 6 primary decisions:
-
-| Decision | Icon | Trigger Condition | Target Action |
-|---|:---:|---|---|
-| **`ACCEPT`** | ✅ | Evidence is strong, safe to release, low risk | Release response to `USER` |
-| **`CORRECT`** | 🔧 | Fixable hallucinations or numeric mismatches detected | Route to `CORRECTOR` agent |
-| **`VERIFY_AGAIN`** | 🔄 | Evidence is insufficient, unverified, or lacks multi-source consensus | Route to `VERIFIER` agent for expanded search |
-| **`REJECT`** | 🛑 | High hallucination risk with no evidence, or unfixable claims | Block response and output safe fallback to `USER` |
-| **`ESCALATE_HUMAN`** | 👨‍⚕️ | Safety-critical contradiction (e.g., drug dosage/contraindication) | Escalate to `HUMAN_REVIEWER` |
-| **`ABSTAIN`** | ⏸️ | Pipeline runtime failure or empty response | Terminate workflow with explanation |
-
----
-
-## 🚀 Quick Start Guide
-
-### 1. Prerequisites
-Ensure Python 3.9+ is installed:
-```bash
-pip install flask
-```
-
-### 2. Launch the Web Dashboard
-```bash
-python app.py
-```
-Open your browser at **[http://127.0.0.1:5000](http://127.0.0.1:5000)**.
-
-### 3. Run the Benchmark Suite (11 Tests)
-```bash
-python benchmark.py
-```
-
-### 4. Run Interactive CLI Simulator
-```bash
-python simulator.py
-```
-
-### 5. Run Unit Tests
-```bash
-python test_judge.py
+```mermaid
+flowchart TD
+    V[Verifier Output] --> G[Evidence Governance]
+    G --> C[Coverage Analysis]
+    C --> X[Conflict Analysis]
+    X --> S[Source Consensus]
+    S --> R[Risk + Policy]
+    R --> D[Decision Reasoning]
+    D --> W[Workflow Action]
+    W --> A[Audit / Explainability]
 ```
 
 ---
 
-## 🔌 API Reference (`/evaluate`)
+## 📌 Important Boundary
 
-### POST `/evaluate`
+Judge is **not currently part of the active production graph**.
 
-**Request Body:**
-```json
-{
-  "user_query": "What is the recommended dosage of ibuprofen for adults?",
-  "draft_response": "The recommended adult dosage of ibuprofen is 200-400mg every 4-6 hours. Do not exceed 1200mg per day OTC.",
-  "domain": "Healthcare",
-  "detector_output": {
-    "hallucination_probability": 0.10,
-    "confidence_score": 0.90
-  },
-  "verifier_output": {
-    "claim_evidence_pairs": [
-      {
-        "claim": "The recommended adult dosage of ibuprofen is 200-400mg every 4-6 hours.",
-        "evidence": "Adult OTC dosage: 200-400mg every 4 to 6 hours as needed.",
-        "source": "FDA Drug Label"
-      }
-    ]
-  }
-}
+This is intentional.
+
+The repository contains the Judge implementation, but its independent NLI/runtime path and integrated semantic behavior must be validated before it is allowed to govern the final system output.
+
+The active orchestration layer should therefore report:
+
+```text
+Judge = NOT EXECUTED
 ```
 
-**Response Body:**
-```json
-{
-  "decision": "ACCEPT",
-  "severity": "LOW",
-  "risk_assessment": {
-    "level": "LOW",
-    "safe_to_release": true,
-    "human_review": false
-  },
-  "evidence_governance": {
-    "quality": "STRONG",
-    "authoritative": 1,
-    "sufficient": true
-  },
-  "claim_verdicts": [
-    {
-      "claim_text": "The recommended adult dosage of ibuprofen is 200-400mg every 4-6 hours",
-      "hallucination_pct": "9.0%",
-      "status": "VERIFIED",
-      "status_label": "✅ Verified"
-    }
-  ],
-  "workflow_action": {
-    "type": "RELEASE_RESPONSE",
-    "target": "USER",
-    "priority": "NORMAL"
-  }
-}
+rather than fabricate a Judge result.
+
+---
+
+## 🧪 What Must Be Validated Before Activation?
+
+### Runtime consistency
+
+The Judge must use a trustworthy, validated NLI path. Its NLI semantics must not disagree silently with the Verifier's validated NLI model.
+
+### Decision semantics
+
+Real scenarios should be tested for:
+
+- strong supporting evidence → `ACCEPT`;
+- fixable contradiction → `CORRECT`;
+- insufficient evidence → `VERIFY_AGAIN` or `ABSTAIN`;
+- unfixable/high-risk claim → `REJECT`;
+- safety-critical conflict → `ESCALATE_HUMAN`;
+- runtime failure → `ABSTAIN` / safe failure.
+
+### Integration contracts
+
+Validate the exact fields coming from Detector, Verifier and Memory. Do not rely only on dataclass construction or mocked values.
+
+---
+
+## 🔌 Intended Input / Output
+
+The Judge receives a structured context containing information such as:
+
+```text
+user_query
+draft_response
+domain
+detector_output
+verifier_output
+evidence
+memory_context
+runtime_status
+retry_count
+```
+
+It returns a structured governance decision with fields such as:
+
+```text
+decision
+severity
+risk_assessment
+claim_verdicts
+evidence_governance
+workflow_action
+explanation
+audit metadata
+```
+
+The exact schema is defined by the current code in `agents/judge_agent/`.
+
+---
+
+## 🧩 Why a Judge Exists When the Verifier Already Checks Evidence
+
+The Verifier answers:
+
+> **“What does the evidence say about the claim?”**
+
+The Judge answers:
+
+> **“Given everything the system now knows, what is the safest and most appropriate workflow decision?”**
+
+That separation becomes especially important in healthcare, finance, security and other high-impact domains where evidence quality, risk and policy can matter even when a raw evidence score is high.
+
+---
+
+## 📂 Key Modules
+
+```text
+agents/judge_agent/
+├── decision_intelligence.py   # central governance engine
+├── decision_policies.py       # domain policy registry
+├── domain_policies.py         # policy/source requirements
+├── evidence_governance.py     # evidence authority/quality
+├── coverage_analyzer.py       # claim coverage
+├── conflict_resolver.py       # conflict categories
+├── source_reliability.py      # authority tiers
+├── source_consensus.py        # agreement / independence
+├── risk_intelligence.py       # policy-driven risk
+├── runtime_inspector.py       # system health
+├── memory_intelligence.py     # historical signals
+├── workflow_orchestrator.py   # next action
+├── explainability.py          # human-readable reasons
+├── audit_trail.py             # audit record
+└── ...
 ```
 
 ---
 
-## 📊 Benchmark Results
+## 🚧 Current Status
 
-| Scenario | Domain | Expected Decision | Actual Decision | Status |
-|---|---|---|---|:---:|
-| `HC-001` | Healthcare | `ACCEPT` | `ACCEPT` | ✅ PASS |
-| `HC-002` | Healthcare | `REJECT` | `REJECT` | ✅ PASS |
-| `HC-003` | Healthcare | `ESCALATE_HUMAN` | `ESCALATE_HUMAN` | ✅ PASS |
-| `FN-001` | Finance | `ACCEPT` | `ACCEPT` | ✅ PASS |
-| `FN-002` | Finance | `CORRECT` | `CORRECT` | ✅ PASS |
-| `CS-001` | Cybersecurity | `ACCEPT` | `ACCEPT` | ✅ PASS |
-| `GK-001` | General Knowledge | `ACCEPT` | `ACCEPT` | ✅ PASS |
-| `GK-002` | General Knowledge | `REJECT` | `REJECT` | ✅ PASS |
-| `EN-001` | Entertainment | `ACCEPT` | `ACCEPT` | ✅ PASS |
-| `EC-001` | Edge Case | `ABSTAIN` | `ABSTAIN` | ✅ PASS |
-| `EC-002` | Edge Case | `CORRECT` | `CORRECT` | ✅ PASS |
+**Implemented:** ✅
 
-**Overall Benchmark Score: 11/11 (100.0% Pass Rate)**
+**Integrated into active LangGraph:** ❌
+
+**Independently runtime-validated against the final Verifier/NLI stack:** 🟡
+
+**Production-ready claim:** ❌ not yet
+
+This README intentionally avoids claiming full production readiness until the runtime and semantic integration are proven.
 
 ---
 
-## 📄 License
+## 🔗 Related Documentation
 
-Part of the **HalluciGuard** Multi-Agent Ecosystem.
+- [Root HalluciGuard README](../../README.md)
+- [Verifier Agent](../verifier_agent/README.md)
+- [Corrector Agent](../corrector_agent/README.md)
+- [LangGraph Orchestration](../../orchestration/README.md)
