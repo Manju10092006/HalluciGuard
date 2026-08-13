@@ -10,8 +10,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Manju10092006/HalluciGuard/stargazers"><img src="https://img.shields.io/github/stars/Manju10092006/HalluciGuard?style=for-the-badge&logo=github&color=F59E0B" alt="Stars"/></a>
-  <a href="https://github.com/Manju10092006/HalluciGuard/network/members"><img src="https://img.shields.io/github/forks/Manju10092006/HalluciGuard?style=for-the-badge&logo=github&color=0EA5E9" alt="Forks"/></a>
   <img src="https://img.shields.io/badge/AI-Trust%20Layer-7C3AED?style=for-the-badge" alt="AI Trust Layer"/>
   <img src="https://img.shields.io/badge/Multi--Agent-Architecture-06B6D4?style=for-the-badge" alt="Multi Agent"/>
   <img src="https://img.shields.io/badge/LangGraph-Orchestration-111827?style=for-the-badge" alt="LangGraph"/>
