@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
 
+from .interbus import publish_message
 from .state import (
     HalluciGuardState,
     add_error,
@@ -18,6 +19,105 @@ from .state import (
 )
 
 MAX_VERIFICATION_RETRIES = int(os.getenv("HALLUCIGUARD_MAX_VERIFICATION_RETRIES", "2"))
+
+
+async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
+    from services.base_llm_service import BaseLLMService
+
+    node_start = start_timer()
+    if state.get("llm_response"):
+        draft = state.get("draft_response") or state["llm_response"]
+        generation = {
+            "draft_response": draft,
+            "model": "external",
+            "provider": "caller_supplied",
+            "generation_mode": "external",
+            "mode": "external",
+            "temperature": None,
+            "latency_ms": 0,
+            "finish_reason": "caller_supplied",
+            "request_id": state.get("request_id", ""),
+            "status": "success",
+            "error": None,
+        }
+        return {
+            "generation": generation,
+            "draft_response": draft,
+            "llm_response": draft,
+            "updated_at": utc_now(),
+            "current_node": "generator",
+            "inter_agent_bus": publish_message(
+                state,
+                source_agent="generator",
+                target_agent="detector",
+                message_type="DRAFT_RESPONSE",
+                payload={"draft_response": draft, "model": "external"},
+            ),
+            "trace": add_trace(
+                state,
+                "generator",
+                "skipped",
+                latency_ms=elapsed_ms(node_start),
+                reason="caller_supplied_llm_response",
+            ),
+        }
+    result = await BaseLLMService().generate(
+        user_query=state["user_query"],
+        conversation_history=state.get("conversation_history", []),
+        generation_mode=state.get("generation_mode", "normal"),
+    )
+    generation = _dump(result)
+    if generation.get("status") not in {"success", "completed"}:
+        exc = RuntimeError(str(generation.get("error") or "generation failed"))
+        update = _failure_update(state, "generator", exc)
+        update.update(
+            {
+                "generation": generation,
+                "draft_response": "",
+                "llm_response": "",
+                "terminal_status": "failed",
+                "verification_status": "generation_failed",
+                "current_node": "generator",
+            }
+        )
+        return update
+    draft = str(generation.get("draft_response", ""))
+    return {
+        "generation": generation,
+        "draft_response": draft,
+        "llm_response": draft,
+        "updated_at": utc_now(),
+        "current_node": "generator",
+        "inter_agent_bus": publish_message(
+            state,
+            source_agent="generator",
+            target_agent="detector",
+            message_type="DRAFT_RESPONSE",
+            payload={"draft_response": draft, "model": generation.get("model")},
+        ),
+        "trace": add_trace(
+            state,
+            "generator",
+            "completed",
+            latency_ms=elapsed_ms(node_start),
+            model=generation.get("model"),
+            mode=generation.get("generation_mode"),
+        ),
+    }
+
+
+def _supervisor_node(state: HalluciGuardState) -> dict[str, Any]:
+    return {
+        "updated_at": utc_now(),
+        "trace": add_trace(
+            state,
+            "supervisor",
+            "completed",
+            current_node=state.get("current_node"),
+            route=state.get("route", "detector"),
+            terminal_status=state.get("terminal_status"),
+        ),
+    }
 
 
 def _dump(value: Any) -> Any:
@@ -41,6 +141,7 @@ def _failure_update(
         "route": "error",
         "terminal_status": "human_review" if retryable else "fallback",
         "verification_status": "agent_failed",
+        "current_node": node,
         "updated_at": utc_now(),
         "trace": add_trace(
             state, node, "failed", error_type=type(exc).__name__, retryable=retryable
@@ -54,7 +155,10 @@ def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
     node_start = start_timer()
     try:
         detector = _dump(
-            DetectorAgent().detect(state["user_query"], state["llm_response"])
+            DetectorAgent().detect(
+                state["user_query"],
+                state.get("draft_response") or state["llm_response"],
+            )
         )
         next_action = str(detector.get("next_action", ""))
         route = "verify" if next_action.lower().endswith("verify") else "accept"
@@ -71,6 +175,20 @@ def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
                 else "verification_required"
             ),
             "updated_at": utc_now(),
+            "current_node": "detector",
+            "inter_agent_bus": publish_message(
+                state,
+                source_agent="detector",
+                target_agent="verifier" if route == "verify" else "memory",
+                message_type=(
+                    "SUSPICIOUS_CLAIMS" if route == "verify" else "DETECTOR_ACCEPT"
+                ),
+                payload={
+                    "detector": detector,
+                    "draft_response": state.get("draft_response")
+                    or state.get("llm_response", ""),
+                },
+            ),
             "trace": add_trace(
                 state,
                 "detector",
@@ -113,7 +231,10 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             or str(uuid.uuid4()),
             domain=state.get("domain", "general"),
             suspicious_claims=[
-                SuspiciousClaim(claim_id="c1", text=state["llm_response"])
+                SuspiciousClaim(
+                    claim_id="c1",
+                    text=state.get("draft_response") or state["llm_response"],
+                )
             ],
         )
         verifier = _dump(await VerificationPipeline().verify(payload))
@@ -167,6 +288,18 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             "ranked_evidence": evidence_all,
             "nli_results": nli_results,
             "verification_status": "verified",
+            "current_node": "verifier",
+            "inter_agent_bus": publish_message(
+                state,
+                source_agent="verifier",
+                target_agent="memory",
+                message_type="VERIFICATION_RESULT",
+                payload={
+                    "verifier": verifier,
+                    "claim_count": len(claims),
+                    "evidence_count": len(evidence_all),
+                },
+            ),
             "updated_at": utc_now(),
             "trace": add_trace(
                 state,
@@ -394,9 +527,6 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
-    from agents.memory_agent.memory.memory_agent import MemoryAgent
-    from agents.memory_agent.schemas.models import StoreFactRequest
-
     node_start = start_timer()
     if not state.get("verifier", {}).get("claim_evidence"):
         memory = {
@@ -406,11 +536,24 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             "vector_memory": False,
             "skipped_reason": "no_verified_claims_to_persist",
         }
+        terminal_status = state.get("terminal_status") or (
+            "failed"
+            if state.get("verification_status") == "generation_failed"
+            else "accepted"
+        )
         return {
             "memory": memory,
             "final_response": state.get("final_response")
             or state.get("llm_response", ""),
+            "terminal_status": terminal_status,
             "updated_at": utc_now(),
+            "inter_agent_bus": publish_message(
+                state,
+                source_agent="memory",
+                target_agent="supervisor",
+                message_type="MEMORY_WRITE_RESULT",
+                payload=memory,
+            ),
             "trace": add_trace(
                 state,
                 "memory",
@@ -420,11 +563,16 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             ),
         }
     try:
+        from agents.memory_agent.memory.memory_agent import MemoryAgent
+        from agents.memory_agent.schemas.models import StoreFactRequest
+
         memory_agent = MemoryAgent()
         await memory_agent.initialize()
         stored = []
         try:
             for report in state.get("verifier", {}).get("claim_evidence", []):
+                if str(report.get("verdict", "")).lower() != "verified":
+                    continue
                 evidence = report.get("evidence", [])
                 sources = [
                     str(e.get("source", "")) for e in evidence if e.get("source")
@@ -465,6 +613,13 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             "memory": memory,
             "final_response": state.get("final_response") or state["llm_response"],
             "updated_at": utc_now(),
+            "inter_agent_bus": publish_message(
+                state,
+                source_agent="memory",
+                target_agent="supervisor",
+                message_type="MEMORY_WRITE_RESULT",
+                payload=memory,
+            ),
             "trace": add_trace(
                 state,
                 "memory",
@@ -475,6 +630,18 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         }
     except Exception as exc:
         update = _failure_update(state, "memory", exc)
+        update["terminal_status"] = "partial_success"
+        update["verification_status"] = state.get(
+            "verification_status", "memory_failed"
+        )
+        update["inter_agent_bus"] = publish_message(
+            state,
+            source_agent="memory",
+            target_agent="supervisor",
+            message_type="MEMORY_WRITE_RESULT",
+            payload={"status": "failed", "error": str(exc)},
+            status="failed",
+        )
         update["final_response"] = state.get("final_response") or state.get(
             "llm_response", ""
         )
@@ -554,16 +721,45 @@ def _retry_node(state: HalluciGuardState) -> dict[str, Any]:
     }
 
 
+def _supervisor_route(state: HalluciGuardState) -> str:
+    if state.get("verification_status") == "generation_failed":
+        return "memory"
+    current = state.get("current_node")
+    if (
+        current == "verifier"
+        or state.get("verifier")
+        or (state.get("route") == "error" and state.get("errors"))
+    ):
+        return "retry" if _verifier_route(state) == "error" else "memory"
+    if (
+        current == "detector"
+        or state.get("detector")
+        or state.get("route")
+        in {
+            "accept",
+            "verify",
+        }
+    ):
+        return "verifier" if state.get("route") == "verify" else "memory"
+    if (
+        current == "generator"
+        or state.get("draft_response")
+        or state.get("llm_response")
+    ):
+        return "detector"
+    return "memory"
+
+
 def build_verification_graph(
     node_overrides: dict[str, Callable[..., Any]] | None = None,
 ):
     nodes = {
+        "generate": _generate_node,
+        "supervisor": _supervisor_node,
         "detector": _detector_node,
         "accept": _accept_node,
         "verifier": _verifier_node,
-        "judge": _judge_node,
         "retry": _retry_node,
-        "corrector": _corrector_node,
         "reject": _reject_node,
         "human_escalation": _human_escalation_node,
         "retry_exhausted": _retry_exhausted_node,
@@ -574,35 +770,29 @@ def build_verification_graph(
     graph = StateGraph(HalluciGuardState)
     for name, fn in nodes.items():
         graph.add_node(name, fn)
-    graph.add_edge(START, "detector")
+    graph.add_edge(START, "generate")
+    graph.add_edge("generate", "supervisor")
     graph.add_conditional_edges(
-        "detector",
-        _detector_route,
-        {"verify": "verifier", "accept": "accept", "error": "human_escalation"},
-    )
-    graph.add_conditional_edges(
-        "verifier", _verifier_route, {"judge": "judge", "error": "human_escalation"}
-    )
-    graph.add_conditional_edges(
-        "judge",
-        _judge_route,
+        "supervisor",
+        _supervisor_route,
         {
-            "verify_again": "retry",
-            "correct": "corrector",
-            "reject": "reject",
-            "human_escalate": "human_escalation",
-            "accept": "accept",
-            "retry_exhausted": "retry_exhausted",
+            "detector": "detector",
+            "verifier": "verifier",
+            "retry": "retry",
+            "memory": "memory",
         },
     )
-    graph.add_edge("retry", "verifier")
+    graph.add_edge("detector", "supervisor")
+    graph.add_edge("verifier", "supervisor")
     graph.add_conditional_edges(
-        "corrector", _corrector_route, {"memory": "memory", "error": "human_escalation"}
+        "retry",
+        lambda s: (
+            "retry"
+            if s.get("retry_count", 0) <= s.get("max_retries", MAX_VERIFICATION_RETRIES)
+            else "failed"
+        ),
+        {"retry": "verifier", "failed": "memory"},
     )
-    graph.add_edge("accept", "memory")
-    graph.add_edge("reject", "memory")
-    graph.add_edge("human_escalation", "memory")
-    graph.add_edge("retry_exhausted", "human_escalation")
     graph.add_edge("memory", END)
     return graph.compile()
 
@@ -619,9 +809,11 @@ def get_verification_graph():
 
 async def run_verification(
     user_query: str,
-    llm_response: str,
+    llm_response: str | None = None,
     domain: str = "general",
     request_id: str | None = None,
+    generation_mode: str = "normal",
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> HalluciGuardState:
     execution_id = str(uuid.uuid4())
     now = utc_now()
@@ -630,7 +822,10 @@ async def run_verification(
             "execution_id": execution_id,
             "request_id": request_id or execution_id,
             "user_query": user_query,
-            "llm_response": llm_response,
+            "llm_response": llm_response or "",
+            "draft_response": llm_response or "",
+            "generation_mode": generation_mode,
+            "conversation_history": conversation_history or [],
             "domain": domain,
             "retry_count": 0,
             "max_retries": MAX_VERIFICATION_RETRIES,
@@ -638,6 +833,18 @@ async def run_verification(
             "updated_at": now,
             "trace": [],
             "errors": [],
+            "inter_agent_bus": [],
+            "active_agents": [
+                "generator",
+                "supervisor",
+                "detector",
+                "verifier",
+                "memory",
+            ],
+            "disabled_agents": {
+                "judge": {"enabled": False, "status": "not_executed"},
+                "corrector": {"enabled": False, "status": "not_executed"},
+            },
             "audit": {
                 "graph": "halluciguard_langgraph_supervisor",
                 "max_retries": MAX_VERIFICATION_RETRIES,
