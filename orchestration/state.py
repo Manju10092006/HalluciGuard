@@ -6,7 +6,7 @@ from typing import Any, Literal, TypedDict
 
 AgentStatus = Literal["started", "completed", "failed", "skipped", "scheduled"]
 TerminalStatus = Literal[
-    "accepted", "corrected", "rejected", "human_review", "fallback"
+    "accepted", "partial_success", "failed", "human_review", "fallback"
 ]
 
 
@@ -34,6 +34,10 @@ class HalluciGuardState(TypedDict, total=False):
     request_id: str
     user_query: str
     llm_response: str
+    draft_response: str
+    generation_mode: str
+    conversation_history: list[dict[str, str]]
+    generation: dict[str, Any]
     domain: str
     created_at: str
     updated_at: str
@@ -70,6 +74,9 @@ class HalluciGuardState(TypedDict, total=False):
     # Observability / audit
     trace: list[ExecutionEvent]
     audit: dict[str, Any]
+    active_agents: list[str]
+    disabled_agents: dict[str, dict[str, str | bool]]
+    inter_agent_bus: list[dict[str, Any]]
 
 
 def utc_now() -> str:
