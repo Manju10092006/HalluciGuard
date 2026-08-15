@@ -6,7 +6,7 @@ from typing import Any, Literal, TypedDict
 
 AgentStatus = Literal["started", "completed", "failed", "skipped", "scheduled"]
 TerminalStatus = Literal[
-    "accepted", "partial_success", "failed", "human_review", "fallback"
+    "accepted", "corrected", "rejected", "partial_success", "failed", "human_review", "fallback"
 ]
 
 
@@ -35,9 +35,10 @@ class HalluciGuardState(TypedDict, total=False):
     user_query: str
     llm_response: str
     draft_response: str
-    generation_mode: str
+    generation_mode: str  # "normal" or "stress_test"
     conversation_history: list[dict[str, str]]
     generation: dict[str, Any]
+    base_llm: dict[str, Any]
     domain: str
     created_at: str
     updated_at: str
@@ -62,6 +63,10 @@ class HalluciGuardState(TypedDict, total=False):
     memory_context: dict[str, Any]
     knowledge_graph_context: dict[str, Any]
 
+    # Active and disabled agents reporting
+    active_agents: list[str]
+    disabled_agents: dict[str, dict[str, str | bool]] | list[str]
+
     # Control plane
     final_response: str
     terminal_status: TerminalStatus
@@ -71,12 +76,12 @@ class HalluciGuardState(TypedDict, total=False):
     errors: list[AgentError]
     error: str
 
+    # Inter-agent event bus messages
+    inter_agent_bus: list[dict[str, Any]]
+
     # Observability / audit
     trace: list[ExecutionEvent]
     audit: dict[str, Any]
-    active_agents: list[str]
-    disabled_agents: dict[str, dict[str, str | bool]]
-    inter_agent_bus: list[dict[str, Any]]
 
 
 def utc_now() -> str:
@@ -128,3 +133,27 @@ def add_error(
         }
     )
     return errors
+
+
+def add_bus_message(
+    state: HalluciGuardState,
+    source_agent: str,
+    target_agent: str,
+    message_type: str,
+    payload: dict[str, Any],
+    status: str = "processed",
+) -> list[dict[str, Any]]:
+    bus_messages = list(state.get("inter_agent_bus", []))
+    bus_messages.append(
+        {
+            "message_id": f"msg-{len(bus_messages) + 1}",
+            "execution_id": state.get("execution_id", state.get("request_id", "")),
+            "source_agent": source_agent,
+            "target_agent": target_agent,
+            "message_type": message_type,
+            "payload": payload,
+            "timestamp": utc_now(),
+            "status": status,
+        }
+    )
+    return bus_messages

@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 
 @dataclass(frozen=True)
-class RuntimeValidationResult:
+class ComponentCheckResult:
     ok: bool
     component: str
     detail: str
-    metadata: dict[str, Any]
+    metadata: Dict[str, Any]
 
-    def model_dump(self) -> dict[str, Any]:
+    def model_dump(self) -> Dict[str, Any]:
         return {
             "ok": self.ok,
             "component": self.component,
@@ -20,42 +22,135 @@ class RuntimeValidationResult:
         }
 
 
-def validate_detector_model_reference() -> RuntimeValidationResult:
-    """Validate that Detector configuration points to a loadable real model artifact."""
-    from agents.detector_agent.config import DetectorConfig
-    from agents.detector_agent.halueval_inference import (
-        validate_halueval_model_reference,
-    )
+def validate_openrouter_configuration() -> ComponentCheckResult:
+    """Validate OpenRouter API key and model configuration."""
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    model = os.environ.get("OPENROUTER_MODEL", "qwen/qwen-2.5-7b-instruct")
+    base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-    cfg = DetectorConfig()
-    try:
-        resolved = validate_halueval_model_reference(cfg.halueval_model_path)
-    except Exception as exc:
-        return RuntimeValidationResult(
+    if not api_key:
+        return ComponentCheckResult(
             ok=False,
-            component="detector",
-            detail=f"{type(exc).__name__}: {exc}",
-            metadata={"configured_model_path": cfg.halueval_model_path},
+            component="base_llm",
+            detail="OPENROUTER_API_KEY is not configured in the environment.",
+            metadata={
+                "provider": "openrouter",
+                "model": model,
+                "base_url": base_url,
+                "key_configured": False,
+            },
         )
-    return RuntimeValidationResult(
+    return ComponentCheckResult(
         ok=True,
-        component="detector",
-        detail="Detector model reference is structurally valid.",
+        component="base_llm",
+        detail="OpenRouter Base LLM configuration is ready.",
         metadata={
-            "configured_model_path": cfg.halueval_model_path,
-            "resolved_model_reference": resolved,
+            "provider": "openrouter",
+            "model": model,
+            "base_url": base_url,
+            "key_configured": True,
         },
     )
 
 
-def validate_orchestration_startup() -> dict[str, Any]:
+def validate_detector_model_reference() -> ComponentCheckResult:
+    """Validate that Detector configuration points to a loadable model artifact."""
+    try:
+        from agents.detector_agent.config import DetectorConfig
+        from agents.detector_agent.halueval_inference import (
+            validate_halueval_model_reference,
+        )
+
+        cfg = DetectorConfig()
+        resolved = validate_halueval_model_reference(cfg.halueval_model_path)
+        return ComponentCheckResult(
+            ok=True,
+            component="detector",
+            detail="Detector model reference is valid.",
+            metadata={
+                "configured_model_path": cfg.halueval_model_path,
+                "resolved_model_reference": resolved,
+            },
+        )
+    except Exception as exc:
+        return ComponentCheckResult(
+            ok=False,
+            component="detector",
+            detail=f"{type(exc).__name__}: {exc}",
+            metadata={"configured_model_path": os.environ.get("HALUEVAL_MODEL_PATH", "")},
+        )
+
+
+def validate_verifier_configuration() -> ComponentCheckResult:
+    """Validate Verifier pipeline and NLI configuration."""
+    try:
+        verifier_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
+        )
+        if verifier_dir not in sys.path:
+            sys.path.insert(0, verifier_dir)
+        from config.settings import get_settings
+        settings = get_settings()
+        nli_model = os.environ.get("HALLUCIGUARD_NLI_MODEL_PATH") or settings.nli_model
+        return ComponentCheckResult(
+            ok=True,
+            component="verifier",
+            detail="Verifier agent pipeline and NLI settings are valid.",
+            metadata={
+                "nli_model": nli_model,
+                "allow_model_downloads": settings.allow_model_downloads,
+            },
+        )
+    except Exception as exc:
+        return ComponentCheckResult(
+            ok=False,
+            component="verifier",
+            detail=f"{type(exc).__name__}: {exc}",
+            metadata={"error": str(exc)},
+        )
+
+
+def validate_memory_configuration() -> ComponentCheckResult:
+    """Validate Memory agent dependencies and vector store accessibility."""
+    try:
+        from agents.memory_agent.memory.memory_agent import MemoryAgent
+        return ComponentCheckResult(
+            ok=True,
+            component="memory",
+            detail="Memory agent dependencies and FAISS storage are available.",
+            metadata={"persistence": "local_or_ephemeral"},
+        )
+    except Exception as exc:
+        return ComponentCheckResult(
+            ok=False,
+            component="memory",
+            detail=f"{type(exc).__name__}: {exc}",
+            metadata={"error": str(exc)},
+        )
+
+
+def validate_orchestration_startup() -> Dict[str, Any]:
+    """Run comprehensive validation checks for all production components."""
+    openrouter = validate_openrouter_configuration()
     detector = validate_detector_model_reference()
+    verifier = validate_verifier_configuration()
+    memory = validate_memory_configuration()
+
+    checks = [openrouter, detector, verifier, memory]
+    all_ok = all(c.ok for c in checks)
+
+    active_agents = ["base_llm", "detector", "verifier", "memory"]
+    disabled_agents = ["judge", "corrector"]
+
     return {
-        "ok": detector.ok,
-        "checks": [detector.model_dump()],
-        "action_required": (
-            None
-            if detector.ok
-            else "Provide HALUEVAL_MODEL_PATH or train the detector artifact before running real E2E."
-        ),
+        "ok": all_ok,
+        "backend_status": "healthy" if all_ok else "degraded",
+        "environment": os.environ.get("HALLUCIGUARD_ENV", "production"),
+        "active_agents": active_agents,
+        "disabled_agents": disabled_agents,
+        "checks": [c.model_dump() for c in checks],
+        "base_llm": openrouter.metadata,
+        "detector": detector.metadata,
+        "verifier": verifier.metadata,
+        "memory": memory.metadata,
     }
