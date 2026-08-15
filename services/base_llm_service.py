@@ -85,10 +85,10 @@ class BaseLLMConfig:
         default_factory=lambda: _env_optional_int("OPENROUTER_MAX_TOKENS")
     )
     timeout_seconds: float = field(
-        default_factory=lambda: _env_float("OPENROUTER_TIMEOUT_SECONDS", "30")
+        default_factory=lambda: _env_float("OPENROUTER_TIMEOUT_SECONDS", "12")
     )
     max_retries: int = field(
-        default_factory=lambda: _env_int("OPENROUTER_MAX_RETRIES", "3")
+        default_factory=lambda: _env_int("OPENROUTER_MAX_RETRIES", "1")
     )
     http_referer: str | None = field(
         default_factory=lambda: _env_str("OPENROUTER_HTTP_REFERER")

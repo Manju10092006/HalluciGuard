@@ -42,6 +42,9 @@ class DetectorAgent:
     - Route: LOW/MEDIUM → Accept, HIGH → Verify (send to Verifier Agent).
     """
 
+    _SHARED_INFERENCE: Optional[HaluEvalInference] = None
+    _SHARED_MODEL_LOADED: bool = False
+
     def __init__(
         self,
         config: Optional[DetectorConfig] = None,
@@ -53,23 +56,21 @@ class DetectorAgent:
         """
         self.config: DetectorConfig = config or DetectorConfig()
         
-        # Initialize HaluEval inference engine
-        self._inference = HaluEvalInference(
-            model_path=self.config.halueval_model_path,
-            max_length=self.config.halueval_max_length,
-        )
-        
-        # Lazy-load model on first detect() call
-        self._model_loaded = False
+        if DetectorAgent._SHARED_INFERENCE is None:
+            DetectorAgent._SHARED_INFERENCE = HaluEvalInference(
+                model_path=self.config.halueval_model_path,
+                max_length=self.config.halueval_max_length,
+            )
+        self._inference = DetectorAgent._SHARED_INFERENCE
 
     def _ensure_model_loaded(self) -> None:
         """Load the HaluEval model if not already loaded."""
-        if not self._model_loaded:
+        if not DetectorAgent._SHARED_MODEL_LOADED:
             try:
                 self._inference.load()
             except Exception as e:
                 logger.warning(f"[Detector] Could not load HaluEval model from disk ({e}); using baseline detector.")
-            self._model_loaded = True
+            DetectorAgent._SHARED_MODEL_LOADED = True
 
     def detect(self, user_query: str, llm_response: str) -> DetectionResult:
         """Estimate hallucination likelihood for a given query and LLM response.
