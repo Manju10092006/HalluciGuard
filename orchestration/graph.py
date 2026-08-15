@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import uuid
@@ -159,7 +160,7 @@ def _generate_route(state: HalluciGuardState) -> str:
     return "detector"
 
 
-def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
+async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
     from agents.detector_agent.detector import DetectorAgent
 
     node_start = start_timer()
@@ -168,9 +169,10 @@ def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         if not llm_resp:
             raise ValueError("No LLM response available for detection.")
 
-        detector = _dump(
-            DetectorAgent().detect(state["user_query"], llm_resp)
-        )
+        def _run_detect():
+            return DetectorAgent().detect(state["user_query"], llm_resp)
+
+        detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))
         route = "verify" if next_action.lower().endswith("verify") else "accept"
 
