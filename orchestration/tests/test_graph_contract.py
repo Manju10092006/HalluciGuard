@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from orchestration.graph import _detector_route, _judge_route, build_verification_graph
+from orchestration.graph import (
+    _detector_route,
+    _generate_route,
+    _verifier_route,
+    build_verification_graph,
+)
 from orchestration.state import add_trace
 
 
@@ -21,59 +26,29 @@ def test_state_trace_has_observability_fields():
     assert trace[0]["retry_count"] == 1
 
 
+def test_generate_route_success():
+    assert _generate_route({"llm_response": "Paris is the capital."}) == "detector"
+
+
+def test_generate_route_failure():
+    assert _generate_route({"route": "error", "llm_response": ""}) == "human_escalation"
+
+
 def test_detector_low_medium_bypass_verifier():
     assert _detector_route({"route": "accept"}) == "accept"
 
 
 def test_detector_high_routes_to_verifier():
-    assert _detector_route({"route": "verify"}) == "verify"
+    assert _detector_route({"route": "verify"}) == "verifier"
 
 
 def test_detector_failure_routes_to_human_escalation():
-    assert _detector_route({"route": "error"}) == "error"
+    assert _detector_route({"route": "error"}) == "human_escalation"
 
 
-def test_judge_accept_route():
-    assert _judge_route({"judge": {"decision": "ACCEPT"}, "retry_count": 0}) == "accept"
+def test_verifier_route_success():
+    assert _verifier_route({"route": "memory"}) == "memory"
 
 
-def test_judge_correction_routes_to_corrector():
-    assert (
-        _judge_route({"judge": {"decision": "CORRECT"}, "retry_count": 0}) == "correct"
-    )
-
-
-def test_judge_retry_routes_back_to_verifier():
-    assert (
-        _judge_route(
-            {"judge": {"decision": "VERIFY_AGAIN"}, "retry_count": 0, "max_retries": 2}
-        )
-        == "verify_again"
-    )
-
-
-def test_judge_retry_is_bounded():
-    assert (
-        _judge_route(
-            {"judge": {"decision": "VERIFY_AGAIN"}, "retry_count": 2, "max_retries": 2}
-        )
-        == "retry_exhausted"
-    )
-
-
-def test_judge_reject_route():
-    assert _judge_route({"judge": {"decision": "REJECT"}, "retry_count": 0}) == "reject"
-
-
-def test_judge_human_escalation_route():
-    assert (
-        _judge_route({"judge": {"decision": "ESCALATE_HUMAN"}, "retry_count": 0})
-        == "human_escalate"
-    )
-
-
-def test_judge_abstain_routes_to_human_escalation():
-    assert (
-        _judge_route({"judge": {"decision": "ABSTAIN"}, "retry_count": 0})
-        == "human_escalate"
-    )
+def test_verifier_route_error():
+    assert _verifier_route({"route": "error"}) == "human_escalation"

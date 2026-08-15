@@ -68,6 +68,13 @@ benchmarks/output/
 tmp/
 temp/
 *.tmp
+scratch/
+.cursor/
+artifacts/
+data/
+auto_crop_boxes.py
+crop_boxes.py
+verify_and_clean_crops.py
 
 # Jupyter
 .ipynb_checkpoints/

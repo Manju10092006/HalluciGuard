@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: halluciguard-api
+    runtime: python
+    region: oregon
+    plan: standard
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "uvicorn orchestration.api:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: HALLUCIGUARD_ENV
+        value: production
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENROUTER_MODEL
+        value: qwen/qwen-2.5-7b-instruct
+      - key: OPENROUTER_TEMPERATURE
+        value: "0.7"
+      - key: OPENROUTER_STRESS_TEMPERATURE
+        value: "0.9"
+      - key: OPENROUTER_TIMEOUT_SECONDS
+        value: "30"
+      - key: OPENROUTER_MAX_RETRIES
+        value: "3"
+      - key: ENABLE_JUDGE
+        value: "false"
+      - key: ENABLE_CORRECTOR
+        value: "false"
+      - key: ALLOW_MODEL_DOWNLOADS
+        value: "true"
+      - key: NLI_MODEL
+        value: cross-encoder/nli-deberta-v3-base
+      - key: CORS_ORIGINS
+        value: "http://localhost:3000,http://127.0.0.1:3000,https://*.vercel.app"
+      - key: OPENROUTER_API_KEY
+        sync: false
