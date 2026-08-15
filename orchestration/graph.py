@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
 
-from .base_llm import BaseLLMService, OpenRouterError
+from services.base_llm_service import BaseLLMService
 from .state import (
     HalluciGuardState,
     add_bus_message,
@@ -97,10 +97,19 @@ async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
 
     try:
         service = BaseLLMService()
-        gen_result = await service.generate_draft(
+        result = await service.generate(
             user_query=user_query,
+            conversation_history=state.get("conversation_history", []),
             generation_mode=state.get("generation_mode", "normal"),
         )
+        gen_result = _dump(result)
+        if gen_result.get("status") not in {"success", "completed"}:
+            exc = RuntimeError(str(gen_result.get("error") or "Base LLM generation failed"))
+            update = _failure_update(state, "base_llm", exc)
+            update["base_llm"] = gen_result
+            update["final_response"] = "Base LLM generation failed. Please try again."
+            return update
+
         draft = gen_result.get("draft_response", "")
         latency = gen_result.get("latency_ms", elapsed_ms(node_start))
 
