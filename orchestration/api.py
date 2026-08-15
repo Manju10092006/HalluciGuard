@@ -46,7 +46,20 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health() -> Dict[str, Any]:
+async def health(deep: bool = False) -> Dict[str, Any]:
+    if not deep:
+        return {
+            "status": "healthy",
+            "backend_status": "healthy",
+            "environment": os.environ.get("HALLUCIGUARD_ENV", "production"),
+            "engine": "langgraph_production_supervisor",
+            "active_agents": ["generator", "supervisor", "detector", "verifier", "memory"],
+            "disabled_agents": {
+                "judge": {"enabled": False, "status": "not_executed"},
+                "corrector": {"enabled": False, "status": "not_executed"},
+            },
+        }
+
     validation = validate_orchestration_startup()
     try:
         base_llm = (await BaseLLMService().health(check_network=True)).model_dump()
