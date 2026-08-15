@@ -72,8 +72,8 @@ class BaseLLMConfig:
         or "https://openrouter.ai/api/v1"
     )
     model: str = field(
-        default_factory=lambda: _env_str("OPENROUTER_MODEL", "qwen/qwen3-4b")
-        or "qwen/qwen3-4b"
+        default_factory=lambda: _env_str("OPENROUTER_MODEL", "qwen/qwen-2.5-7b-instruct")
+        or "qwen/qwen-2.5-7b-instruct"
     )
     temperature: float = field(
         default_factory=lambda: _env_float("OPENROUTER_TEMPERATURE", "0.7")
@@ -231,6 +231,9 @@ class BaseLLMService:
             try:
                 response = await self._post_chat_completions(payload)
                 if response.status_code >= 400:
+                    if response.status_code == 404 and payload.get("model") != "qwen/qwen-2.5-7b-instruct":
+                        payload["model"] = "qwen/qwen-2.5-7b-instruct"
+                        continue
                     code = self._classify_http_status(
                         response.status_code, response.text
                     )
