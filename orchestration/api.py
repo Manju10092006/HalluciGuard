@@ -45,6 +45,19 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root() -> Dict[str, Any]:
+    return {
+        "service": "HalluciGuard Verification Engine API",
+        "status": "online",
+        "version": "2.0.0",
+        "docs_url": "/docs",
+        "health_url": "/health",
+        "verify_endpoint": "/verify",
+        "frontend_url": "https://frontend-alpha-umber-63.vercel.app",
+    }
+
+
 @app.get("/health")
 async def health(deep: bool = False) -> Dict[str, Any]:
     if not deep:
