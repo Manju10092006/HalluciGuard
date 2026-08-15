@@ -554,6 +554,7 @@ async def run_verification(
     domain: str = "general",
     request_id: str | None = None,
     generation_mode: str = "normal",
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> HalluciGuardState:
     execution_id = str(uuid.uuid4())
     now = utc_now()
@@ -568,6 +569,7 @@ async def run_verification(
             "llm_response": llm_response,
             "draft_response": llm_response,
             "generation_mode": generation_mode,
+            "conversation_history": conversation_history or [],
             "domain": domain,
             "active_agents": active_agents,
             "disabled_agents": disabled_agents,
