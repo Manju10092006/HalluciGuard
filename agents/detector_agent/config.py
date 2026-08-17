@@ -32,8 +32,8 @@ class DetectorConfig(ConfigBase):
 
     # --- HaluEval Model Configuration ---
     halueval_model_path: str = Field(
-        default=os.environ.get("HALUEVAL_MODEL_PATH", "artifacts/halueval-detector-final"),
-        description="Path to the fine-tuned HaluEval model directory."
+        default=os.environ.get("HALUEVAL_MODEL_PATH", "Manjunath2000006/halluciguard-detector"),
+        description="Path to the fine-tuned HaluEval model directory or HF repo."
     )
     halueval_max_length: int = Field(
         default=int(os.environ.get("HALUEVAL_MAX_LENGTH", "384")),
