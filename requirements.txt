@@ -4,6 +4,7 @@
 # are managed by the HF Gradio Space SDK (sdk_version in README.md).
 # Do NOT pin them here — it causes version conflicts.
 # ──────────────────────────────────────────────────────────────
+huggingface_hub<1.0.0
 pydantic-settings>=2.0
 langgraph>=0.1.0
 langchain-core>=0.2.0
