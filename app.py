@@ -3,7 +3,7 @@
 Architecture:
   1. Top-level @spaces.GPU decorated function `verify_claim`
   2. Connected via button.click(fn=verify_claim, ...) inside gr.Blocks() as demo
-  3. FastAPI REST endpoints mounted onto Gradio via gr.mount_gradio_app
+  3. Gradio UI mounted at /ui on main FastAPI app so /health, /verify, /docs are 100% accessible
 """
 
 import asyncio
@@ -23,6 +23,7 @@ except ImportError:
     spaces = DummySpaces()
 
 import gradio as gr
+import uvicorn
 from orchestration.api import app as fastapi_app
 from orchestration.graph import run_verification
 
@@ -67,12 +68,12 @@ def verify_claim(user_query: str, domain: str = "general") -> str:
         return f"Verification Error: {type(exc).__name__}: {exc}"
 
 
-# Construct Gradio Blocks interface — top-level `demo` object picked up by HF Space launcher
+# Construct Gradio Blocks interface
 with gr.Blocks(title="HalluciGuard Verification Engine") as demo:
     gr.Markdown("# 🛡️ HalluciGuard Verification Engine")
     gr.Markdown(
         "Production LangGraph Supervisor API powered by OpenRouter LLM, Detector, Verifier, and Memory Agents.\n\n"
-        "REST API endpoints available: **/health**, **/health?deep=true**, **/verify**, **/docs**"
+        "REST API endpoints available: **/health**, **/health?deep=true**, **/verify**, **/docs** | UI at **/ui**"
     )
     
     with gr.Row():
@@ -96,8 +97,8 @@ with gr.Blocks(title="HalluciGuard Verification Engine") as demo:
         outputs=output_text,
     )
 
-# Mount FastAPI REST endpoints onto Gradio app
-app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+# Mount Gradio UI at /ui on the FastAPI app so root REST endpoints (/health, /verify, /docs) work 100%
+app = gr.mount_gradio_app(fastapi_app, demo, path="/ui")
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    uvicorn.run(app, host="0.0.0.0", port=7860)
