@@ -1,27 +1,24 @@
-# HalluciGuard Pinned Compatible Dependencies for Gradio HF Space
-gradio==4.44.0
-fastapi==0.111.0
-starlette==0.37.2
-jinja2==3.1.4
-huggingface_hub==0.24.0
-uvicorn[standard]==0.30.1
-pydantic==2.8.2
-pydantic-settings==2.3.4
-langgraph==0.1.8
-langchain-core==0.2.20
-httpx==0.27.0
-torch==2.3.1
-transformers==4.42.4
-sentence-transformers==3.0.1
-datasets==2.20.0
-scikit-learn==1.5.1
-rank-bm25==0.2.2
-faiss-cpu==1.8.0.post1
-aiosqlite==0.20.0
-networkx==3.3
-numpy==1.26.4
-beautifulsoup4==4.12.3
-lxml==5.2.2
-pyyaml==6.0.1
-python-dotenv==1.0.1
-anyio==4.4.0
+# HalluciGuard — backend dependencies
+# ──────────────────────────────────────────────────────────────
+# NOTE: gradio, fastapi, starlette, jinja2, uvicorn, pydantic
+# are managed by the HF Gradio Space SDK (sdk_version in README.md).
+# Do NOT pin them here — it causes version conflicts.
+# ──────────────────────────────────────────────────────────────
+pydantic-settings>=2.0
+langgraph>=0.1.0
+langchain-core>=0.2.0
+httpx>=0.24.0
+torch
+transformers
+sentence-transformers
+datasets
+scikit-learn
+rank-bm25
+faiss-cpu
+aiosqlite
+networkx
+numpy<2.0
+beautifulsoup4
+lxml
+pyyaml
+python-dotenv
