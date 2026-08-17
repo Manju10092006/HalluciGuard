@@ -1,9 +1,11 @@
 # HalluciGuard — backend dependencies
 # ──────────────────────────────────────────────────────────────
-# NOTE: gradio, fastapi, starlette, jinja2, uvicorn, pydantic
-# are managed by the HF Gradio Space SDK (sdk_version in README.md).
-# Do NOT pin them here — it causes version conflicts.
+# Pinned compatibility locks for HF Gradio Space (sdk_version: 4.44.0)
+# - starlette<0.38.0: fixes Jinja2 TemplateResponse "unhashable type: dict"
+# - huggingface_hub<1.0.0: fixes "cannot import name HfFolder"
 # ──────────────────────────────────────────────────────────────
+starlette<0.38.0
+fastapi<0.115.0
 huggingface_hub<1.0.0
 pydantic-settings>=2.0
 langgraph>=0.1.0
