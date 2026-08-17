@@ -1,3 +1,14 @@
+---
+title: HalluciGuard API
+emoji: 🛡️
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+sdk_version: 4.44.0
+app_file: app.py
+pinned: false
+---
+
 <!-- HERO / MOTION -->
 <p align="center">
   <a href="https://github.com/Manju10092006/HalluciGuard">
