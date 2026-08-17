@@ -45,9 +45,13 @@ verification_cache.db
 *.log
 logs/*.log
 
-# Generated Document Builds
+# Generated Document Builds & Binary Assets
 *.pdf
 *.html
+*.jpg
+*.jpeg
+*.png
+illustrations/
 
 # OS
 .DS_Store
