@@ -1,3 +1,5 @@
+huggingface_hub<0.25.0
+gradio>=4.44.0
 # HalluciGuard Production Dependencies for Render & Local Environments
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
