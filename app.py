@@ -98,3 +98,6 @@ with gr.Blocks(title="HalluciGuard Verification Engine") as demo:
 
 # Mount FastAPI REST endpoints onto Gradio app
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", server_port=7860)
