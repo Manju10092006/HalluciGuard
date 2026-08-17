@@ -27,12 +27,13 @@ from agents.detector_agent.halueval_dataset import format_detector_input
 def _looks_like_local_path(value: str) -> bool:
     """Return True when a model reference should be validated as a filesystem path."""
     path = Path(value).expanduser()
-    return (
-        value.startswith((".", "/", "~"))
-        or os.sep in value
-        or (os.altsep is not None and os.altsep in value)
-        or path.exists()
-    )
+    if path.exists():
+        return True
+    if value.startswith((".", "/", "~", "\\")):
+        return True
+    if os.name == "nt" and len(value) > 1 and value[1] == ":":
+        return True
+    return False
 
 
 def validate_halueval_model_reference(model_ref: str) -> str:
