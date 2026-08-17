@@ -1,9 +1,9 @@
-"""HalluciGuard — Hugging Face Gradio Space entry point with ZeroGPU support.
+"""HalluciGuard — Hugging Face Gradio ZeroGPU Space entry point.
 
 Architecture:
-  1. FastAPI app with REST endpoints (/health, /verify, /docs) is defined in orchestration.api
-  2. Top-level @spaces.GPU decorated Gradio verification handler for ZeroGPU (zero-a10g) hardware
-  3. Gradio UI is mounted onto the FastAPI app via gr.mount_gradio_app
+  1. Top-level @spaces.GPU decorated function `verify_claim`
+  2. Connected via button.click(fn=verify_claim, ...) inside gr.Blocks() as demo
+  3. FastAPI app from orchestration.api mounted via gr.mount_gradio_app
 """
 
 import asyncio
@@ -11,7 +11,6 @@ import json
 import os
 from typing import Any, Dict
 
-# ZeroGPU decorator setup — must be top-level for HF ZeroGPU AST analyzer
 try:
     import spaces
 except ImportError:
@@ -28,8 +27,9 @@ from orchestration.api import app as fastapi_app
 from orchestration.graph import run_verification
 
 
-def _sync_verify(user_query: str, domain: str = "general") -> str:
-    """Synchronous helper executing the LangGraph verification pipeline."""
+@spaces.GPU
+def verify_claim(user_query: str, domain: str = "general") -> str:
+    """ZeroGPU decorated verification handler."""
     if not user_query or not user_query.strip():
         return "Please enter a statement or query to verify."
     try:
@@ -67,46 +67,37 @@ def _sync_verify(user_query: str, domain: str = "general") -> str:
         return f"Verification Error: {type(exc).__name__}: {exc}"
 
 
-# Top-level @spaces.GPU decorator for Hugging Face ZeroGPU AST detection
-@spaces.GPU
-def verify_claim_gradio(user_query: str, domain: str = "general") -> str:
-    """ZeroGPU decorated verification handler."""
-    return _sync_verify(user_query, domain)
-
-
-# ---------------------------------------------------------------------------
-# Gradio UI Interface
-# ---------------------------------------------------------------------------
-demo = gr.Interface(
-    fn=verify_claim_gradio,
-    inputs=[
-        gr.Textbox(
+# Construct Gradio Blocks interface
+with gr.Blocks(title="HalluciGuard Verification Engine") as demo:
+    gr.Markdown("# 🛡️ HalluciGuard Verification Engine")
+    gr.Markdown(
+        "Production LangGraph Supervisor API powered by OpenRouter LLM, Detector, Verifier, and Memory Agents.\n\n"
+        "REST API endpoints available: **/health**, **/health?deep=true**, **/verify**, **/docs**"
+    )
+    
+    with gr.Row():
+        user_input = gr.Textbox(
             label="Claim / Question to Verify",
             placeholder="e.g. What is the capital of France? Or paste a claim to check for hallucinations...",
             lines=3,
-        ),
-        gr.Dropdown(
+        )
+        domain_input = gr.Dropdown(
             choices=["general", "biomedical", "finance"],
             value="general",
             label="Domain Context",
-        ),
-    ],
-    outputs=gr.Textbox(label="HalluciGuard Verification Result", lines=12),
-    title="🛡️ HalluciGuard Verification Engine",
-    description=(
-        "Production LangGraph Supervisor API powered by OpenRouter LLM, Detector, Verifier, and Memory Agents.\n"
-        "REST API endpoints available: **/health**, **/health?deep=true**, **/verify**, **/docs**"
-    ),
-    examples=[
-        ["What is the capital of France?", "general"],
-        ["Is aspirin safe for children with flu?", "biomedical"],
-    ],
-    allow_flagging="never",
-)
+        )
+    
+    verify_btn = gr.Button("Verify Claim", variant="primary")
+    output_text = gr.Textbox(label="HalluciGuard Verification Result", lines=12)
+    
+    verify_btn.click(
+        fn=verify_claim,
+        inputs=[user_input, domain_input],
+        outputs=output_text,
+    )
 
-# Mount Gradio onto the existing FastAPI app so REST endpoints & UI coexist
+# Mount FastAPI app onto Gradio's underlying server
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860)
