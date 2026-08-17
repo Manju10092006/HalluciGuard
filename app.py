@@ -9,4 +9,7 @@ demo = gr.Interface(
     description="Production LangGraph Supervisor API running on Hugging Face 16GB CPU Hardware."
 )
 
-app = gr.mount_gradio_app(fastapi_app, demo, path="/")
+app = gr.mount_gradio_app(fastapi_app, demo, path="/ui")
+
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", server_port=7860)
