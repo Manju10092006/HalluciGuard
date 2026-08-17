@@ -2,7 +2,7 @@
 
 Architecture:
   1. FastAPI app with REST endpoints (/health, /verify, /docs) is defined in orchestration.api
-  2. Gradio UI is decorated with @spaces.GPU for ZeroGPU dynamic allocation
+  2. Top-level @spaces.GPU decorated Gradio verification handler for ZeroGPU (zero-a10g) hardware
   3. Gradio UI is mounted onto the FastAPI app via gr.mount_gradio_app
 """
 
@@ -11,16 +11,19 @@ import json
 import os
 from typing import Any, Dict
 
-import gradio as gr
-
-# Try importing spaces for Hugging Face ZeroGPU environment
+# ZeroGPU decorator setup — must be top-level for HF ZeroGPU AST analyzer
 try:
     import spaces
-    HAS_SPACES = True
 except ImportError:
-    HAS_SPACES = False
-    spaces = None
+    class DummySpaces:
+        @staticmethod
+        def GPU(fn=None, **kwargs):
+            if fn is None:
+                return lambda f: f
+            return fn
+    spaces = DummySpaces()
 
+import gradio as gr
 from orchestration.api import app as fastapi_app
 from orchestration.graph import run_verification
 
@@ -38,7 +41,6 @@ def _sync_verify(user_query: str, domain: str = "general") -> str:
                 generation_mode="normal",
             )
         )
-        # Format clean, readable output for Gradio UI
         status = result.get("verification_status", "unverified").upper()
         terminal = result.get("terminal_status", "completed")
         final_resp = result.get("final_response") or result.get("draft_response") or "No response generated."
@@ -65,16 +67,11 @@ def _sync_verify(user_query: str, domain: str = "general") -> str:
         return f"Verification Error: {type(exc).__name__}: {exc}"
 
 
-# Define the ZeroGPU-decorated Gradio callback function
-if HAS_SPACES:
-    @spaces.GPU
-    def verify_claim_gradio(user_query: str, domain: str) -> str:
-        """Gradio callback decorated with @spaces.GPU for ZeroGPU dynamic allocation."""
-        return _sync_verify(user_query, domain)
-else:
-    def verify_claim_gradio(user_query: str, domain: str) -> str:
-        """Gradio callback for CPU fallback mode."""
-        return _sync_verify(user_query, domain)
+# Top-level @spaces.GPU decorator for Hugging Face ZeroGPU AST detection
+@spaces.GPU
+def verify_claim_gradio(user_query: str, domain: str = "general") -> str:
+    """ZeroGPU decorated verification handler."""
+    return _sync_verify(user_query, domain)
 
 
 # ---------------------------------------------------------------------------
