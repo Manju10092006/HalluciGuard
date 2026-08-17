@@ -3,7 +3,7 @@
 Architecture:
   1. Top-level @spaces.GPU decorated function `verify_claim`
   2. Connected via button.click(fn=verify_claim, ...) inside gr.Blocks() as demo
-  3. FastAPI app from orchestration.api mounted via gr.mount_gradio_app
+  3. FastAPI REST endpoints mounted onto Gradio via gr.mount_gradio_app
 """
 
 import asyncio
@@ -67,7 +67,7 @@ def verify_claim(user_query: str, domain: str = "general") -> str:
         return f"Verification Error: {type(exc).__name__}: {exc}"
 
 
-# Construct Gradio Blocks interface
+# Construct Gradio Blocks interface — top-level `demo` object picked up by HF Space launcher
 with gr.Blocks(title="HalluciGuard Verification Engine") as demo:
     gr.Markdown("# 🛡️ HalluciGuard Verification Engine")
     gr.Markdown(
@@ -96,8 +96,5 @@ with gr.Blocks(title="HalluciGuard Verification Engine") as demo:
         outputs=output_text,
     )
 
-# Mount FastAPI app onto Gradio's underlying server
+# Mount FastAPI REST endpoints onto Gradio app
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
-
-if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
