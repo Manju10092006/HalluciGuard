@@ -8,7 +8,13 @@ import socket
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+    class StrEnum(str, Enum):
+        pass
+
 from typing import Any, Literal
 
 import httpx
