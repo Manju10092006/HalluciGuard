@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Protocol, Optional
 
 from models.domain_intelligence import get_domain_intelligence_registry
@@ -34,17 +35,21 @@ class AdapterRegistry:
         self._adapters[adapter.name] = adapter
 
     def get_adapter(self, domain: str) -> DomainAdapter:
-        """Gets an adapter by domain name, falling back to general."""
+        """Gets an adapter by domain name, respecting domain specialization without silent general fallback."""
         domain_registry = get_domain_intelligence_registry()
         canonical_domain = domain_registry.canonicalize(domain)
         if canonical_domain in self._adapters:
             return self._adapters[canonical_domain]
         if domain in self._adapters:
             return self._adapters[domain]
+
+        # Specialized domain explicitly requested but missing adapter -> return StubAdapter for observable reporting
+        if domain.lower() in ("healthcare", "ai_research", "finance", "cybersecurity", "legal"):
+            from .stub_adapter import StubAdapter
+            return StubAdapter(domain)
+
         adapter = self._adapters.get("general")
         if adapter is None:
-            import logging
-            logging.getLogger(__name__).warning(f"No adapter found for {domain} and 'general' fallback is missing")
             from .stub_adapter import StubAdapter
             return StubAdapter(domain)
         return adapter
@@ -105,5 +110,20 @@ def get_registry() -> AdapterRegistry:
                 continue
             delegate = _REGISTRY._adapters.get(profile.adapter) or _REGISTRY._adapters["general"]
             _REGISTRY.register(DomainProxyAdapter(profile, delegate))
-        
+
+    # ── Dynamic Web-Enhanced wrapping (opt-in via TAVILY_API_KEY) ──────
+    tavily_key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if tavily_key:
+        from .web_enhanced import WebEnhancedAdapter
+        for domain_name in list(_REGISTRY._adapters.keys()):
+            original = _REGISTRY._adapters[domain_name]
+            if isinstance(original, WebEnhancedAdapter):
+                continue
+            if getattr(getattr(original, "metadata", None), "is_stub", False):
+                continue
+            _REGISTRY._adapters[domain_name] = WebEnhancedAdapter(
+                primary_adapter=original,
+                tavily_api_key=tavily_key,
+            )
+
     return _REGISTRY

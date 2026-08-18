@@ -1,0 +1,442 @@
+[
+  {
+    "claim": "Paris is the capital of France.",
+    "expanded_query": "paris is the capital of france",
+    "total_retrieved_count": 5,
+    "reported_retrieved_sources": 5,
+    "reported_verified_sources": 5,
+    "overall_trust_score": 0.406,
+    "verdict": "verified",
+    "explanation": "Verified (40.6% trust score): 3 out of 5 authoritative sources support this claim. The primary source (wikipedia, authority: 0.80) states: \"Article [Paris]: Paris is the capital and largest city of France, with an estimated city population of 2.04 million in an area of 105.4\u00a0km2 (40.7\u00a0sq\u00a0mi), and a metropolitan\" Published unknown.",
+    "raw_passages_list": [
+      {
+        "title": "Wikipedia: Paris",
+        "url": "https://en.wikipedia.org/wiki/Paris",
+        "snippet": "Article [Paris]: Paris is the capital and largest city of France, with an estimated city population of 2.04 million in an area of 105.4\u00a0km2 (40.7\u00a0sq\u00a0m",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: List of capitals of France",
+        "url": "https://en.wikipedia.org/wiki/List_of_capitals_of_France",
+        "snippet": "Article [List of capitals of France]: This is a chronological list of capitals of France. The capital of France has been Paris since its liberation in",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Paris (disambiguation)",
+        "url": "https://en.wikipedia.org/wiki/Paris_%28disambiguation%29",
+        "snippet": "Article [Paris (disambiguation)]: up Paris, P\u00e1ris, Par\u00eds, Par\u00ecs, paris, par\u00eds, p\u0101ris, or p\u00e4ris in Wiktionary, the free dictionary. Paris is the capita",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Entity linking",
+        "url": "https://en.wikipedia.org/wiki/Entity_linking",
+        "snippet": "Article [Entity linking]: text. For example, given the sentence \"Paris is the capital of France\", the main idea is to first identify \"Paris\" and \"Fran",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Paris FC",
+        "url": "https://en.wikipedia.org/wiki/Paris_FC",
+        "snippet": "Article [Paris FC]: association football club based in Paris, France, which competes in Ligue 1, the top division of French football. Founded in 1969,",
+        "relevance_score": 0.7
+      }
+    ],
+    "reranked_passages": [
+      {
+        "title": "Wikipedia: Paris (disambiguation)",
+        "url": "https://en.wikipedia.org/wiki/Paris_%28disambiguation%29",
+        "snippet": "Article [Paris (disambiguation)]: up Paris, P\u00e1ris, Par\u00eds, Par\u00ecs, paris, par\u00eds, p\u0101ris, or p\u00e4ris in Wiktionary, the free dictionary. Paris is the capital of France, which may consist of: Greater",
+        "relevance_score": 0.856797,
+        "nli_label": "entailment",
+        "nli_entailment": 0.996832,
+        "nli_contradiction": 0.000112,
+        "nli_neutral": 0.003056,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: Entity linking",
+        "url": "https://en.wikipedia.org/wiki/Entity_linking",
+        "snippet": "Article [Entity linking]: text. For example, given the sentence \"Paris is the capital of France\", the main idea is to first identify \"Paris\" and \"France\" as named entities, and",
+        "relevance_score": 0.849538,
+        "nli_label": "entailment",
+        "nli_entailment": 0.978279,
+        "nli_contradiction": 0.00111,
+        "nli_neutral": 0.020612,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: Paris",
+        "url": "https://en.wikipedia.org/wiki/Paris",
+        "snippet": "Article [Paris]: Paris is the capital and largest city of France, with an estimated city population of 2.04 million in an area of 105.4\u00a0km2 (40.7\u00a0sq\u00a0mi), and a metropolitan",
+        "relevance_score": 0.83275,
+        "nli_label": "entailment",
+        "nli_entailment": 0.997679,
+        "nli_contradiction": 4.4e-05,
+        "nli_neutral": 0.002277,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: List of capitals of France",
+        "url": "https://en.wikipedia.org/wiki/List_of_capitals_of_France",
+        "snippet": "Article [List of capitals of France]: This is a chronological list of capitals of France. The capital of France has been Paris since its liberation in 1944. Tournai (before 486), current-day",
+        "relevance_score": 0.824766,
+        "nli_label": "contradiction",
+        "nli_entailment": 0.132466,
+        "nli_contradiction": 0.848184,
+        "nli_neutral": 0.01935,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: Paris FC",
+        "url": "https://en.wikipedia.org/wiki/Paris_FC",
+        "snippet": "Article [Paris FC]: association football club based in Paris, France, which competes in Ligue 1, the top division of French football. Founded in 1969, the club merged with Stade Saint-Germain",
+        "relevance_score": 0.727786,
+        "nli_label": "contradiction",
+        "nli_entailment": 1.9e-05,
+        "nli_contradiction": 0.995275,
+        "nli_neutral": 0.004706,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      }
+    ],
+    "score_dict": {
+      "support_score": 0.6767,
+      "contradiction_score": 0.5389,
+      "trust_score": 0.3985,
+      "verdict": "verified"
+    }
+  },
+  {
+    "claim": "The Moon is made of green cheese.",
+    "expanded_query": "the moon is made of green cheese",
+    "total_retrieved_count": 5,
+    "reported_retrieved_sources": 5,
+    "reported_verified_sources": 3,
+    "overall_trust_score": 0.3088,
+    "verdict": "likely_hallucinated",
+    "explanation": "Likely Hallucinated (2 contradicting sources): Authoritative evidence contradicts this claim. The primary source (wikipedia, authority: 0.80) states: \"Article [Government cheese]: Government cheese is processed cheese provided to welfare beneficiaries, Food Stamp recipients, and the elderly receiving Social Security in the Uni...\" Published unknown.",
+    "raw_passages_list": [
+      {
+        "title": "Wikipedia: The Moon is made of green cheese",
+        "url": "https://en.wikipedia.org/wiki/The_Moon_is_made_of_green_cheese",
+        "snippet": "Article [The Moon is made of green cheese]: \"The Moon is made of green cheese\" is a statement referring to a fanciful belief that the Moon is composed",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Green cheese",
+        "url": "https://en.wikipedia.org/wiki/Green_cheese",
+        "snippet": "Article [Green cheese]: \"the Moon is made of green cheese\" refers to the similarity in appearance of a typical round, green cheese and the full Moon. ",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Government cheese",
+        "url": "https://en.wikipedia.org/wiki/Government_cheese",
+        "snippet": "Article [Government cheese]: Government cheese is processed cheese provided to welfare beneficiaries, Food Stamp recipients, and the elderly receiving",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Total Eclipse (Billy Cobham album)",
+        "url": "https://en.wikipedia.org/wiki/Total_Eclipse_%28Billy_Cobham_album%29",
+        "snippet": "Article [Total Eclipse (Billy Cobham album)]: \"Moon Germs\" \u2013 4:55 \"The Moon Ain't Made of Green Cheese\" \u2013 0:56 \"Sea of Tranquility\" \u2013 10:44 \"Last Fron",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Cheese",
+        "url": "https://en.wikipedia.org/wiki/Cheese",
+        "snippet": "Article [Cheese]: The Proverbs of John Heywood claimed \"the moon is made of a green cheese\" (Greene may refer here not to the color, as many now think",
+        "relevance_score": 0.7
+      }
+    ],
+    "reranked_passages": [
+      {
+        "title": "Wikipedia: The Moon is made of green cheese",
+        "url": "https://en.wikipedia.org/wiki/The_Moon_is_made_of_green_cheese",
+        "snippet": "Article [The Moon is made of green cheese]: \"The Moon is made of green cheese\" is a statement referring to a fanciful belief that the Moon is composed of cheese. In its original formulation as a",
+        "relevance_score": 0.88,
+        "nli_label": "entailment",
+        "nli_entailment": 0.991742,
+        "nli_contradiction": 0.001173,
+        "nli_neutral": 0.007085,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: Green cheese",
+        "url": "https://en.wikipedia.org/wiki/Green_cheese",
+        "snippet": "Article [Green cheese]: \"the Moon is made of green cheese\" refers to the similarity in appearance of a typical round, green cheese and the full Moon. It is commonly misinterpreted",
+        "relevance_score": 0.864286,
+        "nli_label": "neutral",
+        "nli_entailment": 0.002364,
+        "nli_contradiction": 0.004732,
+        "nli_neutral": 0.992905,
+        "credibility": 0.8,
+        "in_decision_grade": false
+      },
+      {
+        "title": "Wikipedia: Cheese",
+        "url": "https://en.wikipedia.org/wiki/Cheese",
+        "snippet": "Article [Cheese]: The Proverbs of John Heywood claimed \"the moon is made of a green cheese\" (Greene may refer here not to the color, as many now think, but to being new",
+        "relevance_score": 0.809547,
+        "nli_label": "neutral",
+        "nli_entailment": 0.088261,
+        "nli_contradiction": 0.046954,
+        "nli_neutral": 0.864785,
+        "credibility": 0.8,
+        "in_decision_grade": false
+      },
+      {
+        "title": "Wikipedia: Total Eclipse (Billy Cobham album)",
+        "url": "https://en.wikipedia.org/wiki/Total_Eclipse_%28Billy_Cobham_album%29",
+        "snippet": "Article [Total Eclipse (Billy Cobham album)]: \"Moon Germs\" \u2013 4:55 \"The Moon Ain't Made of Green Cheese\" \u2013 0:56 \"Sea of Tranquility\" \u2013 10:44 \"Last Frontier\" \u2013 5:22 The personnel on all sections is:",
+        "relevance_score": 0.802288,
+        "nli_label": "contradiction",
+        "nli_entailment": 0.000126,
+        "nli_contradiction": 0.9988,
+        "nli_neutral": 0.001074,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: Government cheese",
+        "url": "https://en.wikipedia.org/wiki/Government_cheese",
+        "snippet": "Article [Government cheese]: Government cheese is processed cheese provided to welfare beneficiaries, Food Stamp recipients, and the elderly receiving Social Security in the United States",
+        "relevance_score": 0.623954,
+        "nli_label": "contradiction",
+        "nli_entailment": 8e-06,
+        "nli_contradiction": 0.999847,
+        "nli_neutral": 0.000145,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      }
+    ],
+    "score_dict": {
+      "support_score": 0.592,
+      "contradiction_score": 0.5766,
+      "trust_score": 0.3098,
+      "verdict": "mixed_evidence"
+    }
+  },
+  {
+    "claim": "Aspirin is used to treat mild pain.",
+    "expanded_query": "aspirin is used to treat mild pain",
+    "total_retrieved_count": 5,
+    "reported_retrieved_sources": 5,
+    "reported_verified_sources": 0,
+    "overall_trust_score": 0.0,
+    "verdict": "insufficient_evidence",
+    "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+    "raw_passages_list": [
+      {
+        "title": "Wikipedia: Aspirin",
+        "url": "https://en.wikipedia.org/wiki/Aspirin",
+        "snippet": "Article [Aspirin]: Aspirin is used to treat inflammatory conditions including Kawasaki disease, pericarditis, and rheumatic fever. Aspirin is also use",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Chronic pain",
+        "url": "https://en.wikipedia.org/wiki/Chronic_pain",
+        "snippet": "Article [Chronic pain]: interventions. Medications such as aspirin and ibuprofen are used for mild pain whereas morphine and codeine are prescribed fo",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Bee sting",
+        "url": "https://en.wikipedia.org/wiki/Bee_sting",
+        "snippet": "Article [Bee sting]: only mild pain in most people, allergic reactions may occur in people with allergies to venom components, which can be life-threa",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Paracetamol",
+        "url": "https://en.wikipedia.org/wiki/Paracetamol",
+        "snippet": "Article [Paracetamol]: Paracetamol, or acetaminophen, is an analgesic and antipyretic agent used to treat fever and mild to moderate pain. It is a wid",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Foot drop",
+        "url": "https://en.wikipedia.org/wiki/Foot_drop",
+        "snippet": "Article [Foot drop]: like ibuprofen or aspirin. If necessary, a decompression surgery that is minimally destructive of normal structures may be used t",
+        "relevance_score": 0.7
+      }
+    ],
+    "reranked_passages": [
+      {
+        "title": "Wikipedia: Chronic pain",
+        "url": "https://en.wikipedia.org/wiki/Chronic_pain",
+        "snippet": "Article [Chronic pain]: interventions. Medications such as aspirin and ibuprofen are used for mild pain whereas morphine and codeine are prescribed for severe pain. Non-pharmacological treatments",
+        "relevance_score": 0.771216,
+        "nli_label": "neutral",
+        "nli_entailment": 0.006177,
+        "nli_contradiction": 0.01556,
+        "nli_neutral": 0.978263,
+        "credibility": 0.8,
+        "in_decision_grade": false
+      },
+      {
+        "title": "Wikipedia: Paracetamol",
+        "url": "https://en.wikipedia.org/wiki/Paracetamol",
+        "snippet": "Article [Paracetamol]: Paracetamol, or acetaminophen, is an analgesic and antipyretic agent used to treat fever and mild to moderate pain. It is a widely available over-the-counter",
+        "relevance_score": 0.763486,
+        "nli_label": "neutral",
+        "nli_entailment": 0.000244,
+        "nli_contradiction": 0.019001,
+        "nli_neutral": 0.980755,
+        "credibility": 0.8,
+        "in_decision_grade": false
+      },
+      {
+        "title": "Wikipedia: Aspirin",
+        "url": "https://en.wikipedia.org/wiki/Aspirin",
+        "snippet": "Article [Aspirin]: Aspirin is used to treat inflammatory conditions including Kawasaki disease, pericarditis, and rheumatic fever. Aspirin is also used long-term to reduce",
+        "relevance_score": 0.72565,
+        "nli_label": "neutral",
+        "nli_entailment": 9.3e-05,
+        "nli_contradiction": 0.002005,
+        "nli_neutral": 0.997903,
+        "credibility": 0.8,
+        "in_decision_grade": false
+      },
+      {
+        "title": "Wikipedia: Foot drop",
+        "url": "https://en.wikipedia.org/wiki/Foot_drop",
+        "snippet": "Article [Foot drop]: like ibuprofen or aspirin. If necessary, a decompression surgery that is minimally destructive of normal structures may be used to treat spinal stenosis",
+        "relevance_score": 0.695188,
+        "nli_label": "neutral",
+        "nli_entailment": 0.001418,
+        "nli_contradiction": 0.000154,
+        "nli_neutral": 0.998428,
+        "credibility": 0.8,
+        "in_decision_grade": false
+      },
+      {
+        "title": "Wikipedia: Bee sting",
+        "url": "https://en.wikipedia.org/wiki/Bee_sting",
+        "snippet": "Article [Bee sting]: only mild pain in most people, allergic reactions may occur in people with allergies to venom components, which can be life-threatening if not treated immediately",
+        "relevance_score": 0.648897,
+        "nli_label": "neutral",
+        "nli_entailment": 0.000266,
+        "nli_contradiction": 0.001766,
+        "nli_neutral": 0.997967,
+        "credibility": 0.8,
+        "in_decision_grade": false
+      }
+    ],
+    "score_dict": {
+      "support_score": 0.0,
+      "contradiction_score": 0.0,
+      "trust_score": 0.0,
+      "verdict": "insufficient_evidence"
+    }
+  },
+  {
+    "claim": "The Eiffel Tower is in London.",
+    "expanded_query": "the eiffel tower is in london",
+    "total_retrieved_count": 5,
+    "reported_retrieved_sources": 5,
+    "reported_verified_sources": 4,
+    "overall_trust_score": 0.0,
+    "verdict": "likely_hallucinated",
+    "explanation": "Likely Hallucinated (4 contradicting sources): Authoritative evidence contradicts this claim. The primary source (wikipedia, authority: 0.80) states: \"Article [Eiffel Tower]: The Eiffel Tower (/\u02c8a\u026af\u0259l/ EYE-f\u0259l; French: Tour Eiffel [tu\u0281 \u025bf\u025bl] ) is a lattice tower on the Champ de Mars in Paris, France. It is named after the engi...\" Published unknown. No supporting evidence was found from any authoritative database.",
+    "raw_passages_list": [
+      {
+        "title": "Wikipedia: Eiffel Tower",
+        "url": "https://en.wikipedia.org/wiki/Eiffel_Tower",
+        "snippet": "Article [Eiffel Tower]: The Eiffel Tower (/\u02c8a\u026af\u0259l/ EYE-f\u0259l; French: Tour Eiffel [tu\u0281 \u025bf\u025bl] ) is a lattice tower on the Champ de Mars in Paris, France.",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Eiffel Tower replicas and derivatives",
+        "url": "https://en.wikipedia.org/wiki/Eiffel_Tower_replicas_and_derivatives",
+        "snippet": "Article [Eiffel Tower replicas and derivatives]: As one of the most iconic and recognizable structures in the world, the Eiffel Tower, completed in 18",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Gustave Eiffel",
+        "url": "https://en.wikipedia.org/wiki/Gustave_Eiffel",
+        "snippet": "Article [Gustave Eiffel]: for the French railway network, most famously the Garabit Viaduct. He is best known for the Eiffel Tower, designed by his co",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Watkin's Tower",
+        "url": "https://en.wikipedia.org/wiki/Watkin%27s_Tower",
+        "snippet": "Article [Watkin's Tower]: designed to surpass the height of the Eiffel Tower in Paris, and it was part of Wembley Park's emergence as a recreational s",
+        "relevance_score": 0.7
+      },
+      {
+        "title": "Wikipedia: Tokyo Tower",
+        "url": "https://en.wikipedia.org/wiki/Tokyo_Tower",
+        "snippet": "Article [Tokyo Tower]: tallest tower in Japan until the construction of Tokyo Skytree in 2012. It is a lattice tower inspired by the Eiffel Tower, and",
+        "relevance_score": 0.7
+      }
+    ],
+    "reranked_passages": [
+      {
+        "title": "Wikipedia: Tokyo Tower",
+        "url": "https://en.wikipedia.org/wiki/Tokyo_Tower",
+        "snippet": "Article [Tokyo Tower]: tallest tower in Japan until the construction of Tokyo Skytree in 2012. It is a lattice tower inspired by the Eiffel Tower, and is painted white and international",
+        "relevance_score": 0.7435,
+        "nli_label": "neutral",
+        "nli_entailment": 9.6e-05,
+        "nli_contradiction": 0.279959,
+        "nli_neutral": 0.719946,
+        "credibility": 0.8,
+        "in_decision_grade": false
+      },
+      {
+        "title": "Wikipedia: Gustave Eiffel",
+        "url": "https://en.wikipedia.org/wiki/Gustave_Eiffel",
+        "snippet": "Article [Gustave Eiffel]: for the French railway network, most famously the Garabit Viaduct. He is best known for the Eiffel Tower, designed by his company and built for the 1889",
+        "relevance_score": 0.735516,
+        "nli_label": "contradiction",
+        "nli_entailment": 3.1e-05,
+        "nli_contradiction": 0.999098,
+        "nli_neutral": 0.000871,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: Eiffel Tower replicas and derivatives",
+        "url": "https://en.wikipedia.org/wiki/Eiffel_Tower_replicas_and_derivatives",
+        "snippet": "Article [Eiffel Tower replicas and derivatives]: As one of the most iconic and recognizable structures in the world, the Eiffel Tower, completed in 1889, has been the inspiration for the creation of",
+        "relevance_score": 0.727786,
+        "nli_label": "contradiction",
+        "nli_entailment": 8.6e-05,
+        "nli_contradiction": 0.997265,
+        "nli_neutral": 0.002649,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: Eiffel Tower",
+        "url": "https://en.wikipedia.org/wiki/Eiffel_Tower",
+        "snippet": "Article [Eiffel Tower]: The Eiffel Tower (/\u02c8a\u026af\u0259l/ EYE-f\u0259l; French: Tour Eiffel [tu\u0281 \u025bf\u025bl] ) is a lattice tower on the Champ de Mars in Paris, France. It is named after the engineer",
+        "relevance_score": 0.720297,
+        "nli_label": "contradiction",
+        "nli_entailment": 3e-05,
+        "nli_contradiction": 0.999647,
+        "nli_neutral": 0.000323,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      },
+      {
+        "title": "Wikipedia: Watkin's Tower",
+        "url": "https://en.wikipedia.org/wiki/Watkin%27s_Tower",
+        "snippet": "Article [Watkin's Tower]: designed to surpass the height of the Eiffel Tower in Paris, and it was part of Wembley Park's emergence as a recreational space. The tower was never completed",
+        "relevance_score": 0.713038,
+        "nli_label": "contradiction",
+        "nli_entailment": 2.9e-05,
+        "nli_contradiction": 0.999577,
+        "nli_neutral": 0.000395,
+        "credibility": 0.8,
+        "in_decision_grade": true
+      }
+    ],
+    "score_dict": {
+      "support_score": 0.0,
+      "contradiction_score": 0.6472,
+      "trust_score": 0.0,
+      "verdict": "likely_hallucinated"
+    }
+  }
+]
