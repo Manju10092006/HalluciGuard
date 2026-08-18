@@ -348,20 +348,19 @@ function renderResults(d) {
   }
 
   let claimRows = '';
-  if (d.claim_verdicts && d.claim_verdicts.length) {
-    d.claim_verdicts.forEach(cv => {
-      const scoreNum = (cv.hallucination_score !== undefined ? cv.hallucination_score * 100 : (cv.nli_contradiction*100));
-      const scoreColor = scoreNum >= 70 ? 'var(--red)' : scoreNum >= 35 ? 'var(--yellow)' : 'var(--green)';
-      const scoreLabel = cv.hallucination_pct || (scoreNum.toFixed(1) + '%');
+  if (d.claim_decisions && d.claim_decisions.length) {
+    d.claim_decisions.forEach(cd => {
+      const actClass = cd.action === 'ACCEPT' ? 'status-VERIFIED' : (cd.action === 'CORRECT' ? 'status-HALLUCINATED' : 'status-UNVERIFIED');
+      const stClass = cd.status === 'VERIFIED' ? 'status-VERIFIED' : (cd.status === 'CONTRADICTED' ? 'status-HALLUCINATED' : 'status-UNVERIFIED');
+      const evIds = (cd.evidence_ids || []).join(', ') || '—';
 
       claimRows += `<tr>
-        <td><span class="status-pill status-${cv.status}">${cv.status_label}</span></td>
-        <td><span style="font-weight:800;color:${scoreColor};background:rgba(255,255,255,.05);padding:2px 8px;border-radius:6px;font-size:.8rem">${scoreLabel}</span></td>
-        <td>${cv.claim_text ? cv.claim_text.substring(0,80) : '—'}${cv.claim_text && cv.claim_text.length > 80 ? '…' : ''}</td>
-        <td>${cv.source || '—'}</td>
-        <td style="color:var(--green)">${(cv.nli_entailment*100).toFixed(0)}%</td>
-        <td style="color:var(--red)">${(cv.nli_contradiction*100).toFixed(0)}%</td>
-        <td>${cv.conflict_type !== 'NONE' ? cv.conflict_type : '—'}</td>
+        <td style="font-weight:700;color:var(--accent2)">${cd.claim_id || '—'}</td>
+        <td><span class="status-pill ${stClass}">${cd.status}</span></td>
+        <td><span class="status-pill ${actClass}" style="font-weight:800">${cd.action}</span></td>
+        <td>${cd.claim_text ? cd.claim_text.substring(0,80) : '—'}${cd.claim_text && cd.claim_text.length > 80 ? '…' : ''}</td>
+        <td><span style="font-family:monospace;background:var(--surface3);padding:2px 6px;border-radius:4px;color:var(--cyan)">${evIds}</span></td>
+        <td style="font-size:.72rem;color:var(--text3)">${cd.reason || '—'}</td>
       </tr>`;
     });
   }
@@ -452,12 +451,12 @@ function renderResults(d) {
       </div>
     </div>
 
-    <!-- Claim Verdicts -->
+    <!-- Claim Decisions -->
     ${claimRows ? `<div class="section">
-      <div class="section-title">Claim-Level Verdicts & Hallucination Breakdown</div>
+      <div class="section-title">Claim-Level Governance & Action Decisions</div>
       <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">
         <table class="claims-table">
-          <thead><tr><th>Status</th><th>Hallucination Score</th><th>Extracted Claim</th><th>Source</th><th>Entailment</th><th>Contradiction</th><th>Conflict</th></tr></thead>
+          <thead><tr><th>ID</th><th>Verifier Status</th><th>Judge Action</th><th>Claim Text</th><th>Evidence IDs</th><th>Governance Reason</th></tr></thead>
           <tbody>${claimRows}</tbody>
         </table>
       </div>
@@ -549,6 +548,7 @@ def evaluate():
     )
     return jsonify({
         "decision": verdict.decision.value,
+        "overall_decision": verdict.overall_decision,
         "severity": verdict.severity.value,
         "reasoning_chain": verdict.reasoning_chain,
         "workflow_action": verdict.workflow_action,
@@ -561,6 +561,9 @@ def evaluate():
         "memory_insight": verdict.memory_insight,
         "audit_record": verdict.audit_record,
         "claim_verdicts": verdict.claim_verdicts,
+        "claim_decisions": verdict.claim_decisions,
+        "correction_required": verdict.correction_required,
+        "re_verification_required": verdict.re_verification_required,
         "detector_signal": verdict.detector_signal,
         "alternatives_rejected": verdict.alternatives_rejected
     })
