@@ -470,9 +470,9 @@ class DecisionIntelligenceEngine:
                 claim_action = "ACCEPT"
                 reason = "Claim is verified by authoritative evidence."
             elif claim_status == "CONTRADICTED":
-                if is_safety:
+                if is_safety or det_prob >= 0.35 or (policy and policy.strictness_level in ("VERY_STRICT", "STRICT", "MODERATE")):
                     claim_action = "REJECT"
-                    reason = "Safety-critical contradiction detected. Claim rejected."
+                    reason = "Claim contradicted by authoritative evidence. Response rejected."
                 else:
                     claim_action = "CORRECT"
                     reason = "Claim contradicted by evidence. Flagged for Corrector Agent."
