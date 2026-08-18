@@ -55,6 +55,7 @@ async def test_openrouter_success_returns_draft_and_usage():
     )
     result = await service.generate("Respond with the single word: Connected.")
     assert result.status == "success"
+    assert result.user_query == "Respond with the single word: Connected."
     assert result.provider == "openrouter"
     assert result.model == "qwen/qwen3-4b"
     assert result.draft_response == "Connected."

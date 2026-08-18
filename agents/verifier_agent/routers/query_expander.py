@@ -49,10 +49,16 @@ class QueryExpander:
         resolution = self.entity_resolver.resolve(query, domain)
         domain_key = domain.lower()
 
-        # If a canonical entity query was resolved (e.g. CVE-2021-44228 or Metformin type 2 diabetes),
-        # start with the canonical query!
+        # Canonical entities improve source matching, but must not replace the
+        # rest of a factual claim: predicates, conditions, and outcomes carry
+        # the verification intent.
         if resolution.canonical_query and resolution.primary_entity:
-            base_query = resolution.canonical_query
+            canonical = resolution.canonical_query.strip()
+            normalized_query = " ".join(query.split())
+            if canonical.lower() in normalized_query.lower():
+                base_query = normalized_query
+            else:
+                base_query = f"{canonical} {normalized_query}"
         else:
             base_query = query
 
@@ -68,6 +74,61 @@ class QueryExpander:
         # Clean up whitespace
         clean_query = " ".join(expanded_query.split())
         return clean_query, resolution
+
+    def generate_search_queries(self, query: str, domain: str) -> List[str]:
+        """
+        Generate primary and expanded search queries preserving the semantic subject.
+        Returns a list of 1-3 distinct search query strings.
+        """
+        clean_q = " ".join((query or "").split())
+        if not clean_q:
+            return []
+
+        queries = [clean_q]
+
+        resolution = self.entity_resolver.resolve(clean_q, domain)
+        if resolution.canonical_query and resolution.canonical_query.lower() != clean_q.lower():
+            queries.append(resolution.canonical_query)
+
+        # Subject-predicate expansion for relationship claims (e.g. 'X was created by Y' -> 'X creator', 'X created by')
+        created_match = re.search(
+            r"^([A-Za-z0-9\s]+?)\s+(?:was\s+)?(?:created|developed|invented|founded|written|authored|discovered)\s+by\s+",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if created_match:
+            subj = created_match.group(1).strip()
+            if subj and len(subj) > 2:
+                queries.append(f"{subj} created by")
+
+        capital_match = re.search(
+            r"^([A-Za-z0-9\s]+?)\s+is\s+the\s+capital\s+of\s+([A-Za-z0-9\s]+)",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if capital_match:
+            country = capital_match.group(2).strip()
+            queries.append(f"capital of {country}")
+
+        location_match = re.search(
+            r"^([A-Za-z0-9\s]+?)\s+is\s+(?:located\s+in|in)\s+([A-Za-z0-9\s]+)",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if location_match:
+            landmark = location_match.group(1).strip()
+            queries.append(f"{landmark} location")
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique_queries = []
+        for q in queries:
+            qn = q.strip().lower()
+            if qn and qn not in seen:
+                seen.add(qn)
+                unique_queries.append(q.strip())
+
+        return unique_queries[:3]
 
     def expand(self, query: str, domain: str) -> str:
         """Helper returning just the expanded query string for backward compatibility."""

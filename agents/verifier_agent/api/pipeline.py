@@ -80,6 +80,32 @@ class VerificationPipeline:
     # Evidence gating and confidence calibration
     # ------------------------------------------------------------------
     @staticmethod
+    def _select_relevant_passages(passages: List[Passage]) -> List[Passage]:
+        """Apply relevance and source-diversity gates before NLI."""
+        if not passages:
+            return []
+
+        # Keep passages with non-zero relevance signal
+        relevant = [
+            passage
+            for passage in passages
+            if passage.relevance_score > 0.0001 or EvidenceScorer.relevance_weight(passage.relevance_score) >= 0.05
+        ]
+        if not relevant:
+            relevant = passages[:5]
+
+        # Multiple search hits from one source are not independent evidence.
+        # Keep the strongest reranked passage per source so a tangential page
+        # cannot manufacture a same-source conflict with a direct statement.
+        strongest_by_source: Dict[str, Passage] = {}
+        for passage in relevant:
+            source_key = passage.source or passage.source_id or passage.url
+            current = strongest_by_source.get(source_key)
+            if current is None or passage.relevance_score > current.relevance_score:
+                strongest_by_source[source_key] = passage
+        return list(strongest_by_source.values())
+
+    @staticmethod
     def _select_decision_grade_evidence(
         passages: List[Passage],
         nli_results: List[Dict[str, Any]],
@@ -100,9 +126,6 @@ class VerificationPipeline:
             >= 0.35
         ]
 
-        # If the model is uncertain about every passage, do not manufacture
-        # evidence. Return empty evidence and let the final verdict be
-        # insufficient_evidence.
         if not selected:
             return [], []
 
@@ -122,17 +145,27 @@ class VerificationPipeline:
         evidence_count: int,
         conflict_res: Dict[str, Any],
     ) -> float:
-        """Calibrate trust without unfairly penalizing a single strong source."""
-        base = max(0.0, min(1.0, float(scores.get("trust_score", 0.0))))
+        """
+        Calibrate confidence across both verified and contradicted claims.
+        Reflects evidence strength, consensus, and source stability without arbitrary zeros.
+        """
+        if scores.get("confidence_score") is not None and float(scores.get("confidence_score", 0.0)) > 0.0:
+            base = float(scores["confidence_score"])
+        else:
+            sup = float(scores.get("support_score", 0.0))
+            con = float(scores.get("contradiction_score", 0.0))
+            primary = max(sup, con)
+            if primary < 0.15:
+                return 0.0
+            consensus = max(0.10, 1.0 - min(sup, con))
+            base = primary * consensus
+
         if evidence_count <= 0 or base <= 0.0:
             return 0.0
 
-        # Quality is already encoded in trust_score. Evidence count is only a
-        # modest stability bonus, so one authoritative source can still yield
-        # high confidence while independent sources increase stability.
         evidence_factor = 0.75 + 0.25 * min(1.0, evidence_count / 3.0)
         conflict_penalty = (
-            0.80 if conflict_res.get("resolution_type") == "genuine_conflict" else 1.0
+            0.60 if conflict_res.get("resolution_type") == "genuine_conflict" else 1.0
         )
         return round(max(0.0, min(1.0, base * evidence_factor * conflict_penalty)), 4)
 
@@ -221,18 +254,35 @@ class VerificationPipeline:
 
                     with tracker.track(PipelineStage.RETRIEVAL):
                         retrieval_start = time.time()
-                        try:
-                            raw_passages = await adapter.search(expanded_query)
-                        except Exception as e:
-                            self.logger.error(
-                                "Adapter retrieval failed for query '%s': %s",
-                                expanded_query,
-                                e,
-                            )
-                            adapter_failures.append(
-                                f"{validated_domain}:{str(e)[:100]}"
-                            )
-                            raw_passages = []
+                        search_queries = self.query_expander.generate_search_queries(
+                            sub_claim, validated_domain
+                        )
+                        if not search_queries:
+                            search_queries = [expanded_query]
+
+                        all_raw: List[Passage] = []
+                        for q in search_queries:
+                            try:
+                                q_passages = await adapter.search(q)
+                                all_raw.extend(q_passages)
+                            except Exception as e:
+                                self.logger.error(
+                                    "Adapter retrieval failed for query '%s': %s",
+                                    q,
+                                    e,
+                                )
+                                adapter_failures.append(
+                                    f"{validated_domain}:{str(e)[:100]}"
+                                )
+
+                        # Deduplicate raw passages by unique URL/ID/title
+                        seen_doc_keys = set()
+                        raw_passages = []
+                        for p in all_raw:
+                            doc_k = (p.url or p.source_id or p.title or "").strip().lower()
+                            if doc_k and doc_k not in seen_doc_keys:
+                                seen_doc_keys.add(doc_k)
+                                raw_passages.append(p)
 
                         retrieval_duration = int((time.time() - retrieval_start) * 1000)
                         self.metrics.record_retrieval(
@@ -261,10 +311,13 @@ class VerificationPipeline:
 
                     with tracker.track(PipelineStage.NLI):
                         nli_start = time.time()
+                        relevant_passages = self._select_relevant_passages(
+                            reranked_passages
+                        )
                         nli_results = (
                             self.nli_engine.batch_classify(
                                 sub_claim,
-                                [p.snippet for p in reranked_passages],
+                                [p.snippet for p in relevant_passages],
                                 model_name=route.nli_model,
                             )
                             if reranked_passages
@@ -277,8 +330,8 @@ class VerificationPipeline:
                     # Only evidence with a meaningful NLI signal is allowed to
                     # influence scoring, conflict resolution, or final citations.
                     decision_passages, decision_nli = (
-                        self._select_decision_grade_evidence(
-                            reranked_passages, nli_results
+                            self._select_decision_grade_evidence(
+                            relevant_passages, nli_results
                         )
                     )
 
@@ -319,15 +372,16 @@ class VerificationPipeline:
                 if isinstance(verdict, str):
                     verdict_map = {
                         "verified": VerdictLabel.VERIFIED,
-                        "likely_hallucinated": VerdictLabel.LIKELY_HALLUCINATED,
-                        "insufficient_evidence": VerdictLabel.INSUFFICIENT_EVIDENCE,
+                        "contradicted": VerdictLabel.CONTRADICTED,
+                        "unverified": VerdictLabel.UNVERIFIED,
+                        "conflicted": VerdictLabel.CONFLICTED,
                     }
-                    verdict = verdict_map.get(verdict, VerdictLabel.MIXED_EVIDENCE)
+                    verdict = verdict_map.get(verdict, VerdictLabel.UNVERIFIED)
                 elif not isinstance(verdict, VerdictLabel):
                     verdict = (
-                        VerdictLabel.INSUFFICIENT_EVIDENCE
+                        VerdictLabel.UNVERIFIED
                         if not claim_evidence_items
-                        else VerdictLabel.MIXED_EVIDENCE
+                        else VerdictLabel.CONFLICTED
                     )
 
                 confidence = self._calibrate_confidence(
@@ -398,7 +452,7 @@ class VerificationPipeline:
                     contradiction_score=0.0,
                     trust_score=0.0,
                     confidence_score=0.0,
-                    verdict=VerdictLabel.INSUFFICIENT_EVIDENCE,
+                    verdict=VerdictLabel.UNVERIFIED,
                     explanation=f"Pipeline error: {type(e).__name__} — {str(e)[:200]}. This claim could not be verified.",
                 )
                 claim_reports.append(error_report)
@@ -432,10 +486,18 @@ class VerificationPipeline:
                 )
             )
 
+        sources_attempted = getattr(adapter, "sources_attempted", [adapter.name])
+        sources_succeeded = getattr(adapter, "sources_succeeded", [adapter.name] if total_retrieved > 0 else [])
+        sources_failed = getattr(adapter, "sources_failed", [] if total_retrieved > 0 else [adapter.name])
+
         final_response = VerifierOutputV2(
             query_id=payload.query_id,
             domain=validated_domain,
             domain_validated=is_domain_correct,
+            adapter=adapter.name,
+            sources_attempted=sources_attempted,
+            sources_succeeded=sources_succeeded,
+            sources_failed=sources_failed,
             retrieved_sources=total_retrieved,
             verified_sources=sum(len(r.evidence) for r in claim_reports),
             claim_evidence=claim_reports,

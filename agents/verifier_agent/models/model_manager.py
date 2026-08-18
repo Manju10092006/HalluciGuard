@@ -180,9 +180,6 @@ class ModelManager:
             settings = get_settings()
             t0 = time.monotonic()
             ce_kwargs: Dict[str, Any] = {"device": self.device}
-            if not os.path.isdir(model_name) and not settings.allow_model_downloads:
-                ce_kwargs["model_kwargs"] = {"local_files_only": True}
-                ce_kwargs["tokenizer_kwargs"] = {"local_files_only": True}
 
             try:
                 model = CrossEncoder(model_name, **ce_kwargs)
@@ -227,23 +224,30 @@ class ModelManager:
                 "top_k": None,
                 "device": self._hf_device,
             }
-            if not os.path.isdir(model_name) and not settings.allow_model_downloads:
-                kwargs["model_kwargs"] = {"local_files_only": True}
-                kwargs["tokenizer_kwargs"] = {"local_files_only": True}
 
             try:
                 model = hf_pipeline(**kwargs)
             except Exception as primary_err:
-                if self.device == "cuda":
-                    logger.warning(
-                        "GPU load failed for NLI '%s': %s — retrying on CPU",
-                        model_name,
-                        primary_err,
+                logger.warning(f"Primary NLI load failed for {model_name}: {primary_err}. Attempting local_files_only fallback.")
+                try:
+                    model = hf_pipeline(
+                        task="text-classification",
+                        model=model_name,
+                        top_k=None,
+                        device=self._hf_device,
+                        model_kwargs={"local_files_only": True},
                     )
-                    kwargs["device"] = -1
-                    model = hf_pipeline(**kwargs)
-                else:
-                    raise
+                except Exception as offline_err:
+                    if self.device == "cuda":
+                        logger.warning(
+                            "GPU load failed for NLI '%s': %s — retrying on CPU",
+                            model_name,
+                            primary_err,
+                        )
+                        kwargs["device"] = -1
+                        model = hf_pipeline(**kwargs)
+                    else:
+                        raise primary_err
             elapsed = time.monotonic() - t0
             self._models[model_name] = model
             self._model_load_times[model_name] = elapsed

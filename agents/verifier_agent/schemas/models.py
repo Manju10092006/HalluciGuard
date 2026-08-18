@@ -19,9 +19,9 @@ class EntailmentLabel(str, Enum):
 
 class VerdictLabel(str, Enum):
     VERIFIED = "verified"
-    LIKELY_HALLUCINATED = "likely_hallucinated"
-    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
-    MIXED_EVIDENCE = "mixed_evidence"
+    CONTRADICTED = "contradicted"
+    UNVERIFIED = "unverified"
+    CONFLICTED = "conflicted"
 
 
 class PipelineStage(str, Enum):
@@ -120,6 +120,10 @@ class VerifierOutputV2(BaseModel):
     query_id: str
     domain: str
     domain_validated: bool
+    adapter: str = "general"
+    sources_attempted: list[str] = []
+    sources_succeeded: list[str] = []
+    sources_failed: list[str] = []
     retrieved_sources: int
     verified_sources: int
     claim_evidence: list[ClaimReport]

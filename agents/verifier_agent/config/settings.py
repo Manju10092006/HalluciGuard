@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
     # -- Cache --
     cache_ttl: int = 86400
+    verifier_cache_enabled: bool = True
 
     # -- Server --
     verifier_port: int = 8002
