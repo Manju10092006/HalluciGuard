@@ -73,21 +73,21 @@ class ExplanationGenerator:
                 f"authoritative sources support this claim. The primary source ({source_name}, authority: {credibility:.2f}) "
                 f'states: "{snippet}" Published {pub_date}.'
             )
-        elif verdict_str == VerdictLabel.LIKELY_HALLUCINATED.value:
+        elif verdict_str == VerdictLabel.CONTRADICTED.value:
             explanation = (
-                f"Likely Hallucinated ({len(contradicts)} contradicting sources): Authoritative evidence contradicts this claim. "
+                f"Contradicted ({len(contradicts)} contradicting sources): Authoritative evidence contradicts this claim. "
                 f'The primary source ({source_name}, authority: {credibility:.2f}) states: "{snippet}" Published {pub_date}.'
             )
             if not supports:
                 explanation += " No supporting evidence was found from any authoritative database."
-        elif verdict_str == VerdictLabel.MIXED_EVIDENCE.value:
+        elif verdict_str == VerdictLabel.CONFLICTED.value:
             explanation = (
-                f"Mixed Evidence: Available authoritative evidence shows conflicting findings ({len(supports)} supporting vs {len(contradicts)} contradicting). "
+                f"Conflicted: Available authoritative evidence shows conflicting findings ({len(supports)} supporting vs {len(contradicts)} contradicting). "
                 f'A primary source ({source_name}, authority: {credibility:.2f}) states: "{snippet}".'
             )
         else:
             explanation = (
-                f"Insufficient Evidence: Evaluated {total_evidence} sources from {source_name}, but current evidence remains inconclusive "
+                f"Unverified: Evaluated {total_evidence} sources from {source_name}, but current evidence remains inconclusive "
                 f"or neutral regarding the specific claim."
             )
 
