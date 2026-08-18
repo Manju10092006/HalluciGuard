@@ -465,34 +465,39 @@ class DecisionIntelligenceEngine:
             # 2. Determine Claim Action (Judge Policy Decision)
             is_safety = (conflict and conflict.is_safety_critical) or (policy and policy.domain_name == "Healthcare" and claim_status == "CONTRADICTED")
             can_retry = retry_count < 2 and (policy is None or policy.retry_on_insufficient_evidence)
+            has_reliable_evidence = bool(pair.get("evidence", "").strip())
 
             if claim_status == "VERIFIED":
                 claim_action = "ACCEPT"
-                reason = "Claim is verified by authoritative evidence."
+                reason = "Claim is sufficiently supported by authoritative evidence."
             elif claim_status == "CONTRADICTED":
-                if is_safety or det_prob >= 0.35 or (policy and policy.strictness_level in ("VERY_STRICT", "STRICT", "MODERATE")):
-                    claim_action = "REJECT"
-                    reason = "Claim contradicted by authoritative evidence. Response rejected."
-                else:
+                if is_safety:
+                    if policy and policy.escalate_on_safety_conflict:
+                        claim_action = "ESCALATE_HUMAN"
+                        reason = "Safety-critical contradiction detected. Escalated for human expert review."
+                    else:
+                        claim_action = "REJECT"
+                        reason = "Safety-critical contradiction detected. Response rejected."
+                elif has_reliable_evidence:
                     claim_action = "CORRECT"
-                    reason = "Claim contradicted by evidence. Flagged for Corrector Agent."
+                    reason = "Claim is strongly contradicted with reliable evidence available for minimal correction. Forwarded to Corrector."
+                else:
+                    claim_action = "REJECT"
+                    reason = "Claim contradicted without reliable correction evidence. Response rejected."
             elif claim_status == "CONFLICTED":
                 if can_retry:
                     claim_action = "RE-VERIFY"
-                    reason = "Conflicting evidence sources detected. Triggering targeted re-verification."
+                    reason = "Authoritative sources conflict. Requesting another verification attempt."
                 else:
-                    claim_action = "REJECT"
-                    reason = "Unresolved source conflict and retries exhausted."
+                    claim_action = "ESCALATE_HUMAN" if (policy and policy.strictness_level in ("VERY_STRICT", "STRICT")) else "REJECT"
+                    reason = "Authoritative sources conflict and retries exhausted. Escalated to prevent guessing."
             else:  # UNVERIFIED
-                if det_prob >= 0.7:
-                    claim_action = "REJECT"
-                    reason = "Unverified claim with high hallucination probability. Response rejected."
-                elif can_retry:
+                if can_retry:
                     claim_action = "RE-VERIFY"
-                    reason = "Insufficient evidence. Triggering expanded retrieval."
+                    reason = "Evidence is insufficient. Requesting another verification attempt."
                 elif policy and policy.strictness_level in ("VERY_STRICT", "STRICT"):
-                    claim_action = "REJECT"
-                    reason = "Unverified claim under strict domain policy."
+                    claim_action = "ESCALATE_HUMAN" if policy.escalate_on_safety_conflict else "REJECT"
+                    reason = "Insufficient evidence under strict policy. Escalated rather than guessing."
                 else:
                     claim_action = "ACCEPT"
                     reason = "Unverified non-critical claim accepted under relaxed policy."
