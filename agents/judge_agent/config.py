@@ -18,6 +18,20 @@ class Decision(enum.Enum):
     ESCALATE_HUMAN = "ESCALATE_HUMAN"
 
 
+class ClaimStatus(enum.Enum):
+    VERIFIED = "VERIFIED"
+    CONTRADICTED = "CONTRADICTED"
+    UNVERIFIED = "UNVERIFIED"
+    CONFLICTED = "CONFLICTED"
+
+
+class ClaimAction(enum.Enum):
+    ACCEPT = "ACCEPT"
+    CORRECT = "CORRECT"
+    RE_VERIFY = "RE_VERIFY"
+    REJECT = "REJECT"
+
+
 class Severity(enum.Enum):
     CRITICAL = "CRITICAL"
     HIGH = "HIGH"

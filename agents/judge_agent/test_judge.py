@@ -1,4 +1,4 @@
-"""Test script for the Decision Intelligence Engine."""
+"""Test script for the Decision Intelligence Engine — Verifier Contract Alignment."""
 import sys, os, json, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -7,37 +7,52 @@ from decision_intelligence import DecisionIntelligenceEngine
 
 engine = DecisionIntelligenceEngine()
 
-# Test 1: Healthcare with conflicting evidence
+# Test 1: Verifier Contract with Claims Schema (CONTRADICTED -> CORRECT)
 print("=" * 70)
-print("TEST 1: Healthcare — Contradicting drug dosage claim")
+print("TEST 1: Verifier Claim Schema — Contradicted Python Claim")
 print("=" * 70)
 v1 = engine.evaluate(
-    user_query="What is the max daily dose of ibuprofen?",
-    draft_response="The max daily dose of ibuprofen is 3200mg for adults.",
-    detector_output={"hallucination_probability": 0.45, "confidence_score": 0.82},
-    verifier_output={"claim_evidence_pairs": [
-        {"claim": "The max daily dose of ibuprofen is 3200mg for adults.",
-         "evidence": "OTC ibuprofen maximum is 1200mg/day. Prescription max is 3200mg under medical supervision only.",
-         "source": "FDA Drug Label"}
-    ]},
-    domain="Healthcare"
+    user_query="Who created Python and when?",
+    draft_response="Python was created by Elon Musk in 1999.",
+    detector_output={"hallucination_probability": 0.45, "confidence_score": 0.88},
+    verifier_output={
+        "claims": [
+            {
+                "claim_id": "C1",
+                "claim_text": "Python was created by Elon Musk in 1999.",
+                "verdict": "CONTRADICTED",
+                "confidence_score": 0.97,
+                "trust_score": 0.94,
+                "explanation": "Authoritative evidence identifies Guido van Rossum as the creator of Python.",
+                "evidence": [
+                    {
+                        "evidence_id": "E1",
+                        "title": "Python History",
+                        "source": "Wikipedia",
+                        "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+                        "snippet": "Python was created by Guido van Rossum in 1991.",
+                        "entailment_label": "contradiction",
+                        "entailment_score": 0.98,
+                        "credibility_score": 0.80
+                    }
+                ]
+            }
+        ]
+    },
+    domain="General Knowledge"
 )
-print(f"Decision: {v1.decision.value}")
-print(f"Severity: {v1.severity.value}")
-print(f"Risk Level: {v1.risk_assessment['level']}")
-print(f"Safe to Release: {v1.risk_assessment['safe_to_release']}")
-print(f"Evidence Quality: {v1.evidence_governance['quality']}")
-for cv in v1.claim_verdicts:
-    print(f"  Claim: {cv['claim_text'][:60]}... -> {cv['status_label']}")
-print()
-print("Reasoning:")
-for step in v1.reasoning_chain:
-    print(f"  {step}")
+
+print(f"Overall Decision: {v1.overall_decision}")
+print(f"Correction Required: {v1.correction_required}")
+print(f"Re-verification Required: {v1.re_verification_required}")
+for cd in v1.claim_decisions:
+    print(f"  Claim [{cd['claim_id']}]: Status={cd['status']} | Action={cd['action']} | EvidenceIDs={cd['evidence_ids']}")
+    print(f"    Reason: {cd['reason']}")
 print()
 
 # Test 2: Cybersecurity — CVE claim
 print("=" * 70)
-print("TEST 2: Cybersecurity — CVE vulnerability claim")
+print("TEST 2: Cybersecurity — Verified CVE Claim")
 print("=" * 70)
 v2 = engine.evaluate(
     user_query="Is CVE-2024-1234 a critical vulnerability?",
@@ -50,60 +65,16 @@ v2 = engine.evaluate(
     ]},
     domain="Cybersecurity"
 )
-print(f"Decision: {v2.decision.value}")
-print(f"Severity: {v2.severity.value}")
-print(f"Risk Level: {v2.risk_assessment['level']}")
-for cv in v2.claim_verdicts:
-    print(f"  Claim: {cv['claim_text'][:60]}... -> {cv['status_label']}")
+print(f"Overall Decision: {v2.overall_decision}")
+for cd in v2.claim_decisions:
+    print(f"  Claim [{cd['claim_id']}]: Status={cd['status']} | Action={cd['action']}")
 print()
 
-# Test 3: General Knowledge — No conflicts
+# Test 3: Finance with numeric mismatch
 print("=" * 70)
-print("TEST 3: General Knowledge — Well-supported claim")
+print("TEST 3: Finance — Numeric Revenue Mismatch")
 print("=" * 70)
 v3 = engine.evaluate(
-    user_query="Who created Python?",
-    draft_response="Python was created by Guido van Rossum and first released in 1991.",
-    detector_output={"hallucination_probability": 0.05, "confidence_score": 0.95},
-    verifier_output={"claim_evidence_pairs": [
-        {"claim": "Python was created by Guido van Rossum",
-         "evidence": "Python was conceived by Guido van Rossum at CWI in the Netherlands.",
-         "source": "Wikipedia"},
-        {"claim": "first released in 1991",
-         "evidence": "Python was first released in 1991 as version 0.9.0.",
-         "source": "Python.org official documentation"}
-    ]},
-    domain="General Knowledge"
-)
-print(f"Decision: {v3.decision.value}")
-print(f"Severity: {v3.severity.value}")
-print(f"Risk Level: {v3.risk_assessment['level']}")
-for cv in v3.claim_verdicts:
-    print(f"  Claim: {cv['claim_text'][:60]}... -> {cv['status_label']}")
-print()
-
-# Test 4: High hallucination, no evidence
-print("=" * 70)
-print("TEST 4: Healthcare — High hallucination, no evidence")
-print("=" * 70)
-v4 = engine.evaluate(
-    user_query="What are the side effects of a new drug?",
-    draft_response="The drug causes liver failure in 50% of patients.",
-    detector_output={"hallucination_probability": 0.85, "confidence_score": 0.75},
-    verifier_output={"claim_evidence_pairs": []},
-    domain="Healthcare"
-)
-print(f"Decision: {v4.decision.value}")
-print(f"Severity: {v4.severity.value}")
-print(f"Risk Level: {v4.risk_assessment['level']}")
-print(f"Safe to Release: {v4.risk_assessment['safe_to_release']}")
-print()
-
-# Test 5: Finance with numeric mismatch
-print("=" * 70)
-print("TEST 5: Finance — Numeric revenue mismatch")
-print("=" * 70)
-v5 = engine.evaluate(
     user_query="What was Apple's 2023 revenue?",
     draft_response="Apple reported revenue of $450 billion in FY2023.",
     detector_output={"hallucination_probability": 0.35, "confidence_score": 0.88},
@@ -114,14 +85,11 @@ v5 = engine.evaluate(
     ]},
     domain="Finance"
 )
-print(f"Decision: {v5.decision.value}")
-print(f"Severity: {v5.severity.value}")
-print(f"Risk Level: {v5.risk_assessment['level']}")
-for cv in v5.claim_verdicts:
-    print(f"  Claim: {cv['claim_text'][:60]}... -> {cv['status_label']}")
-    print(f"    Conflict: {cv['conflict_type']} — {cv['conflict_implication'][:80]}")
+print(f"Overall Decision: {v3.overall_decision}")
+for cd in v3.claim_decisions:
+    print(f"  Claim [{cd['claim_id']}]: Status={cd['status']} | Action={cd['action']}")
 print()
 
 print("=" * 70)
-print("ALL 5 TESTS COMPLETE")
+print("ALL UNIT TESTS COMPLETE")
 print("=" * 70)

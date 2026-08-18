@@ -28,6 +28,7 @@ logger = logging.getLogger("HalluciGuard.DecisionIntelligence")
 class JudgeVerdict:
     """The complete output of the Judge Agent's decision process."""
     decision: Decision
+    overall_decision: str
     severity: Severity
     reasoning_chain: List[str]
     workflow_action: Dict[str, Any]
@@ -40,6 +41,9 @@ class JudgeVerdict:
     memory_insight: Dict[str, Any]
     audit_record: Dict[str, Any]
     claim_verdicts: List[Dict[str, Any]]
+    claim_decisions: List[Dict[str, Any]]
+    correction_required: bool
+    re_verification_required: bool
     detector_signal: Dict[str, Any]
     alternatives_rejected: Dict[str, str]
 
@@ -84,9 +88,28 @@ class DecisionIntelligenceEngine:
         policy = self.policy_registry.get_policy(domain)
         logger.info(f"Governing Policy: {policy.domain_name} ({policy.strictness_level})")
 
-        # ---- Phase 1b: Dynamic Claim Extraction & Evidence Alignment ----
-        pairs = verifier_output.get("claim_evidence_pairs", [])
-        pairs = self._extract_and_align_claims(draft_response, pairs)
+        # ---- Phase 1b: Verifier Claims Extraction & Evidence Alignment ----
+        verifier_claims = verifier_output.get("claims", [])
+        if verifier_claims:
+            pairs = []
+            for c in verifier_claims:
+                ev_list = c.get("evidence", [])
+                ev_text = " ".join([e.get("snippet", "") for e in ev_list if e.get("snippet")]).strip()
+                ev_src = ev_list[0].get("source", "Verifier Evidence") if ev_list else "None (Unverified)"
+                pairs.append({
+                    "claim_id": c.get("claim_id", f"C{len(pairs)+1}"),
+                    "claim": c.get("claim_text", ""),
+                    "evidence": ev_text,
+                    "source": ev_src,
+                    "verdict": c.get("verdict", "UNVERIFIED"),
+                    "confidence_score": c.get("confidence_score", 0.5),
+                    "trust_score": c.get("trust_score", 0.5),
+                    "explanation": c.get("explanation", ""),
+                    "evidence_items": ev_list
+                })
+        else:
+            pairs = verifier_output.get("claim_evidence_pairs", [])
+            pairs = self._extract_and_align_claims(draft_response, pairs)
 
         # ---- Phase 2: Runtime Inspection ----
         nli_results = self.nli.batch_predict(pairs)
@@ -144,12 +167,19 @@ class DecisionIntelligenceEngine:
             runtime_report, risk_assessment, user_query, draft_response
         )
 
-        # ---- Phase 12: Claim-Level Verdicts ----
-        claim_verdicts = self._build_claim_verdicts(nli_results, conflict_reports, detector_output)
+        # ---- Phase 12: Claim-Level Decisions & Verdicts ----
+        claim_verdicts, claim_decisions = self._build_claim_decisions(
+            pairs, nli_results, conflict_reports, detector_output, policy, retry_count
+        )
+
+        correction_required = any(cd["action"] == "CORRECT" for cd in claim_decisions) or decision == Decision.CORRECT
+        re_verification_required = any(cd["action"] == "RE-VERIFY" for cd in claim_decisions) or decision == Decision.VERIFY_AGAIN
 
         # ---- Assemble Verdict ----
         return JudgeVerdict(
-            decision=decision, severity=severity,
+            decision=decision,
+            overall_decision=decision.value,
+            severity=severity,
             reasoning_chain=reasoning.steps,
             workflow_action={"type": action.action_type, "target": action.target_agent,
                              "instructions": action.instructions, "priority": action.priority,
@@ -190,6 +220,9 @@ class DecisionIntelligenceEngine:
                           "decision": audit.final_decision, "severity": audit.severity,
                           "reasoning_chain": audit.reasoning_chain},
             claim_verdicts=claim_verdicts,
+            claim_decisions=claim_decisions,
+            correction_required=correction_required,
+            re_verification_required=re_verification_required,
             detector_signal={"hallucination_probability": detector_output.get("hallucination_probability", 0),
                              "confidence_score": detector_output.get("confidence_score", 0),
                              "flagged_claims": detector_output.get("flagged_claims", [])},
@@ -350,69 +383,136 @@ class DecisionIntelligenceEngine:
 
         return aligned if aligned else provided_pairs
 
-    def _build_claim_verdicts(
+    def _build_claim_decisions(
         self,
+        pairs: List[Dict[str, Any]],
         nli_results: List[Dict[str, Any]],
         conflict_reports: List[ConflictReport],
-        detector_output: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
-        """Build per-claim verdict breakdown with explicit hallucination scores."""
-        verdicts = []
+        detector_output: Optional[Dict[str, Any]] = None,
+        policy: Optional[DomainPolicy] = None,
+        retry_count: int = 0
+    ) -> tuple:
+        """
+        Build per-claim status and action decisions.
+        Takes Verifier factual reports directly without re-fact-checking.
+        Maps Verifier Status (VERIFIED, CONTRADICTED, UNVERIFIED, CONFLICTED) -> Judge Action (ACCEPT, CORRECT, RE-VERIFY, REJECT).
+        """
+        claim_verdicts = []
+        claim_decisions = []
         det_prob = (detector_output or {}).get("hallucination_probability", 0.0)
 
-        for i, nli_pair in enumerate(nli_results):
-            claim = nli_pair.get("claim", "")
-            evidence = nli_pair.get("evidence", "")
-            scores = nli_pair.get("nli_scores", {})
+        for i, pair in enumerate(pairs):
+            c_id = pair.get("claim_id", f"C{i+1}")
+            claim_text = pair.get("claim", "")
+            verifier_verdict = str(pair.get("verdict", "")).upper()
+            
+            # Map top NLI relation if explicit Verifier verdict missing
+            nli_pair = nli_results[i] if i < len(nli_results) else {}
             relation = nli_pair.get("top_relation", "neutral")
-
-            conflict = conflict_reports[i] if i < len(conflict_reports) else None
-
+            scores = nli_pair.get("nli_scores", {})
             entail = scores.get("entailment", 0.0)
             contra = scores.get("contradiction", 0.0)
             neutral = scores.get("neutral", 1.0)
+            conflict = conflict_reports[i] if i < len(conflict_reports) else None
 
-            # Calculate explicit Claim Hallucination Score (0.0 to 1.0)
-            if conflict and conflict.has_conflict and conflict.conflict_type.name != "NO_CONFLICT":
-                claim_hallucination_prob = max(contra, det_prob, 0.85)
-            elif relation == "contradiction":
-                claim_hallucination_prob = max(contra, det_prob)
-            elif not evidence or not evidence.strip():
-                # No evidence provided for claim -> hallucination risk driven by Detector probability & lack of grounding
-                claim_hallucination_prob = max(det_prob, 0.40 if det_prob > 0.3 else 0.15)
+            # 1. Determine Claim Status (from Verifier)
+            if verifier_verdict in ("VERIFIED", "CONTRADICTED", "UNVERIFIED", "CONFLICTED"):
+                claim_status = verifier_verdict
+            elif conflict and conflict.has_conflict:
+                if conflict.conflict_type.value in ("DIRECT_REFUTATION", "NUMERIC_MISMATCH", "SAFETY_VIOLATION"):
+                    claim_status = "CONTRADICTED"
+                else:
+                    claim_status = "CONFLICTED"
             elif relation == "entailment":
-                claim_hallucination_prob = round(max(0.0, (1.0 - entail) * det_prob), 4)
+                claim_status = "VERIFIED"
+            elif relation == "contradiction":
+                claim_status = "CONTRADICTED"
             else:
-                # Neutral / partial evidence
-                claim_hallucination_prob = round(0.5 * det_prob + 0.5 * (1.0 - entail), 4)
+                claim_status = "UNVERIFIED"
 
-            verdict = {
+            # Extract evidence items & IDs
+            ev_items = pair.get("evidence_items", [])
+            evidence_ids = []
+            if ev_items:
+                for j, ev in enumerate(ev_items):
+                    e_id = ev.get("evidence_id", f"E{i+1}_{j+1}")
+                    evidence_ids.append(e_id)
+            else:
+                if pair.get("evidence"):
+                    evidence_ids.append(f"E{i+1}")
+
+            # 2. Determine Claim Action (Judge Policy Decision)
+            is_safety = (conflict and conflict.is_safety_critical) or (policy and policy.domain_name == "Healthcare" and claim_status == "CONTRADICTED")
+            can_retry = retry_count < 2 and (policy is None or policy.retry_on_insufficient_evidence)
+
+            if claim_status == "VERIFIED":
+                claim_action = "ACCEPT"
+                reason = "Claim is verified by authoritative evidence."
+            elif claim_status == "CONTRADICTED":
+                if is_safety:
+                    claim_action = "REJECT"
+                    reason = "Safety-critical contradiction detected. Claim rejected."
+                else:
+                    claim_action = "CORRECT"
+                    reason = "Claim contradicted by evidence. Flagged for Corrector Agent."
+            elif claim_status == "CONFLICTED":
+                if can_retry:
+                    claim_action = "RE-VERIFY"
+                    reason = "Conflicting evidence sources detected. Triggering targeted re-verification."
+                else:
+                    claim_action = "REJECT"
+                    reason = "Unresolved source conflict and retries exhausted."
+            else:  # UNVERIFIED
+                if can_retry:
+                    claim_action = "RE-VERIFY"
+                    reason = "Insufficient evidence. Triggering expanded retrieval."
+                elif det_prob >= 0.7 or (policy and policy.strictness_level in ("VERY_STRICT", "STRICT")):
+                    claim_action = "REJECT"
+                    reason = "Unverified claim under strict domain policy."
+                else:
+                    claim_action = "ACCEPT"
+                    reason = "Unverified non-critical claim accepted under relaxed policy."
+
+            # Calculate hallucination score
+            if claim_status == "CONTRADICTED":
+                h_score = max(contra, det_prob, 0.85)
+            elif claim_status == "CONFLICTED":
+                h_score = max(contra, det_prob, 0.60)
+            elif claim_status == "UNVERIFIED":
+                h_score = max(det_prob, 0.35)
+            else:
+                h_score = round(max(0.0, (1.0 - entail) * det_prob), 4)
+
+            # Build Claim Decision
+            claim_decisions.append({
+                "claim_id": c_id,
+                "claim_text": claim_text,
+                "status": claim_status,
+                "action": claim_action,
+                "reason": reason,
+                "evidence_ids": evidence_ids
+            })
+
+            # Build Legacy Claim Verdict for visual backward-compatibility
+            claim_verdicts.append({
                 "claim_index": i,
-                "claim_text": claim,
-                "evidence_text": evidence[:200] if evidence else "No grounding evidence provided",
-                "source": nli_pair.get("source", nli_pair.get("evidence_source", "Unknown")),
+                "claim_id": c_id,
+                "claim_text": claim_text,
+                "evidence_text": pair.get("evidence", "No evidence provided")[:200],
+                "source": pair.get("source", "Unknown"),
                 "nli_entailment": entail,
                 "nli_neutral": neutral,
                 "nli_contradiction": contra,
-                "hallucination_score": round(claim_hallucination_prob, 4),
-                "hallucination_pct": f"{round(claim_hallucination_prob * 100, 1)}%",
+                "hallucination_score": round(h_score, 4),
+                "hallucination_pct": f"{round(h_score * 100, 1)}%",
                 "top_relation": relation,
+                "status": claim_status,
+                "action": claim_action,
+                "status_label": f"✅ {claim_status}" if claim_status == "VERIFIED" else (f"❌ {claim_status}" if claim_status == "CONTRADICTED" else f"⚠️ {claim_status}"),
                 "has_conflict": conflict.has_conflict if conflict else False,
                 "conflict_type": conflict.conflict_type.value if conflict and conflict.has_conflict else "NONE",
                 "conflict_implication": conflict.implication if conflict and conflict.has_conflict else "No conflict.",
-                "is_safe": not (conflict.is_safety_critical if conflict else False),
-            }
+                "evidence_ids": evidence_ids
+            })
 
-            # Determine per-claim status
-            if relation == "entailment" and not (conflict and conflict.has_conflict):
-                verdict["status"] = "VERIFIED"
-                verdict["status_label"] = "✅ Verified"
-            elif relation == "contradiction" or (conflict and conflict.has_conflict) or claim_hallucination_prob >= 0.70:
-                verdict["status"] = "HALLUCINATED"
-                verdict["status_label"] = "❌ Hallucinated"
-            else:
-                verdict["status"] = "UNVERIFIED"
-                verdict["status_label"] = "⚠️ Unverified"
-
-            verdicts.append(verdict)
-        return verdicts
+        return claim_verdicts, claim_decisions
