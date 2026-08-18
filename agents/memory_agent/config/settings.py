@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
 
     memory_agent_port: int = 8005
     mock_mode: bool = False
+    memory_agent_api_key: Optional[str] = None
 
     # Knowledge Graph
     kg_persistence_path: str = "data/knowledge_graph.json"
@@ -38,6 +40,16 @@ class Settings(BaseSettings):
     trust_prior: float = 0.5
     trust_learning_rate: float = 0.1
     trust_decay_rate: float = 0.01
+
+    # Intelligence (v1.1)
+    duplicate_similarity_threshold: float = 0.95
+    contradiction_similarity_threshold: float = 0.75
+    fuzzy_cache_threshold: float = 0.85
+    contradiction_top_k: int = 5
+    rerank_alpha: float = 0.6
+    rerank_beta: float = 0.3
+    rerank_gamma: float = 0.1
+    recall_min_similarity: float = 0.0
 
     # Domain support
     supported_domains: list[str] = [
