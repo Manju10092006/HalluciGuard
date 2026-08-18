@@ -144,11 +144,19 @@ class DecisionIntelligenceEngine:
         )
         logger.info(f"Risk: {risk_assessment.risk_level.value} | Safe: {risk_assessment.is_safe_to_release}")
 
+        # ---- Phase 8b: Claim-Level Decisions & Verdicts ----
+        claim_verdicts, claim_decisions = self._build_claim_decisions(
+            pairs, nli_results, conflict_reports, detector_output, policy, retry_count
+        )
+
+        correction_required = any(cd["action"] == "CORRECT" for cd in claim_decisions)
+        re_verification_required = any(cd["action"] == "RE-VERIFY" for cd in claim_decisions)
+
         # ---- Phase 9: Decision Reasoning (NOT SCORING) ----
         decision, severity = self._reason_decision(
             detector_output, policy, evidence_report, coverage_report,
             conflict_reports, consensus_report, runtime_report,
-            risk_assessment, memory_insight, retry_count
+            risk_assessment, memory_insight, retry_count, claim_decisions
         )
         logger.info(f"DECISION: {decision.value} | SEVERITY: {severity.value}")
 
@@ -233,7 +241,8 @@ class DecisionIntelligenceEngine:
         self,
         detector_output, policy, evidence_report, coverage_report,
         conflict_reports, consensus_report, runtime_report,
-        risk_assessment, memory_insight, retry_count
+        risk_assessment, memory_insight, retry_count,
+        claim_decisions: Optional[List[Dict[str, Any]]] = None
     ) -> tuple:
         """
         Core reasoning engine. Produces a decision through GOVERNANCE LOGIC, not scoring.
@@ -243,6 +252,18 @@ class DecisionIntelligenceEngine:
         has_safety_conflict = any(c.is_safety_critical for c in conflict_reports if c.has_conflict)
         has_any_conflict = any(c.has_conflict for c in conflict_reports)
         has_immediate = any(c.requires_immediate_action for c in conflict_reports if c.has_conflict)
+
+        # Check claim-level actions for direct alignment
+        if claim_decisions:
+            actions = set(cd.get("action", "") for cd in claim_decisions)
+            if "REJECT" in actions:
+                if policy.escalate_on_safety_conflict and (has_safety_conflict or has_immediate):
+                    return Decision.ESCALATE_HUMAN, Severity.CRITICAL
+                return Decision.REJECT, Severity.HIGH
+            if "CORRECT" in actions:
+                return Decision.CORRECT, Severity.MEDIUM
+            if "RE-VERIFY" in actions and (policy.retry_on_insufficient_evidence and retry_count < 2):
+                return Decision.VERIFY_AGAIN, Severity.MEDIUM
 
         # ═══════════════════════════════════════════════════════════════
         # RULE 1: Safety-critical conflicts → REJECT or ESCALATE
@@ -463,10 +484,13 @@ class DecisionIntelligenceEngine:
                     claim_action = "REJECT"
                     reason = "Unresolved source conflict and retries exhausted."
             else:  # UNVERIFIED
-                if can_retry:
+                if det_prob >= 0.7:
+                    claim_action = "REJECT"
+                    reason = "Unverified claim with high hallucination probability. Response rejected."
+                elif can_retry:
                     claim_action = "RE-VERIFY"
                     reason = "Insufficient evidence. Triggering expanded retrieval."
-                elif det_prob >= 0.7 or (policy and policy.strictness_level in ("VERY_STRICT", "STRICT")):
+                elif policy and policy.strictness_level in ("VERY_STRICT", "STRICT"):
                     claim_action = "REJECT"
                     reason = "Unverified claim under strict domain policy."
                 else:
