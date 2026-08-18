@@ -273,3 +273,66 @@ class TestFuzzyCache:
         )
         resp = await agent.recall(req)
         assert len(resp.fuzzy_cache_hits) >= 0
+
+
+class TestFactDeletion:
+    @pytest.mark.asyncio
+    async def test_delete_existing_fact(self, agent):
+        req = StoreFactRequest(
+            claim_text="Fact to be deleted",
+            domain="test",
+            verdict="verified",
+            confidence=0.9,
+        )
+        resp = await agent.store_fact(req)
+        assert resp.stored is True
+
+        delete_resp = await agent.delete_fact(resp.fact_id)
+        assert delete_resp.deleted is True
+        assert "knowledge_graph" in delete_resp.deleted_from
+        assert "vector_store" in delete_resp.deleted_from
+        assert "cache" in delete_resp.deleted_from
+
+        # Verify it's gone
+        assert agent.kg.get_entity(resp.fact_id) is None
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent_fact(self, agent):
+        resp = await agent.delete_fact("nonexistent-id")
+        assert resp.deleted is False
+        assert resp.deleted_from == []
+
+
+class TestFactUpdate:
+    @pytest.mark.asyncio
+    async def test_update_verdict(self, agent):
+        from agents.memory_agent.schemas.models import UpdateFactRequest
+
+        req = StoreFactRequest(
+            claim_text="Fact to be updated",
+            domain="test",
+            verdict="likely_hallucinated",
+            confidence=0.1,
+        )
+        resp = await agent.store_fact(req)
+
+        update = UpdateFactRequest(
+            fact_id=resp.fact_id,
+            new_verdict="verified",
+            new_confidence=0.95,
+        )
+        update_resp = await agent.update_fact(update)
+        assert update_resp.old_verdict == "likely_hallucinated"
+        assert update_resp.new_verdict == "verified"
+        assert update_resp.new_confidence == 0.95
+        assert "knowledge_graph" in update_resp.updated_in
+        assert "vector_store" in update_resp.updated_in
+
+    @pytest.mark.asyncio
+    async def test_update_nonexistent_fact(self, agent):
+        from agents.memory_agent.schemas.models import UpdateFactRequest
+        import pytest as _pytest
+
+        update = UpdateFactRequest(fact_id="nonexistent", new_verdict="verified")
+        with _pytest.raises(ValueError, match="not found"):
+            await agent.update_fact(update)

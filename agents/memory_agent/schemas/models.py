@@ -333,3 +333,35 @@ class HealthResponse(BaseModel):
     version: str
     components: dict[str, str]
     stats: Optional[MemoryStatsResponse] = None
+
+
+# ---------------------------------------------------------------------------
+# Fact Lifecycle Models (v1.2)
+# ---------------------------------------------------------------------------
+
+class DeleteFactResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    fact_id: str
+    deleted: bool
+    deleted_from: list[str] = Field(default_factory=list)
+
+
+class UpdateFactRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    fact_id: str
+    new_verdict: Optional[str] = None
+    new_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    new_evidence: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class UpdateFactResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    fact_id: str
+    old_verdict: str
+    new_verdict: str
+    old_confidence: float
+    new_confidence: float
+    updated_in: list[str] = Field(default_factory=list)

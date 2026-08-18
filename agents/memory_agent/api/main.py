@@ -24,6 +24,7 @@ from ..monitoring import (
 )
 from ..schemas.models import (
     BatchStoreResponse,
+    DeleteFactResponse,
     GraphAnalytics,
     HealthResponse,
     MemoryStatsResponse,
@@ -36,6 +37,8 @@ from ..schemas.models import (
     TrustChangeReason,
     TrustUpdate,
     TrustUpdateRequest,
+    UpdateFactRequest,
+    UpdateFactResponse,
 )
 from ..version import MEMORY_AGENT_VERSION
 
@@ -124,6 +127,29 @@ async def store_batch(request: Request, body: list[StoreFactRequest]):
         return await agent.store_facts_batch(body)
     except Exception as e:
         logger.exception("Failed to store fact batch")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/facts/{fact_id}", response_model=DeleteFactResponse)
+async def delete_fact(request: Request, fact_id: str):
+    agent = _get_agent(request)
+    try:
+        return await agent.delete_fact(fact_id)
+    except Exception as e:
+        logger.exception("Failed to delete fact")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/facts/{fact_id}", response_model=UpdateFactResponse)
+async def update_fact(request: Request, fact_id: str, body: UpdateFactRequest):
+    agent = _get_agent(request)
+    try:
+        body.fact_id = fact_id
+        return await agent.update_fact(body)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to update fact")
         raise HTTPException(status_code=500, detail=str(e))
 
 

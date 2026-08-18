@@ -170,3 +170,54 @@ class TestApiKeyAuth:
             "confidence": 0.9,
         })
         assert resp.status_code == 200
+
+
+class TestDeleteFactEndpoint:
+    @pytest.mark.asyncio
+    async def test_delete_fact(self, client):
+        r = await client.post("/store", json={
+            "claim_text": "Delete me",
+            "domain": "test",
+            "verdict": "verified",
+            "confidence": 0.9,
+        })
+        fact_id = r.json()["fact_id"]
+        resp = await client.delete(f"/facts/{fact_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["deleted"] is True
+        assert "knowledge_graph" in data["deleted_from"]
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent(self, client):
+        resp = await client.delete("/facts/nonexistent")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is False
+
+
+class TestUpdateFactEndpoint:
+    @pytest.mark.asyncio
+    async def test_update_fact(self, client):
+        r = await client.post("/store", json={
+            "claim_text": "Update me",
+            "domain": "test",
+            "verdict": "likely_hallucinated",
+            "confidence": 0.1,
+        })
+        fact_id = r.json()["fact_id"]
+        resp = await client.put(
+            f"/facts/{fact_id}",
+            json={"new_verdict": "verified", "new_confidence": 0.9},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["new_verdict"] == "verified"
+        assert data["old_verdict"] == "likely_hallucinated"
+
+    @pytest.mark.asyncio
+    async def test_update_nonexistent(self, client):
+        resp = await client.put(
+            "/facts/nonexistent",
+            json={"new_verdict": "verified"},
+        )
+        assert resp.status_code == 404

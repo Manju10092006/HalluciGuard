@@ -14,6 +14,7 @@ from ..schemas.models import (
     CacheStats,
     CachedVerification,
     ContradictionAlert,
+    DeleteFactResponse,
     EntityType,
     HallucinationPattern,
     MemoryStatsResponse,
@@ -26,6 +27,8 @@ from ..schemas.models import (
     StoreFactResponse,
     TrustChangeReason,
     TrustUpdate,
+    UpdateFactRequest,
+    UpdateFactResponse,
     VectorSearchResult,
 )
 from ..trust.source_trust import SourceTrustManager
@@ -289,6 +292,98 @@ class MemoryAgent:
         )
 
     # ------------------------------------------------------------------
+    # Fact lifecycle
+    # ------------------------------------------------------------------
+
+    async def delete_fact(self, fact_id: str) -> DeleteFactResponse:
+        """Remove a fact from all subsystems (KG, vectors, cache)."""
+        deleted_from: list[str] = []
+
+        # Knowledge Graph — fact_id is stored as entity NAME, not ID
+        entities = self.kg.find_entity_by_name(fact_id, EntityType.FACT)
+        entity = entities[0] if entities else None
+        if entity:
+            self.kg.remove_entity(entity.entity_id)
+            deleted_from.append("knowledge_graph")
+
+        # Vector Store
+        if self.vectors.delete(fact_id):
+            deleted_from.append("vector_store")
+
+        # Cache — invalidate by claim text if found in KG properties
+        if entity and entity.properties.get("claim_text"):
+            domain = entity.properties.get("domain", "general")
+            claim = entity.properties["claim_text"]
+            if await self.cache.invalidate(domain, claim):
+                deleted_from.append("cache")
+
+        self.kg.save()
+
+        return DeleteFactResponse(
+            fact_id=fact_id,
+            deleted=len(deleted_from) > 0,
+            deleted_from=deleted_from,
+        )
+
+    async def update_fact(self, request: UpdateFactRequest) -> UpdateFactResponse:
+        """Update verdict/confidence of an existing fact across subsystems."""
+        # fact_id is stored as entity NAME, not ID
+        entities = self.kg.find_entity_by_name(request.fact_id, EntityType.FACT)
+        entity = entities[0] if entities else None
+        if not entity:
+            raise ValueError(f"Fact {request.fact_id} not found")
+
+        old_verdict = str(entity.properties.get("verdict", "unknown"))
+        old_confidence = float(entity.properties.get("confidence", 0.0))
+        new_verdict = request.new_verdict or old_verdict
+        new_confidence = (
+            request.new_confidence
+            if request.new_confidence is not None
+            else old_confidence
+        )
+        updated_in: list[str] = []
+
+        # Update KG entity properties
+        entity.properties["verdict"] = new_verdict
+        entity.properties["confidence"] = new_confidence
+        entity.updated_at = datetime.utcnow()
+        updated_in.append("knowledge_graph")
+
+        # Update vector store metadata
+        vec_entry = self.vectors.get(request.fact_id)
+        if vec_entry and vec_entry.metadata:
+            vec_entry.metadata["verdict"] = new_verdict
+            vec_entry.metadata["confidence"] = new_confidence
+            updated_in.append("vector_store")
+
+        # Update cache if claim text exists
+        claim_text = entity.properties.get("claim_text")
+        if claim_text:
+            domain = entity.properties.get("domain", "general")
+            # Invalidate old cache, re-set with new verdict
+            await self.cache.invalidate(domain, claim_text)
+            await self.cache.set(
+                domain=domain,
+                claim_text=claim_text,
+                verdict=new_verdict,
+                evidence_summary=f"Updated: {new_verdict}",
+                confidence=new_confidence,
+                source_count=0,
+            )
+            updated_in.append("cache")
+
+        self.kg.save()
+
+        return UpdateFactResponse(
+            fact_id=request.fact_id,
+            old_verdict=old_verdict,
+            new_verdict=new_verdict,
+            old_confidence=old_confidence,
+            new_confidence=new_confidence,
+            updated_in=updated_in,
+        )
+
+    # ------------------------------------------------------------------
     # Recall
     # ------------------------------------------------------------------
 
@@ -300,57 +395,77 @@ class MemoryAgent:
         relevant_patterns: list[HallucinationPattern] = []
         source_trust: list[SourceTrustRecord] = []
 
+        # Graceful degradation: each subsystem failure is isolated
         if request.include_cache:
-            cached_verification = await self.cache.get(
-                domain=request.domain or "general",
-                claim_text=request.query,
-            )
-        else:
-            cached_verification = None
+            try:
+                cached_verification = await self.cache.get(
+                    domain=request.domain or "general",
+                    claim_text=request.query,
+                )
+            except Exception as e:
+                logger.warning("Cache lookup failed, continuing: %s", e)
 
-        similar_facts = self.vectors.search(
-            query=request.query,
-            top_k=request.top_k,
-            metadata_filter={"domain": request.domain} if request.domain else None,
-        )
+        try:
+            similar_facts = self.vectors.search(
+                query=request.query,
+                top_k=request.top_k,
+                metadata_filter={"domain": request.domain} if request.domain else None,
+            )
+        except Exception as e:
+            logger.warning("Vector search failed, continuing: %s", e)
 
         # Fuzzy cache: near-duplicate claims that were verified before
         if request.include_cache and request.fuzzy_cache:
             for fact in similar_facts:
                 if fact.score >= self._settings.fuzzy_cache_threshold:
-                    hit = await self.cache.get(
-                        domain=request.domain or "general",
-                        claim_text=fact.text,
-                    )
+                    try:
+                        hit = await self.cache.get(
+                            domain=request.domain or "general",
+                            claim_text=fact.text,
+                        )
+                    except Exception:
+                        hit = None
                     if hit and hit.cache_key not in {
                         h.cache_key for h in fuzzy_cache_hits
                     }:
                         fuzzy_cache_hits.append(hit)
 
         if request.include_graph_context:
-            claim_nodes = self.kg.find_entity_by_name(request.query[:120])
-            for node in claim_nodes[:5]:
-                neighbors = self.kg.get_neighbors(node.entity_id)
-                for neighbor, edge in neighbors:
-                    neighbor.access_count += 1
-                    related_entities.append(neighbor)
+            try:
+                claim_nodes = self.kg.find_entity_by_name(request.query[:120])
+                for node in claim_nodes[:5]:
+                    neighbors = self.kg.get_neighbors(node.entity_id)
+                    for neighbor, edge in neighbors:
+                        neighbor.access_count += 1
+                        related_entities.append(neighbor)
+            except Exception as e:
+                logger.warning("Graph lookup failed, continuing: %s", e)
 
         if request.include_patterns:
-            relevant_patterns = await self.patterns.query_patterns(
-                domain=request.domain,
-                top_k=10,
-            )
+            try:
+                relevant_patterns = await self.patterns.query_patterns(
+                    domain=request.domain,
+                    top_k=10,
+                )
+            except Exception as e:
+                logger.warning("Pattern query failed, continuing: %s", e)
 
         if request.domain:
-            source_trust = await self.trust.get_domain_sources(
-                domain=request.domain,
-                min_trust=0.3,
-            )
+            try:
+                source_trust = await self.trust.get_domain_sources(
+                    domain=request.domain,
+                    min_trust=0.3,
+                )
+            except Exception as e:
+                logger.warning("Trust lookup failed, continuing: %s", e)
 
         reranked = False
         if request.rerank and similar_facts:
-            similar_facts = await self._rerank_results(similar_facts, request.domain)
-            reranked = True
+            try:
+                similar_facts = await self._rerank_results(similar_facts, request.domain)
+                reranked = True
+            except Exception as e:
+                logger.warning("Reranking failed, using raw scores: %s", e)
 
         if request.min_similarity > 0:
             similar_facts = [
@@ -374,32 +489,34 @@ class MemoryAgent:
         domain: Optional[str],
     ) -> list[VectorSearchResult]:
         """Blend vector similarity with source trust and recency."""
+        # Fetch domain trust once, not per result
+        domain_trust_avg = 0.5
+        if domain:
+            domain_sources = await self.trust.get_domain_sources(
+                domain=domain, min_trust=0.0
+            )
+            if domain_sources:
+                domain_trust_avg = sum(
+                    s.trust_score for s in domain_sources
+                ) / len(domain_sources)
+
+        now = datetime.utcnow()
         reranked: list[VectorSearchResult] = []
         for result in results:
-            trust_score = 0.5
+            # Recency score
             try:
                 ts = result.metadata.get("timestamp")
                 if ts:
-                    age_days = (datetime.utcnow() - datetime.fromisoformat(ts)).total_seconds() / 86400
+                    age_days = (now - datetime.fromisoformat(ts)).total_seconds() / 86400
                     recency = max(0.0, 1.0 - age_days / 365.0)
                 else:
                     recency = 0.5
             except Exception:
                 recency = 0.5
 
-            # Nearest similar sources' trust, if any
-            if domain:
-                domain_sources = await self.trust.get_domain_sources(
-                    domain=domain, min_trust=0.0
-                )
-                if domain_sources:
-                    trust_score = sum(
-                        s.trust_score for s in domain_sources
-                    ) / len(domain_sources)
-
             blended = (
                 self._settings.rerank_alpha * result.score
-                + self._settings.rerank_beta * trust_score
+                + self._settings.rerank_beta * domain_trust_avg
                 + self._settings.rerank_gamma * recency
             )
             reranked.append(
