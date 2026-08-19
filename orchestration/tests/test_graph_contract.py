@@ -47,8 +47,12 @@ def test_detector_failure_routes_to_human_escalation():
 
 
 def test_verifier_route_success():
-    assert _verifier_route({"route": "memory"}) == "memory"
+    assert _verifier_route({"verification_status": "verified"}) == "memory"
 
 
 def test_verifier_route_error():
     assert _verifier_route({"route": "error"}) == "human_escalation"
+
+
+def test_verifier_route_agent_failed():
+    assert _verifier_route({"verification_status": "agent_failed"}) == "human_escalation"
