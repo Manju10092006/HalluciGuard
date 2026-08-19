@@ -20,10 +20,6 @@ from .state import (
     utc_now,
 )
 
-MAX_VERIFICATION_RETRIES = int(os.getenv("HALLUCIGUARD_MAX_VERIFICATION_RETRIES", "2"))
-ENABLE_JUDGE = os.getenv("ENABLE_JUDGE", "false").lower() in {"true", "1", "yes"}
-ENABLE_CORRECTOR = os.getenv("ENABLE_CORRECTOR", "false").lower() in {"true", "1", "yes"}
-
 
 def _dump(value: Any) -> Any:
     if hasattr(value, "model_dump"):
@@ -263,28 +259,9 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             verifier_res = await asyncio.wait_for(VerificationPipeline().verify(payload), timeout=8.0)
             verifier = _dump(verifier_res)
         except (asyncio.TimeoutError, Exception) as sub_err:
-            verifier = {
-                "claim_evidence": [
-                    {
-                        "claim_id": "c1",
-                        "claim_text": state["llm_response"],
-                        "verdict": "verified",
-                        "confidence_score": 0.91,
-                        "evidence": [
-                            {
-                                "source": "Wikipedia Verified Reference",
-                                "url": "https://en.wikipedia.org",
-                                "snippet": f"Ground truth alignment corroborated for: {state.get('user_query', '')}",
-                                "entailment_label": "entailment",
-                                "entailment_score": 0.94,
-                                "credibility_score": 0.92,
-                            }
-                        ],
-                    }
-                ],
-                "overall_verdict": "verified",
-                "confidence_score": 0.91,
-            }
+            raise RuntimeError(
+                f"Verifier failed: {type(sub_err).__name__}: {sub_err}"
+            ) from sub_err
         judge_pairs: list[dict[str, Any]] = []
         evidence_all: list[dict[str, Any]] = []
         nli_results: list[dict[str, Any]] = []
@@ -370,9 +347,6 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
 def _verifier_route(state: HalluciGuardState) -> str:
     if state.get("route") == "error" or state.get("verification_status") == "agent_failed":
         return "human_escalation"
-    if ENABLE_JUDGE:
-        return "judge"
-    # When Judge is disabled, route directly to Memory
     return "memory"
 
 
@@ -486,6 +460,7 @@ def _accept_node(state: HalluciGuardState) -> dict[str, Any]:
     return {
         "final_response": state.get("llm_response", ""),
         "terminal_status": "accepted",
+        "verification_status": "accepted",
         "updated_at": utc_now(),
         "trace": add_trace(
             state, "accept", "completed", reason="accepted by detector/supervisor"
@@ -557,9 +532,9 @@ def build_verification_graph(
         _verifier_route,
         {"memory": "memory", "human_escalation": "human_escalation"},
     )
-    graph.add_edge("accept", "memory")
-    graph.add_edge("reject", "memory")
-    graph.add_edge("human_escalation", "memory")
+    graph.add_edge("accept", END)
+    graph.add_edge("reject", END)
+    graph.add_edge("human_escalation", END)
     graph.add_edge("memory", END)
 
     return graph.compile()
@@ -600,8 +575,6 @@ async def run_verification(
             "domain": domain,
             "active_agents": active_agents,
             "disabled_agents": disabled_agents,
-            "retry_count": 0,
-            "max_retries": MAX_VERIFICATION_RETRIES,
             "created_at": now,
             "updated_at": now,
             "inter_agent_bus": [],

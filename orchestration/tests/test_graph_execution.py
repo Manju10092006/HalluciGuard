@@ -14,8 +14,6 @@ def base_state():
         "llm_response": "draft",
         "draft_response": "draft",
         "domain": "general",
-        "retry_count": 0,
-        "max_retries": 1,
         "trace": [],
         "errors": [],
         "inter_agent_bus": [],
@@ -23,13 +21,7 @@ def base_state():
 
 
 @pytest.mark.asyncio
-async def test_safe_response_reaches_memory_without_verifier_or_judge():
-    async def memory(state):
-        return {
-            "memory": {"count": 0},
-            "trace": add_trace(state, "memory", "completed"),
-        }
-
+async def test_safe_response_reaches_accept_directly_without_verifier_memory_or_judge():
     graph = build_verification_graph(
         node_overrides={
             "detector": lambda s: {
@@ -37,15 +29,14 @@ async def test_safe_response_reaches_memory_without_verifier_or_judge():
                 "detector": {"next_action": "ACCEPT"},
                 "trace": add_trace(s, "detector", "completed"),
             },
-            "memory": memory,
         }
     )
     result = await graph.ainvoke(base_state())
     nodes = [e["node"] for e in result["trace"]]
     assert "detector" in nodes
     assert "accept" in nodes
-    assert "memory" in nodes
     assert "verifier" not in nodes
+    assert "memory" not in nodes
     assert "judge" not in nodes
     assert "corrector" not in nodes
 
@@ -82,7 +73,7 @@ async def test_high_risk_routes_verifier_then_memory_without_judge_or_corrector(
 
 
 @pytest.mark.asyncio
-async def test_generation_failure_does_not_call_detector():
+async def test_generation_failure_goes_to_human_escalation_directly():
     async def generate(s):
         return {
             "verification_status": "generation_failed",
@@ -95,22 +86,20 @@ async def test_generation_failure_does_not_call_detector():
     def detector(_):
         raise AssertionError("detector must not run after generation failure")
 
-    async def memory(s):
-        return {"memory": {"count": 0}, "trace": add_trace(s, "memory", "skipped")}
-
     graph = build_verification_graph(
-        node_overrides={"generate": generate, "detector": detector, "memory": memory}
+        node_overrides={"generate": generate, "detector": detector}
     )
     result = await graph.ainvoke(
         {**base_state(), "llm_response": "", "draft_response": ""}
     )
     nodes = [e["node"] for e in result["trace"]]
     assert "detector" not in nodes
-    assert "memory" in nodes
+    assert "human_escalation" in nodes
+    assert "memory" not in nodes
 
 
 @pytest.mark.asyncio
-async def test_verifier_failure_routes_to_human_escalation_then_memory():
+async def test_verifier_failure_routes_to_human_escalation_directly():
     async def verifier(s):
         return {
             "route": "error",
@@ -119,9 +108,6 @@ async def test_verifier_failure_routes_to_human_escalation_then_memory():
             "trace": add_trace(s, "verifier", "failed"),
         }
 
-    async def memory(s):
-        return {"memory": {"count": 0}, "trace": add_trace(s, "memory", "completed")}
-
     graph = build_verification_graph(
         node_overrides={
             "detector": lambda s: {
@@ -129,13 +115,13 @@ async def test_verifier_failure_routes_to_human_escalation_then_memory():
                 "trace": add_trace(s, "detector", "completed"),
             },
             "verifier": verifier,
-            "memory": memory,
         }
     )
     result = await graph.ainvoke(base_state())
     nodes = [e["node"] for e in result["trace"]]
     assert "verifier" in nodes
     assert "human_escalation" in nodes
-    assert nodes[-1] == "memory"
+    assert nodes[-1] == "human_escalation"
+    assert "memory" not in nodes
     assert "judge" not in nodes
     assert "corrector" not in nodes
