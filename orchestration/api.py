@@ -37,7 +37,7 @@ allowed_origins = [origin.strip() for origin in raw_cors.split(",") if origin.st
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,7 +65,7 @@ async def health(deep: bool = False) -> Dict[str, Any]:
             "backend_status": "healthy",
             "environment": os.environ.get("HALLUCIGUARD_ENV", "production"),
             "engine": "langgraph_production_supervisor",
-            "active_agents": ["generator", "supervisor", "detector", "verifier", "memory"],
+            "active_agents": ["base_llm", "detector", "verifier", "memory"],
             "disabled_agents": {
                 "judge": {"enabled": False, "status": "not_executed"},
                 "corrector": {"enabled": False, "status": "not_executed"},
@@ -83,7 +83,7 @@ async def health(deep: bool = False) -> Dict[str, Any]:
         "backend_status": "healthy" if validation.get("ok") and base_llm.get("available") else "degraded",
         "environment": os.environ.get("HALLUCIGUARD_ENV", "production"),
         "engine": "langgraph_production_supervisor",
-        "active_agents": ["generator", "supervisor", "detector", "verifier", "memory"],
+        "active_agents": ["base_llm", "detector", "verifier", "memory"],
         "disabled_agents": {
             "judge": {"enabled": False, "status": "not_executed"},
             "corrector": {"enabled": False, "status": "not_executed"},
@@ -124,7 +124,7 @@ async def _execute_verification(request: VerificationRequest) -> Dict[str, Any]:
             "detector": result.get("detector"),
             "verifier": result.get("verifier"),
             "memory": result.get("memory"),
-            "active_agents": ["generator", "supervisor", "detector", "verifier", "memory"],
+            "active_agents": ["base_llm", "detector", "verifier", "memory"],
             "disabled_agents": {
                 "judge": {"enabled": False, "status": "not_executed"},
                 "corrector": {"enabled": False, "status": "not_executed"},
