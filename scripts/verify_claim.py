@@ -85,6 +85,7 @@ async def verify_custom_claim(
     claim_text: str,
     domain: str = "general",
     retrieval_mode: str = "hybrid",
+    source_mode: Optional[str] = None,
     show_trace: bool = True,
 ) -> None:
     print("\n" + "=" * 72)
@@ -92,6 +93,8 @@ async def verify_custom_claim(
     print(f"  Claim           : '{claim_text}'")
     print(f"  Domain          : {domain}")
     print(f"  Retrieval Mode  : {retrieval_mode}")
+    if source_mode:
+        print(f"  Source Mode     : {source_mode}")
     print("=" * 72)
     print("[1/3] Initializing pipeline & loading ML models (DeBERTa NLI + BGE Reranker)...")
 
@@ -104,6 +107,7 @@ async def verify_custom_claim(
         domain=domain,
         suspicious_claims=[SuspiciousClaim(claim_id="c1", text=claim_text)],
         retrieval_mode=retrieval_mode,
+        source_mode=source_mode,
     )
 
     print("[2/3] Retrieving evidence (Authoritative Adapters + Tavily Web)...")
@@ -219,6 +223,11 @@ def main() -> None:
         help="Retrieval mode: hybrid (default), primary_only (no Tavily), tavily_only (skip primary).",
     )
     parser.add_argument(
+        "--source-mode",
+        default=None,
+        help="Granular adapter source mode (e.g. healthcare-pubmed, healthcare-fda, healthcare-pmc, healthcare-who, healthcare-clinicaltrials).",
+    )
+    parser.add_argument(
         "--force-tavily",
         action="store_true",
         help="Force Tavily-only mode (equivalent to --retrieval-mode tavily_only).",
@@ -247,6 +256,7 @@ def main() -> None:
             args.claim,
             args.domain,
             retrieval_mode,
+            source_mode=args.source_mode,
             show_trace=not args.no_trace,
         ))
 
