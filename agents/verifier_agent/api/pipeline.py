@@ -94,12 +94,10 @@ class VerificationPipeline:
         if not relevant:
             relevant = passages[:5]
 
-        # Multiple search hits from one source are not independent evidence.
-        # Keep the strongest reranked passage per source so a tangential page
-        # cannot manufacture a same-source conflict with a direct statement.
+        # Deduplicate multiple chunks from the same specific document/URL
         strongest_by_source: Dict[str, Passage] = {}
         for passage in relevant:
-            source_key = passage.source or passage.source_id or passage.url
+            source_key = (passage.url or passage.source_id or f"{passage.source}:{passage.title}").strip().lower()
             current = strongest_by_source.get(source_key)
             if current is None or passage.relevance_score > current.relevance_score:
                 strongest_by_source[source_key] = passage
@@ -263,7 +261,12 @@ class VerificationPipeline:
                         all_raw: List[Passage] = []
                         for q in search_queries:
                             try:
-                                q_passages = await adapter.search(q, **({'retrieval_mode': payload.retrieval_mode} if hasattr(adapter, 'last_retrieval_trace') else {}))
+                                search_kwargs = {}
+                                if hasattr(adapter, 'last_retrieval_trace'):
+                                    search_kwargs['retrieval_mode'] = payload.retrieval_mode
+                                if getattr(payload, 'source_mode', None):
+                                    search_kwargs['source_mode'] = payload.source_mode
+                                q_passages = await adapter.search(q, **search_kwargs)
                                 all_raw.extend(q_passages)
                             except Exception as e:
                                 self.logger.error(

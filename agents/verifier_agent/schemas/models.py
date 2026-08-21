@@ -62,6 +62,7 @@ class VerifierInputV2(BaseModel):
     domain: str
     suspicious_claims: list[SuspiciousClaim]
     retrieval_mode: str = "hybrid"  # "hybrid", "primary_only", "tavily_only"
+    source_mode: Optional[str] = None
 
 
 class EvidenceItem(BaseModel):

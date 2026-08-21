@@ -196,6 +196,7 @@ class WebEnhancedAdapter:
         query: str,
         k: int = 5,
         retrieval_mode: str = "hybrid",
+        source_mode: Optional[str] = None,
     ) -> List[Passage]:
         """
         Search with quality-based Tavily fallback.
@@ -204,6 +205,7 @@ class WebEnhancedAdapter:
             query: The claim/search query.
             k: Maximum passages to return.
             retrieval_mode: "hybrid" (default), "primary_only", "tavily_only"
+            source_mode: Optional domain-specific source override (e.g. "healthcare-pubmed")
 
         Returns:
             List of Passage objects. Also sets self.last_retrieval_trace.
@@ -238,7 +240,13 @@ class WebEnhancedAdapter:
 
         try:
             search_fn = getattr(self._primary, "search")
-            primary_passages = await search_fn(query, k)
+            if source_mode:
+                try:
+                    primary_passages = await search_fn(query, k, source_mode=source_mode)
+                except TypeError:
+                    primary_passages = await search_fn(query, k)
+            else:
+                primary_passages = await search_fn(query, k)
             if primary_passages:
                 self.sources_succeeded.append(primary_name)
                 logger.info(
@@ -350,7 +358,14 @@ class WebEnhancedAdapter:
 
         try:
             retriever = self._get_web_retriever()
-            web_passages = await retriever.search(query, k=k)
+            include_domains = None
+            if self.name == "healthcare":
+                include_domains = [
+                    "who.int", "pubmed.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov",
+                    "fda.gov", "cdc.gov", "nih.gov", "mayoclinic.org", "webmd.com",
+                ]
+
+            web_passages = await retriever.search(query, k=k, include_domains=include_domains)
             tavily_latency = int((time.time() - tavily_start) * 1000)
 
             usable = [p for p in web_passages if self._is_usable_passage(p)]
@@ -371,6 +386,7 @@ class WebEnhancedAdapter:
                 extracted_count=len(web_passages),
                 usable_count=len(usable),
                 latency_ms=tavily_latency,
+                domains_requested=include_domains or [],
             )
             return web_passages
 
