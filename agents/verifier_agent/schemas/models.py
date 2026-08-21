@@ -61,6 +61,7 @@ class VerifierInputV2(BaseModel):
     query_id: str
     domain: str
     suspicious_claims: list[SuspiciousClaim]
+    retrieval_mode: str = "hybrid"  # "hybrid", "primary_only", "tavily_only"
 
 
 class EvidenceItem(BaseModel):
@@ -107,6 +108,7 @@ class ClaimReport(BaseModel):
     retrieved_documents: int = 0
     reranked_documents: int = 0
     verified_evidence: int = 0
+    retrieval_trace: Optional[dict] = None
 
 
 class PipelineStageStatus(BaseModel):

@@ -263,7 +263,7 @@ class VerificationPipeline:
                         all_raw: List[Passage] = []
                         for q in search_queries:
                             try:
-                                q_passages = await adapter.search(q)
+                                q_passages = await adapter.search(q, **({'retrieval_mode': payload.retrieval_mode} if hasattr(adapter, 'last_retrieval_trace') else {}))
                                 all_raw.extend(q_passages)
                             except Exception as e:
                                 self.logger.error(
@@ -429,6 +429,10 @@ class VerificationPipeline:
                         retrieved_documents=claim_retrieved,
                         reranked_documents=claim_reranked,
                         verified_evidence=len(claim_evidence_items),
+                        retrieval_trace=(
+                            getattr(adapter, "last_retrieval_trace", None).model_dump()
+                            if getattr(adapter, "last_retrieval_trace", None) else None
+                        ),
                     )
 
                 if claim_evidence_items:
