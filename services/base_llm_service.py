@@ -53,15 +53,22 @@ def _env_str(name: str, default: str | None = None) -> str | None:
 
 
 def _env_float(name: str, default: str) -> float:
-    return float(os.getenv(name, default))
+    val = os.getenv(name)
+    if val is not None and val.strip():
+        return float(val.strip())
+    return float(default)
 
 
 def _env_int(name: str, default: str) -> int:
-    return int(os.getenv(name, default))
+    val = os.getenv(name)
+    if val is not None and val.strip():
+        return int(val.strip())
+    return int(default)
 
 
 def _env_optional_int(name: str) -> int | None:
-    return int(os.environ[name]) if os.getenv(name) else None
+    val = os.getenv(name)
+    return int(val.strip()) if val and val.strip() else None
 
 
 @dataclass(frozen=True)
@@ -78,11 +85,12 @@ class BaseLLMConfig:
         or "https://openrouter.ai/api/v1"
     )
     model: str = field(
-        default_factory=lambda: _env_str("OPENROUTER_MODEL", "qwen/qwen-2.5-7b-instruct")
-        or "qwen/qwen-2.5-7b-instruct"
+        default_factory=lambda: _env_str("HALLUCIGUARD_LLM_MODEL")
+        or _env_str("OPENROUTER_MODEL", "qwen/qwen3-4b")
+        or "qwen/qwen3-4b"
     )
     temperature: float = field(
-        default_factory=lambda: _env_float("OPENROUTER_TEMPERATURE", "0.7")
+        default_factory=lambda: _env_float("HALLUCIGUARD_LLM_TEMPERATURE", os.getenv("OPENROUTER_TEMPERATURE", "0.7"))
     )
     stress_temperature: float = field(
         default_factory=lambda: _env_float("OPENROUTER_STRESS_TEMPERATURE", "0.9")
@@ -91,10 +99,10 @@ class BaseLLMConfig:
         default_factory=lambda: _env_optional_int("OPENROUTER_MAX_TOKENS")
     )
     timeout_seconds: float = field(
-        default_factory=lambda: _env_float("OPENROUTER_TIMEOUT_SECONDS", "12")
+        default_factory=lambda: _env_float("HALLUCIGUARD_LLM_TIMEOUT", os.getenv("OPENROUTER_TIMEOUT_SECONDS", "30.0"))
     )
     max_retries: int = field(
-        default_factory=lambda: _env_int("OPENROUTER_MAX_RETRIES", "1")
+        default_factory=lambda: _env_int("OPENROUTER_MAX_RETRIES", "3")
     )
     http_referer: str | None = field(
         default_factory=lambda: _env_str("OPENROUTER_HTTP_REFERER")
@@ -106,6 +114,7 @@ class BaseLLMConfig:
 
 @dataclass(frozen=True)
 class GenerationResult:
+    user_query: str
     draft_response: str
     model: str
     provider: str
@@ -201,6 +210,7 @@ class BaseLLMService:
 
         if self.config.provider.lower() != "openrouter":
             return self._failed(
+                user_query,
                 request_id,
                 mode,
                 temp,
@@ -210,6 +220,7 @@ class BaseLLMService:
             )
         if not self.config.api_key:
             return self._failed(
+                user_query,
                 request_id,
                 mode,
                 temp,
@@ -249,12 +260,12 @@ class BaseLLMService:
                         or attempt == attempts - 1
                     ):
                         return self._failed(
-                            request_id, mode, temp, started, code, message
+                            user_query, request_id, mode, temp, started, code, message
                         )
                     last_code, last_error = code, message
                 else:
                     return self._parse_success(
-                        response, request_id, mode, temp, started
+                        user_query, response, request_id, mode, temp, started
                     )
             except Exception as exc:
                 code = self._classify_exception(exc)
@@ -268,10 +279,10 @@ class BaseLLMService:
                     }
                     or attempt == attempts - 1
                 ):
-                    return self._failed(request_id, mode, temp, started, code, message)
+                    return self._failed(user_query, request_id, mode, temp, started, code, message)
                 last_code, last_error = code, message
             await asyncio.sleep(self._retry_delay_seconds(attempt))
-        return self._failed(request_id, mode, temp, started, last_code, last_error)
+        return self._failed(user_query, request_id, mode, temp, started, last_code, last_error)
 
     async def _post_chat_completions(self, payload: dict[str, Any]) -> httpx.Response:
         headers = {
@@ -291,6 +302,7 @@ class BaseLLMService:
 
     def _parse_success(
         self,
+        user_query: str,
         response: httpx.Response,
         request_id: str,
         mode: str,
@@ -299,6 +311,7 @@ class BaseLLMService:
     ) -> GenerationResult:
         if not response.content:
             return self._failed(
+                user_query,
                 request_id,
                 mode,
                 temperature,
@@ -310,6 +323,7 @@ class BaseLLMService:
             data = response.json()
         except json.JSONDecodeError:
             return self._failed(
+                user_query,
                 request_id,
                 mode,
                 temperature,
@@ -327,6 +341,7 @@ class BaseLLMService:
             content = str(message.get("content") or "").strip()
         if not content:
             return self._failed(
+                user_query,
                 request_id,
                 mode,
                 temperature,
@@ -335,6 +350,7 @@ class BaseLLMService:
                 "OpenRouter returned no assistant content",
             )
         return GenerationResult(
+            user_query=user_query,
             draft_response=content,
             model=str(data.get("model") or self.config.model),
             provider="openrouter",
@@ -350,6 +366,7 @@ class BaseLLMService:
 
     def _failed(
         self,
+        user_query: str,
         request_id: str,
         mode: str,
         temperature: float | None,
@@ -358,6 +375,7 @@ class BaseLLMService:
         error: str,
     ) -> GenerationResult:
         return GenerationResult(
+            user_query=user_query,
             draft_response="",
             model=self.config.model,
             provider=self.config.provider,

@@ -39,6 +39,21 @@ class Settings(BaseSettings):
 
     # -- Cache --
     cache_ttl: int = 86400
+    verifier_cache_enabled: bool = True
+
+    # -- Retrieval quality gate --
+    # Minimum number of passages with BGE relevance above relevance_threshold to consider primary evidence sufficient
+    min_relevant_passages: int = 1
+    # Minimum BGE relevance score for the top passage to consider primary evidence sufficient
+    min_top_relevance: float = 0.30
+    # BGE relevance score threshold: passages below this are considered not relevant
+    relevance_threshold: float = 0.25
+    # Maximum number of primary passages to assess (performance limit)
+    max_primary_passages: int = 10
+    # Relevance gate for evidence classification: passages with BGE below this are IRRELEVANT
+    evidence_relevance_gate: float = 0.20
+    # Default retrieval mode: hybrid (primary + fallback), primary_only, tavily_only
+    default_retrieval_mode: str = "hybrid"
 
     # -- Server --
     verifier_port: int = 8002

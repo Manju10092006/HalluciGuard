@@ -6,6 +6,28 @@ from schemas.models import EntailmentLabel, VerdictLabel, EvidenceItem
 class ExplanationGenerator:
     """Generates faithful human-readable natural language explanations for verification results."""
 
+    @staticmethod
+    def _format_source_name(raw_source: str) -> str:
+        """Format raw source strings (like tavily:domain.com or wikipedia) into clean display names."""
+        if not raw_source:
+            return "Unknown"
+        if raw_source.startswith("tavily:"):
+            domain = raw_source.split(":", 1)[1]
+            return f"web source ({domain})"
+        if raw_source == "wikipedia":
+            return "Wikipedia"
+        if raw_source == "pubmed":
+            return "PubMed"
+        if raw_source == "openfda":
+            return "OpenFDA"
+        if raw_source == "nvd":
+            return "NVD"
+        if raw_source == "sec_edgar":
+            return "SEC EDGAR"
+        if raw_source == "clinical_trials":
+            return "ClinicalTrials.gov"
+        return raw_source
+
     def generate(
         self,
         claim_text: str,
@@ -47,17 +69,19 @@ class ExplanationGenerator:
         most_credible = max(evidence_items, key=get_cred)
 
         if isinstance(most_credible, dict):
-            source_name = most_credible.get(
+            raw_source = most_credible.get(
                 "source", most_credible.get("source_name", "Unknown")
             )
             credibility = get_cred(most_credible)
             snippet = most_credible.get("snippet", "")
             pub_date = most_credible.get("publication_date", "Unknown date")
         else:
-            source_name = getattr(most_credible, "source", "Unknown")
+            raw_source = getattr(most_credible, "source", "Unknown")
             credibility = get_cred(most_credible)
             snippet = getattr(most_credible, "snippet", "")
             pub_date = getattr(most_credible, "publication_date", "Unknown date")
+
+        source_name = self._format_source_name(raw_source)
 
         if len(snippet) > 180:
             snippet = snippet[:177] + "..."
@@ -68,27 +92,29 @@ class ExplanationGenerator:
         trust_sc = float(scores.get("trust_score", 0.0))
 
         if verdict_str == VerdictLabel.VERIFIED.value:
+            src_count_str = f"{len(supports)} out of {total_evidence} sources support" if total_evidence > 1 else "1 source supports"
             explanation = (
-                f"Verified ({trust_sc * 100:.1f}% trust score): {len(supports)} out of {total_evidence} "
-                f"authoritative sources support this claim. The primary source ({source_name}, authority: {credibility:.2f}) "
+                f"Verified ({trust_sc * 100:.1f}% trust score): {src_count_str} this claim. "
+                f"The primary source ({source_name}, authority: {credibility:.2f}) "
                 f'states: "{snippet}" Published {pub_date}.'
             )
-        elif verdict_str == VerdictLabel.LIKELY_HALLUCINATED.value:
+        elif verdict_str == VerdictLabel.CONTRADICTED.value:
+            contra_count_str = f"{len(contradicts)} contradicting sources" if len(contradicts) != 1 else "1 contradicting source"
             explanation = (
-                f"Likely Hallucinated ({len(contradicts)} contradicting sources): Authoritative evidence contradicts this claim. "
+                f"Contradicted ({contra_count_str}): Authoritative evidence contradicts this claim. "
                 f'The primary source ({source_name}, authority: {credibility:.2f}) states: "{snippet}" Published {pub_date}.'
             )
             if not supports:
                 explanation += " No supporting evidence was found from any authoritative database."
-        elif verdict_str == VerdictLabel.MIXED_EVIDENCE.value:
+        elif verdict_str == VerdictLabel.CONFLICTED.value:
             explanation = (
-                f"Mixed Evidence: Available authoritative evidence shows conflicting findings ({len(supports)} supporting vs {len(contradicts)} contradicting). "
+                f"Conflicted: Available evidence shows conflicting findings ({len(supports)} supporting vs {len(contradicts)} contradicting). "
                 f'A primary source ({source_name}, authority: {credibility:.2f}) states: "{snippet}".'
             )
         else:
             explanation = (
-                f"Insufficient Evidence: Evaluated {total_evidence} sources from {source_name}, but current evidence remains inconclusive "
-                f"or neutral regarding the specific claim."
+                f"Unverified: Evaluated {total_evidence} evidence item{'s' if total_evidence != 1 else ''} from {source_name}, "
+                f"but current evidence remains inconclusive or neutral regarding the specific claim."
             )
 
         # Include conflict resolution explanation if a genuine conflict was detected

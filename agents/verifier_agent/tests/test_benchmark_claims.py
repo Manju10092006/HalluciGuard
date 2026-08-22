@@ -11,7 +11,7 @@ def mock_verify_claim(claim, domain):
         return {"verdict": "VERIFIED"}
     elif claim == 'The Earth is the third planet from the Sun':
         return {"verdict": "VERIFIED"}
-    return {"verdict": "UNKNOWN"}
+    return {"verdict": "UNVERIFIED"}
 
 def test_healthcare_verify():
     """Healthcare: 'Metformin is used to treat Type 2 Diabetes as first-line therapy.' (should verify)"""

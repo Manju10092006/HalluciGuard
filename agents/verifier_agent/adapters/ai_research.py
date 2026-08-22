@@ -30,15 +30,30 @@ class AiResearchAdapter:
         )
 
     def credibility_of(self, source_id: str) -> float:
-        if source_id.startswith("arxiv"): return 0.90
-        if source_id.startswith("s2"): return 0.95
-        if source_id.startswith("crossref"): return 0.92
-        return 0.85
+        if source_id.startswith("arxiv"): return 0.95
+        if source_id.startswith("s2") or source_id.startswith("semantic"): return 0.96
+        if source_id.startswith("crossref"): return 0.94
+        return 0.90
 
-    async def search(self, query: str, k: int = 5) -> List[Passage]:
+    async def search(
+        self,
+        query: str,
+        k: int = 5,
+        source_mode: Optional[str] = None,
+    ) -> List[Passage]:
         passages: List[Passage] = []
         try:
             client = get_client()
+
+            if source_mode:
+                mode_clean = source_mode.lower().strip()
+                if mode_clean in ("ai-arxiv", "arxiv"):
+                    return await self._search_arxiv(client, query, k)
+                if mode_clean in ("ai-semanticscholar", "semanticscholar", "s2"):
+                    return await self._search_semanticscholar(client, query, k)
+                if mode_clean in ("ai-crossref", "crossref"):
+                    return await self._search_crossref(client, query, k)
+
             results = await gather_results([
                 self._search_arxiv(client, query, k),
                 self._search_semanticscholar(client, query, k),
@@ -52,15 +67,31 @@ class AiResearchAdapter:
                     passages.extend(result)
         except Exception as e:
             logger.error(f"Failed ai_research search: {e}")
+
+        # Deduplicate passages
+        seen = set()
+        deduped = []
+        for p in passages:
+            key = p.url or p.source_id
+            if key not in seen:
+                seen.add(key)
+                deduped.append(p)
             
-        return sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k] if passages else passages
+        return sorted(deduped, key=lambda x: x.relevance_score, reverse=True)[:k] if deduped else deduped
+
+    def _sanitize_arxiv_query(self, query: str) -> str:
+        import re
+        clean = re.sub(r"[^\w\s\-]", " ", query)
+        words = [w for w in clean.split() if len(w) > 2]
+        return " ".join(words[:6]) if words else query[:50]
 
     async def _search_arxiv(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
+            clean_q = self._sanitize_arxiv_query(query)
             res = await client.get(
                 "https://export.arxiv.org/api/query",
                 adapter_name=self.name,
-                params={"search_query": f"all:{query}", "start": 0, "max_results": k},
+                params={"search_query": f"all:{clean_q}", "start": 0, "max_results": k},
             )
             
             soup = BeautifulSoup(res.text, "xml")
@@ -80,7 +111,8 @@ class AiResearchAdapter:
                     publication_date=published[:10],
                     snippet=f"Paper Title [{title}]: {summary[:300]}",
                     source_id=f"arxiv_{url_id.split('/')[-1]}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.80,
                 ))
             return passages
         except Exception as e:
@@ -112,7 +144,8 @@ class AiResearchAdapter:
                     publication_date=str(year),
                     snippet=f"Abstract [{title} ({year})]: {abstract[:300]}",
                     source_id=f"s2_{item.get('paperId', 'paper')}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.85,
                 ))
             return passages
         except Exception as e:
@@ -146,7 +179,8 @@ class AiResearchAdapter:
                     publication_date=publication_date,
                     snippet=f"Publication [{title}]: {abstract[:300]}",
                     source_id=f"crossref_{url_val.split('/')[-1]}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.80,
                 ))
             return passages
         except Exception as e:
