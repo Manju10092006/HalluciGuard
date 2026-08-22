@@ -3,7 +3,44 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from adapters.registry import get_registry
+from adapters.healthcare import HealthcareAdapter
+from routers.query_expander import QueryExpander
 from schemas.models import Passage
+
+
+def test_healthcare_source_diversity_precedes_global_limit():
+    passages = [
+        Passage(title="PubMed 1", source="pubmed", url="p1", publication_date="2024", snippet="a", relevance_score=0.9),
+        Passage(title="PubMed 2", source="pubmed", url="p2", publication_date="2024", snippet="b", relevance_score=0.8),
+        Passage(title="FDA label", source="openfda", url="f1", publication_date="2024", snippet="c", relevance_score=0.5),
+    ]
+
+    selected = HealthcareAdapter._select_source_diverse_passages(passages, 2)
+
+    assert [passage.source for passage in selected] == ["pubmed", "openfda"]
+
+
+def test_healthcare_query_preserves_claim_context_with_resolved_drug():
+    adapter = HealthcareAdapter()
+    resolution = adapter.entity_resolver.resolve(
+        "Aspirin is used to treat mild pain.", "healthcare"
+    )
+
+    query = adapter._sanitize_query_for_api(
+        "Aspirin is used to treat mild pain.", resolution
+    )
+
+    assert "aspirin" in query.lower()
+    assert "pain" in query.lower()
+
+
+def test_query_expansion_preserves_predicate_after_entity_resolution():
+    expanded, _ = QueryExpander().resolve_and_expand(
+        "Aspirin is used to treat mild pain.", "healthcare"
+    )
+
+    assert "aspirin" in expanded.lower()
+    assert "pain" in expanded.lower()
 
 @pytest.mark.anyio
 async def test_healthcare_adapter_search():

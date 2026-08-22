@@ -30,14 +30,27 @@ class LegalGeneralAdapter:
         )
 
     def credibility_of(self, source_id: str) -> float:
-        if source_id.startswith("courtlistener"): return 0.92
+        if source_id.startswith("courtlistener"): return 0.95
         if source_id.startswith("wiki"): return 0.80
         return 0.75
 
-    async def search(self, query: str, k: int = 5) -> List[Passage]:
+    async def search(
+        self,
+        query: str,
+        k: int = 5,
+        source_mode: Optional[str] = None,
+    ) -> List[Passage]:
         passages: List[Passage] = []
         try:
             client = get_client()
+
+            if source_mode:
+                mode_clean = source_mode.lower().strip()
+                if mode_clean in ("legal-courtlistener", "courtlistener"):
+                    return await self._search_courtlistener(client, query, k)
+                if mode_clean in ("legal-wikipedia", "wikipedia"):
+                    return await self._search_wikipedia(client, query, k)
+
             results = await gather_results([
                 self._search_courtlistener(client, query, k),
                 self._search_wikipedia(client, query, k),
@@ -50,8 +63,17 @@ class LegalGeneralAdapter:
                 
         except Exception as e:
             logger.error(f"Failed legal general search: {e}")
+
+        # Deduplicate passages
+        seen = set()
+        deduped = []
+        for p in passages:
+            key = p.url or p.source_id
+            if key not in seen:
+                seen.add(key)
+                deduped.append(p)
             
-        return sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k] if passages else passages
+        return sorted(deduped, key=lambda x: x.relevance_score, reverse=True)[:k] if deduped else deduped
 
     async def _search_courtlistener(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
         try:
@@ -78,7 +100,8 @@ class LegalGeneralAdapter:
                     publication_date=str(date_filed)[:10],
                     snippet=f"Legal opinion [{case_name}]: {snippet[:300]}",
                     source_id=f"courtlistener_{item.get('cluster_id', item.get('id', 'opinion'))}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.80,
                 ))
             return passages
         except Exception as e:
@@ -109,7 +132,8 @@ class LegalGeneralAdapter:
                     publication_date="unknown",
                     snippet=f"Legal Reference [{title}]: {snippet[:300]}",
                     source_id=f"wiki_{title_url}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.70,
                 ))
             return passages
         except Exception as e:

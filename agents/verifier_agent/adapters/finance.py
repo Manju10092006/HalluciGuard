@@ -44,10 +44,24 @@ class FinanceAdapter:
             return 0.90
         return 0.85
 
-    async def search(self, query: str, k: int = 5) -> List[Passage]:
+    async def search(
+        self,
+        query: str,
+        k: int = 5,
+        source_mode: Optional[str] = None,
+    ) -> List[Passage]:
         passages: List[Passage] = []
         try:
             client = get_client()
+
+            if source_mode:
+                mode_clean = source_mode.lower().strip()
+                if mode_clean in ("finance-sec", "sec"):
+                    return await self._search_sec(client, query, k)
+                if mode_clean in ("finance-worldbank", "worldbank", "wb"):
+                    return await self._search_worldbank(client, query, k)
+                if mode_clean in ("finance-alpha", "alphavantage"):
+                    return await self._search_alphavantage(client, query, k)
 
             # Resolve financial entities (Company name, Ticker, CIK)
             resolution = self.entity_resolver.resolve(query, "finance")
@@ -73,10 +87,19 @@ class FinanceAdapter:
         except Exception as e:
             logger.error(f"Failed finance search: {e}")
 
+        # Deduplicate passages by URL
+        seen = set()
+        deduped = []
+        for p in passages:
+            key = p.url or p.source_id
+            if key not in seen:
+                seen.add(key)
+                deduped.append(p)
+
         return (
-            sorted(passages, key=lambda x: x.relevance_score, reverse=True)[:k]
-            if passages
-            else passages
+            sorted(deduped, key=lambda x: x.relevance_score, reverse=True)[:k]
+            if deduped
+            else deduped
         )
 
     async def _search_sec(
@@ -126,7 +149,8 @@ class FinanceAdapter:
                         publication_date=str(date)[:10],
                         snippet=f"SEC Form {form} by {entity} ({date}): {desc[:350]}",
                         source_id=f"sec_{entity}",
-                        relevance_score=0.5,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.80,
                     )
                 )
             return passages
@@ -166,7 +190,8 @@ class FinanceAdapter:
                                 publication_date="unknown",
                                 snippet=f"World Bank indicator {item.get('id')} [{item.get('name')}]: {source_note[:350]}",
                                 source_id=f"wb_{item.get('id')}",
-                                relevance_score=0.5,
+                                relevance_score=0.0,
+                                source_confidence_hint=0.75,
                             )
                         )
                         if len(passages) >= k:
@@ -207,7 +232,8 @@ class FinanceAdapter:
                         publication_date="unknown",
                         snippet=f"Overview for {data.get('Name', data['Symbol'])} ({data['Symbol']}): {data.get('Description', '')[:350]}",
                         source_id=f"alpha_{data['Symbol']}",
-                        relevance_score=0.5,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.85,
                     )
                 ]
             return []

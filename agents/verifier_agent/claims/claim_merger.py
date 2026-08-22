@@ -57,14 +57,18 @@ class ClaimMerger:
         avg_contradict = total_contradict / total_weight if total_weight > 0 else 0.0
         avg_trust = total_trust / count if count > 0 else 0.0
         
-        if avg_trust > 0.5 or avg_support > 0.6:
+        if avg_support >= 0.30 and avg_contradict >= 0.30:
+            overall_verdict = 'conflicted'
+        elif avg_support >= 0.30 and avg_support > avg_contradict + 0.10:
             overall_verdict = 'verified'
-        elif avg_contradict > 0.5:
-            overall_verdict = 'likely_hallucinated'
-        elif avg_support == 0.0 and avg_contradict == 0.0:
-            overall_verdict = 'insufficient_evidence'
+        elif avg_contradict >= 0.30 and avg_contradict > avg_support + 0.10:
+            overall_verdict = 'contradicted'
+        elif avg_support > avg_contradict and avg_support >= 0.20:
+            overall_verdict = 'verified'
+        elif avg_contradict > avg_support and avg_contradict >= 0.20:
+            overall_verdict = 'contradicted'
         else:
-            overall_verdict = 'mixed_evidence'
+            overall_verdict = 'unverified'
 
         self.logger.debug("Merge decision: %s (weighted_support=%.2f, weighted_contradict=%.2f, avg_trust=%.2f)", overall_verdict, avg_support, avg_contradict, avg_trust)
 

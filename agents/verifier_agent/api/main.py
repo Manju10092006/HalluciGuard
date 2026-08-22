@@ -704,7 +704,7 @@ async def verify(payload: VerifierInputV2, request: Request) -> VerifierOutputV2
             stages_timing={},
             adapters_called=[payload.domain],
             adapters_failed=[],
-            verdict=response.claim_evidence[0].verdict.value if response.claim_evidence else "unknown",
+            verdict=response.claim_evidence[0].verdict.value if response.claim_evidence else "unverified",
             confidence=response.overall_evidence_confidence,
             total_latency_ms=response.latency_ms,
             timestamp=time.time()
