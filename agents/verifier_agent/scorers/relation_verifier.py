@@ -109,6 +109,48 @@ class RelationVerifier:
                     )
                 )
 
+            # Inverted capital pattern, e.g. "Kingdom of France: The traditional capital was Paris..."
+            cap_colon = re.search(
+                r"([A-Za-z\s\-]+?)\s*:\s*(?:the\s+)?(?:traditional\s+|official\s+|national\s+|administrative\s+)?capital\s+(?:is|was|became|remains)\s+([A-Za-z\s\-]+)",
+                sent_clean,
+                re.IGNORECASE,
+            )
+            cap_inverted = re.search(
+                r"(?:the\s+)?(?:traditional\s+|official\s+|national\s+|administrative\s+)?capital\s+(?:(?:city\s+)?(?:of|for)\s+([A-Za-z\s\-]+?)\s+)?(?:is|was|became|remains)\s+([A-Za-z\s\-]+)",
+                sent_clean,
+                re.IGNORECASE,
+            )
+            if cap_colon and not cap_match:
+                country_entity = cap_colon.group(1).strip()
+                city_entity = cap_colon.group(2).strip()
+                city_entity = re.split(r"\b(though|from|in|along|with|and|on|which|where|predating)\b", city_entity, flags=re.IGNORECASE)[0].strip()
+                if city_entity and len(city_entity) > 2 and country_entity:
+                    triples.append(
+                        Triple(
+                            subject=self._normalize_name(city_entity),
+                            relation="capital_of",
+                            object=self._normalize_name(country_entity),
+                            qualifiers=["historical_or_traditional"],
+                            raw_text=sent_clean,
+                        )
+                    )
+            elif cap_inverted and not cap_match:
+                country_entity = (cap_inverted.group(1) or "").strip()
+                city_entity = cap_inverted.group(2).strip()
+                city_entity = re.split(r"\b(though|from|in|along|with|and|on|which|where|predating)\b", city_entity, flags=re.IGNORECASE)[0].strip()
+                if city_entity and len(city_entity) > 2 and country_entity:
+                    triples.append(
+                        Triple(
+                            subject=self._normalize_name(city_entity),
+                            relation="capital_of",
+                            object=self._normalize_name(country_entity),
+                            qualifiers=["historical_or_traditional"],
+                            raw_text=sent_clean,
+                        )
+                    )
+
+
+
             # ── 2. Location Relations ─────────────────────────────────
             # e.g., "The Eiffel Tower is located in London"
             # e.g., "The Eiffel Tower is a lattice tower on the Champ de Mars in Paris, France"

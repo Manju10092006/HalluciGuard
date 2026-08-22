@@ -184,7 +184,7 @@ class EvidenceScorer:
                     has_explicit_refutation = any(
                         rf in snippet_lower for rf in refutation_phrases
                     )
-                    if covered < len(claim_words) and not has_explicit_refutation:
+                    if covered == 0 and not has_explicit_refutation:
                         return "NEUTRAL"
 
                 return "CONTRADICTING"
