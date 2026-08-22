@@ -284,7 +284,7 @@ class TestConfidenceInvariants:
 
     def test_strong_support_high_confidence(self):
         claim = "Test claim"
-        passages = [Passage(title="P1", source="s1", url="u1", publication_date="2024-01-01", snippet="Support text", relevance_score=0.9)]
+        passages = [Passage(title="P1", source="s1", url="u1", publication_date="2024-01-01", snippet="Support test claim text", relevance_score=0.9)]
         nli = [{"label": EntailmentLabel.ENTAILMENT, "entailment_score": 0.99, "contradiction_score": 0.0, "neutral_score": 0.01, "degraded": False}]
         res = self.scorer.score_evidence(claim, passages, nli, "general")
         assert res["verdict"] == VerdictLabel.VERIFIED
@@ -292,7 +292,7 @@ class TestConfidenceInvariants:
 
     def test_strong_contradiction_high_confidence(self):
         claim = "Test claim"
-        passages = [Passage(title="P1", source="s1", url="u1", publication_date="2024-01-01", snippet="Refute text", relevance_score=0.9)]
+        passages = [Passage(title="P1", source="s1", url="u1", publication_date="2024-01-01", snippet="Test claim is false and refuted", relevance_score=0.9)]
         nli = [{"label": EntailmentLabel.CONTRADICTION, "entailment_score": 0.0, "contradiction_score": 0.99, "neutral_score": 0.01, "degraded": False}]
         res = self.scorer.score_evidence(claim, passages, nli, "general")
         assert res["verdict"] == VerdictLabel.CONTRADICTED
@@ -301,8 +301,8 @@ class TestConfidenceInvariants:
     def test_conflict_reduced_confidence(self):
         claim = "Test claim"
         passages = [
-            Passage(title="P1", source="s1", url="u1", publication_date="2024-01-01", snippet="Support text", relevance_score=0.9),
-            Passage(title="P2", source="s2", url="u2", publication_date="2024-01-01", snippet="Refute text", relevance_score=0.9),
+            Passage(title="P1", source="s1", url="u1", publication_date="2024-01-01", snippet="Support test claim text", relevance_score=0.9),
+            Passage(title="P2", source="s2", url="u2", publication_date="2024-01-01", snippet="Test claim is false and refuted", relevance_score=0.9),
         ]
         nli = [
             {"label": EntailmentLabel.ENTAILMENT, "entailment_score": 0.95, "contradiction_score": 0.02, "neutral_score": 0.03, "degraded": False},

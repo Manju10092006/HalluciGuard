@@ -151,7 +151,8 @@ class CybersecurityAdapter:
                         publication_date=pub_date,
                         snippet=f"Vulnerability {cve_clean}: {summary[:400]}",
                         source_id=f"circl_{cve_clean.lower()}",
-                        relevance_score=0.85,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.85,
                     )
                 )
                 return passages
@@ -178,7 +179,8 @@ class CybersecurityAdapter:
                         publication_date=str(adv.get("published_at", "unknown"))[:10],
                         snippet=f"Security Advisory for {cve_clean} [{ghsa_id}]: {summary[:400]}",
                         source_id=f"ghsa_{ghsa_id.lower()}",
-                        relevance_score=0.85,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.85,
                     )
                 )
                 return passages
@@ -222,7 +224,8 @@ class CybersecurityAdapter:
     def _parse_nvd_vulnerabilities(
         self,
         data: List[Dict[str, Any]],
-        relevance_score: float = 0.80,
+        relevance_score: float = 0.0,
+        source_confidence_hint: float = 0.80,
     ) -> List[Passage]:
         passages = []
         for item in data:
@@ -242,6 +245,7 @@ class CybersecurityAdapter:
                         snippet=f"Vulnerability {cve_id}: {desc_text[:400]}",
                         source_id=f"nvd_{cve_id.lower().replace('-', '_')}",
                         relevance_score=relevance_score,
+                        source_confidence_hint=source_confidence_hint,
                     )
                 )
         return passages
@@ -304,7 +308,8 @@ class CybersecurityAdapter:
                                 )[:10],
                                 snippet=f"Technique [{ext_id}]: {obj.get('description', '')[:350]}",
                                 source_id=f"mitre_{ext_id.lower().replace('.', '_')}",
-                                relevance_score=0.75,
+                                relevance_score=0.0,
+                                source_confidence_hint=0.75,
                             )
                         )
                         if len(passages) >= k:
@@ -376,7 +381,8 @@ class CybersecurityAdapter:
                             publication_date=str(item.get("dateAdded", "unknown"))[:10],
                             snippet=f"CISA Known Exploited Vulnerability [{cve}] {vendor} {product} ({vuln}): {desc[:350]}",
                             source_id=f"cisa_{cve.lower().replace('-', '_')}",
-                            relevance_score=0.85,
+                            relevance_score=0.0,
+                            source_confidence_hint=0.85,
                         )
                     )
             return passages

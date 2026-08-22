@@ -85,21 +85,21 @@ class VerificationPipeline:
         if not passages:
             return []
 
-        # Keep passages with non-zero relevance signal
+        # Filter out passages with low relevance (< 0.20) if any relevant passage exists
         relevant = [
-            passage
-            for passage in passages
-            if passage.relevance_score > 0.0001 or EvidenceScorer.relevance_weight(passage.relevance_score) >= 0.05
+            p for p in passages
+            if float(getattr(p, "relevance_score", 0.0) or 0.0) >= 0.20
+            or (float(getattr(p, "relevance_score", 0.0) or 0.0) == 0.0 and float(getattr(p, "source_confidence_hint", 0.0) or 0.0) >= 0.50)
         ]
         if not relevant:
             relevant = passages[:5]
 
-        # Deduplicate multiple chunks from the same specific document/URL
+        # Deduplicate multiple chunks from the same specific source URL/domain
         strongest_by_source: Dict[str, Passage] = {}
         for passage in relevant:
             source_key = (passage.url or passage.source_id or f"{passage.source}:{passage.title}").strip().lower()
             current = strongest_by_source.get(source_key)
-            if current is None or passage.relevance_score > current.relevance_score:
+            if current is None or (passage.relevance_score or 0.0) > (current.relevance_score or 0.0):
                 strongest_by_source[source_key] = passage
         return list(strongest_by_source.values())
 
@@ -107,22 +107,52 @@ class VerificationPipeline:
     def _select_decision_grade_evidence(
         passages: List[Passage],
         nli_results: List[Dict[str, Any]],
+        claim: str = "",
+        relation_verifier: Any = None,
     ) -> Tuple[List[Passage], List[Dict[str, Any]]]:
-        """Keep only evidence with a meaningful entailment/contradiction signal."""
+        """Keep only evidence with a meaningful entailment/contradiction signal or structured relation match/mismatch."""
         pairs = list(zip(passages, nli_results))
         if not pairs:
             return [], []
 
-        selected = [
-            (passage, result)
-            for passage, result in pairs
-            if not result.get("degraded", False)
-            and max(
-                float(result.get("entailment_score", 0.0)),
-                float(result.get("contradiction_score", 0.0)),
+        selected = []
+        for passage, result in pairs:
+            if result.get("degraded", False):
+                continue
+
+            entailment = float(result.get("entailment_score", 0.0))
+            contradiction = float(result.get("contradiction_score", 0.0))
+
+            rel_status = "NO_TRIPLE_EXTRACTED"
+            if relation_verifier and claim:
+                rel_check = relation_verifier.verify_relation(claim, [passage])
+                rel_status = rel_check.status
+                if rel_status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
+                    contradiction = max(contradiction, 0.95)
+                    result["contradiction_score"] = contradiction
+                    result["entailment_score"] = 0.0
+                    result["label"] = "contradiction"
+                elif rel_status == "MATCH":
+                    entailment = max(entailment, 0.95)
+                    result["entailment_score"] = entailment
+                    result["contradiction_score"] = 0.0
+                    result["label"] = "entailment"
+
+            # Check explicit refutation in snippet
+            refutation_phrases = (
+                "disproven", "debunked", "misconception", "hoax", "untrue",
+                "falsely", "refuted", "no evidence", "scientifically disproven",
+                "incorrectly claimed", "not true", "not associated", "is false",
             )
-            >= 0.35
-        ]
+            snippet_lower = f"{passage.title} {passage.snippet}".lower()
+            if any(rf in snippet_lower for rf in refutation_phrases) and not any(neg in claim.lower() for neg in ("not", "never", "disproven", "false", "myth")):
+                contradiction = max(contradiction, 0.95)
+                result["contradiction_score"] = contradiction
+                result["entailment_score"] = 0.0
+                result["label"] = "contradiction"
+
+            if max(entailment, contradiction) >= 0.35 or rel_status in ("MATCH", "OBJECT_MISMATCH", "RELATION_MISMATCH"):
+                selected.append((passage, result))
 
         if not selected:
             return [], []
@@ -312,6 +342,17 @@ class VerificationPipeline:
                         )
                         claim_reranked += len(reranked_passages)
 
+                        # Update retrieval audit trace with real BGE score
+                        if reranked_passages and getattr(adapter, "last_retrieval_trace", None):
+                            trace_obj = getattr(adapter, "last_retrieval_trace")
+                            top_bge = max([p.relevance_score for p in reranked_passages], default=0.0)
+                            if trace_obj.gate_relevance_audit:
+                                trace_obj.gate_relevance_audit.final_bge_relevance_score = round(top_bge, 4)
+                                trace_obj.gate_relevance_audit.signals_agree = (
+                                    (trace_obj.gate_relevance_audit.gate_time_relevance_signal >= 0.25 and top_bge >= 0.25)
+                                    or (trace_obj.gate_relevance_audit.gate_time_relevance_signal < 0.25 and top_bge < 0.25)
+                                )
+
                     with tracker.track(PipelineStage.NLI):
                         nli_start = time.time()
                         relevant_passages = self._select_relevant_passages(
@@ -323,18 +364,41 @@ class VerificationPipeline:
                                 [p.snippet for p in relevant_passages],
                                 model_name=route.nli_model,
                             )
-                            if reranked_passages
+                            if relevant_passages
                             else []
                         )
                         self.metrics.record_nli_inference(
                             int((time.time() - nli_start) * 1000)
                         )
 
-                    # Only evidence with a meaningful NLI signal is allowed to
+                        # Run relation verification and attach trace
+                        rel_check = self.evidence_scorer.relation_verifier.verify_relation(
+                            sub_claim, relevant_passages
+                        )
+                        if getattr(adapter, "last_retrieval_trace", None):
+                            trace_obj = getattr(adapter, "last_retrieval_trace")
+                            from schemas.retrieval_trace import RelationCheckTrace
+                            c_t = rel_check.claim_triple.model_dump() if rel_check.claim_triple else {}
+                            e_ts = [t.model_dump() for t in rel_check.evidence_triples]
+                            trace_obj.relation_check = RelationCheckTrace(
+                                claim_subject=c_t.get("subject", ""),
+                                claim_relation=c_t.get("relation", ""),
+                                claim_object=c_t.get("object", ""),
+                                evidence_subject=e_ts[0].get("subject", "") if e_ts else "",
+                                evidence_relation=e_ts[0].get("relation", "") if e_ts else "",
+                                evidence_object=e_ts[0].get("object", "") if e_ts else "",
+                                check_result=rel_check.status,
+                                combination_rule_applied=rel_check.combination_rule_applied or "STANDARD_NLI_SCORING",
+                            )
+
+                    # Only evidence with a meaningful NLI or relation signal is allowed to
                     # influence scoring, conflict resolution, or final citations.
                     decision_passages, decision_nli = (
-                            self._select_decision_grade_evidence(
-                            relevant_passages, nli_results
+                        self._select_decision_grade_evidence(
+                            relevant_passages,
+                            nli_results,
+                            claim=sub_claim,
+                            relation_verifier=self.evidence_scorer.relation_verifier,
                         )
                     )
 

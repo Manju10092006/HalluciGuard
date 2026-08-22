@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -59,6 +59,25 @@ class EvidencePassageTrace(BaseModel):
     evidence_class: str = ""  # SUPPORTING / CONTRADICTING / NEUTRAL / IRRELEVANT
     source_credibility: float = 0.0
     effective_weight: float = 0.0
+    source_confidence_hint: float = 0.0
+    relation_check_result: Optional[str] = None
+
+
+class RelationCheckTrace(BaseModel):
+    """Trace of structured relation verification."""
+    claim_triple: Optional[Dict[str, Any]] = None
+    evidence_triples: List[Dict[str, Any]] = Field(default_factory=list)
+    comparison_result: str = "NO_TRIPLE_EXTRACTED"  # MATCH / OBJECT_MISMATCH / RELATION_MISMATCH / NO_TRIPLE_EXTRACTED
+    combination_rule_applied: str = ""
+    details: Optional[str] = None
+
+
+class GateRelevanceAuditTrace(BaseModel):
+    """Trace comparing gate-time heuristics with final BGE relevance scores."""
+    source_confidence_hint: float = 0.0
+    gate_time_relevance_signal: float = 0.0
+    final_bge_relevance_score: float = 0.0
+    signals_agree: bool = True
 
 
 class RetrievalTrace(BaseModel):
@@ -71,4 +90,6 @@ class RetrievalTrace(BaseModel):
     merged: MergedTrace = Field(default_factory=MergedTrace)
     final: FinalTrace = Field(default_factory=FinalTrace)
     evidence_details: List[EvidencePassageTrace] = Field(default_factory=list)
+    relation_check: Optional[RelationCheckTrace] = None
+    gate_relevance_audit: Optional[GateRelevanceAuditTrace] = None
     timings: dict = Field(default_factory=dict)
