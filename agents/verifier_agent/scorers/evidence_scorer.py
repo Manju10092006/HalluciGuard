@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Dict, List, Tuple
 
 from schemas.models import Passage, VerdictLabel, EntailmentLabel
@@ -141,6 +142,29 @@ class EvidenceScorer:
             return "NEUTRAL"
         elif ("contradiction" in label or contradiction >= self.MIN_NLI_SIGNAL) and contradiction > entailment:
             if contradiction >= self.MIN_NLI_SIGNAL:
+                # If passage lacks key predicate terms and has no explicit refutation phrases, it is neutral context
+                claim_words = [
+                    w.lower() for w in re.findall(r"[a-zA-Z0-9]+", claim)
+                    if len(w) > 3 and w.lower() not in {
+                        "is", "the", "a", "an", "in", "of", "to", "and", "or", "for", "with",
+                        "that", "this", "from", "was", "were", "been", "have", "has", "had",
+                        "associated", "related", "called", "known", "named"
+                    } and not (w.isdigit() and len(w) == 4)
+                ]
+                if len(claim_words) >= 2:
+                    snippet_lower = full_text.lower()
+                    covered = sum(1 for w in claim_words if w in snippet_lower)
+                    refutation_phrases = (
+                        "disproven", "debunked", "misconception", "hoax", "untrue",
+                        "falsely", "refuted", "no evidence", "myth", "incorrectly claimed",
+                        "not true", "not associated", "not related", "is false",
+                    )
+                    has_explicit_refutation = any(
+                        rf in snippet_lower for rf in refutation_phrases
+                    )
+                    if covered < len(claim_words) and not has_explicit_refutation:
+                        return "NEUTRAL"
+
                 return "CONTRADICTING"
             return "NEUTRAL"
         else:

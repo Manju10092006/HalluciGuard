@@ -67,7 +67,7 @@ class VerificationPipeline:
         self.reliability_manager = SourceReliabilityManager()
         self.conflict_resolver = ConflictResolver()
         self.explanation_generator = ExplanationGenerator()
-        self.citation_formatter = CitationFormatter()
+        self.citation_formatter = CitationFormatter(evidence_scorer=self.evidence_scorer)
         self.response_formatter = ResponseFormatter()
         self.domain_validator = DomainValidator()
         self.model_router = ModelRouter()
@@ -350,6 +350,7 @@ class VerificationPipeline:
                             nli_results=decision_nli,
                             domain=validated_domain,
                             reliability_manager=self.reliability_manager,
+                            claim=sub_claim,
                         )
                         claim_evidence_items.extend(formatted_evidence)
                         sub_reports.append(
