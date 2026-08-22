@@ -11,10 +11,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+try:
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    AutoModelForSequenceClassification = None
+    AutoTokenizer = None
+    HAS_TORCH = False
 
 logger = logging.getLogger(__name__)
+
 
 # Default model artifact path — updated to final versioned directory
 DEFAULT_MODEL_PATH = "artifacts/halueval-detector-final"
@@ -108,7 +116,7 @@ class HaluEvalInference:
 
         # Auto-detect device
         if device is None:
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = "cuda" if (HAS_TORCH and torch and torch.cuda.is_available()) else "cpu"
         else:
             self.device = device
 
@@ -149,11 +157,18 @@ class HaluEvalInference:
         if self._loaded:
             return
 
+        if not HAS_TORCH or AutoTokenizer is None or AutoModelForSequenceClassification is None:
+            raise RuntimeError(
+                "torch and transformers are required to load HaluEval model. "
+                "Please install torch and transformers."
+            )
+
         self.model_path = validate_halueval_model_reference(self.model_path)
 
         logger.info(f"Loading HaluEval model from: {self.model_path}")
         print(f"[HaluEval] Loading model from: {self.model_path}")
         print(f"[HaluEval] Device: {self.device}")
+
 
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         self._model = AutoModelForSequenceClassification.from_pretrained(
