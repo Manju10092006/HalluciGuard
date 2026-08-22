@@ -165,14 +165,45 @@ class WebEnhancedAdapter:
             unique_sources.add(source_key)
         source_diversity = len(unique_sources)
 
-        # Quality Gate Decision
+        # Check claim term coverage in primary passages to detect alias/colloquial gaps
+        import re
+        stopwords = {
+            "is", "the", "a", "an", "in", "of", "to", "and", "or", "for", "with",
+            "that", "this", "from", "was", "were", "been", "have", "has", "had",
+            "associated", "related", "called", "known", "named", "most", "dangerous"
+        }
+        claim_terms = [
+            w.lower() for w in re.findall(r"[a-zA-Z0-9]+", claim)
+            if len(w) > 3 and w.lower() not in stopwords and not (w.isdigit() and len(w) == 4)
+        ]
+        if claim_terms:
+            combined_corpus = " ".join((p.title + " " + p.snippet).lower() for p in usable)
+            covered_terms = sum(1 for term in claim_terms if term in combined_corpus)
+            coverage_ratio = covered_terms / len(claim_terms)
+        else:
+            coverage_ratio = 1.0
+            covered_terms = 0
+
+        if len(claim_terms) == 1:
+            sufficient_coverage = (covered_terms >= 1)
+        elif len(claim_terms) == 2:
+            sufficient_coverage = (covered_terms == 2)
+        elif claim_terms:
+            sufficient_coverage = (coverage_ratio >= 0.70)
+        else:
+            sufficient_coverage = True
+
+        # Quality Gate Decision: must have relevant passages, top relevance, and sufficient term coverage
         sufficient = (
             relevant_count >= settings.min_relevant_passages
             and top_relevance >= settings.min_top_relevance
+            and sufficient_coverage
         )
 
         if sufficient:
             reason = "PRIMARY_EVIDENCE_SUFFICIENT"
+        elif not sufficient_coverage:
+            reason = f"PRIMARY_EVIDENCE_INSUFFICIENT_TERM_COVERAGE ({covered_terms}/{len(claim_terms)} terms covered)"
         elif relevant_count == 0:
             reason = "PRIMARY_EVIDENCE_INSUFFICIENT_RELEVANCE"
         elif top_relevance < settings.min_top_relevance:
