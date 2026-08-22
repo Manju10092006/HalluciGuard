@@ -1,0 +1,292 @@
+{
+  "metrics": {
+    "accuracy": 0.5454545454545454,
+    "total_evaluated": 22,
+    "errors": 0,
+    "confusion_matrix": {
+      "verified": {
+        "verified": 8,
+        "contradicted": 1,
+        "unverified": 1,
+        "conflicted": 2
+      },
+      "contradicted": {
+        "verified": 1,
+        "contradicted": 1,
+        "unverified": 4,
+        "conflicted": 0
+      },
+      "unverified": {
+        "verified": 0,
+        "contradicted": 1,
+        "unverified": 3,
+        "conflicted": 0
+      },
+      "conflicted": {
+        "verified": 0,
+        "contradicted": 0,
+        "unverified": 0,
+        "conflicted": 0
+      }
+    },
+    "per_class": {
+      "verified": {
+        "TP": 8,
+        "FP": 1,
+        "FN": 4,
+        "precision": 0.8888888888888888,
+        "recall": 0.6666666666666666,
+        "f1": 0.761904761904762
+      },
+      "contradicted": {
+        "TP": 1,
+        "FP": 2,
+        "FN": 5,
+        "precision": 0.3333333333333333,
+        "recall": 0.16666666666666666,
+        "f1": 0.2222222222222222
+      },
+      "unverified": {
+        "TP": 3,
+        "FP": 5,
+        "FN": 1,
+        "precision": 0.375,
+        "recall": 0.75,
+        "f1": 0.5
+      },
+      "conflicted": {
+        "TP": 0,
+        "FP": 2,
+        "FN": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    },
+    "macro_precision": 0.5324074074074073,
+    "macro_recall": 0.5277777777777778,
+    "macro_f1": 0.4947089947089947
+  },
+  "results": [
+    {
+      "claim": "Paris is the capital of France.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "conflicted",
+      "confidence": 0.3313,
+      "trust_score": 0.4257,
+      "explanation": "Conflicted: Available evidence shows conflicting findings (3 supporting vs 1 contradicting). A primary source (Wikipedia, authority: 0.80) states: \"Article [Paris]: Paris is the capital and largest city of France, with an estimated city population of 2.04 million in an area of 105.4\u00a0km2 (40.7\u00a0sq\u00a0mi), and a metropolitan\".",
+      "evidence_count": 4
+    },
+    {
+      "claim": "The Eiffel Tower is located in London.",
+      "domain": "general",
+      "expected": "contradicted",
+      "actual": "contradicted",
+      "confidence": 0.673,
+      "trust_score": 0.0,
+      "explanation": "Contradicted (5 contradicting sources): Authoritative evidence contradicts this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [List of names on the Eiffel Tower]: On the Eiffel Tower, 72 names of French male scientists, engineers, and mathematicians appear in raised lettering in recognition of ...\" Published unknown. No supporting evidence was found from any authoritative database.",
+      "evidence_count": 5
+    },
+    {
+      "claim": "Amazon company was built by Sundar Pichai.",
+      "domain": "general",
+      "expected": "contradicted",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 5 evidence items from Wikipedia, but current evidence remains inconclusive or neutral regarding the specific claim.",
+      "evidence_count": 5
+    },
+    {
+      "claim": "AlphaFold was developed by DeepMind to predict protein structures.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.8282,
+      "trust_score": 0.8782,
+      "explanation": "Verified (87.8% trust score): 4 out of 4 sources support this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [AlphaFold]: AlphaFold is an artificial intelligence (AI) program developed by DeepMind, a subsidiary of Alphabet, which performs predictions of protein structure\" Published unknown.",
+      "evidence_count": 4
+    },
+    {
+      "claim": "Peter Shor developed Shor's algorithm for quantum factoring in 1994.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.6539,
+      "trust_score": 0.7633,
+      "explanation": "Verified (76.3% trust score): 2 out of 2 sources support this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Shor's algorithm]: Shor's algorithm is a quantum algorithm for finding the prime factors of an integer. It was developed in 1994 by the American mathematician Peter Shor\" Published unknown.",
+      "evidence_count": 2
+    },
+    {
+      "claim": "The 1992 Indian securities scam involved stockbroker Harshad Mehta.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.7661,
+      "trust_score": 0.8161,
+      "explanation": "Verified (81.6% trust score): 3 out of 4 sources support this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [1992 Indian stock market scam]: The 1992 Indian stock market scam was a market manipulation carried out by Harshad Mehta with other bankers and politicians on the Bomba...\" Published unknown.",
+      "evidence_count": 4
+    },
+    {
+      "claim": "The Moon is made of green cheese.",
+      "domain": "general",
+      "expected": "unverified",
+      "actual": "contradicted",
+      "confidence": 0.4875,
+      "trust_score": 0.0,
+      "explanation": "Contradicted (2 contradicting sources): Authoritative evidence contradicts this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Government cheese]: Government cheese is processed cheese provided to welfare beneficiaries, Food Stamp recipients, and the elderly receiving Social Security in the Uni...\" Published unknown.",
+      "evidence_count": 3
+    },
+    {
+      "claim": "Java was created by Gaurav.",
+      "domain": "general",
+      "expected": "contradicted",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 2 evidence items from Wikipedia, but current evidence remains inconclusive or neutral regarding the specific claim.",
+      "evidence_count": 2
+    },
+    {
+      "claim": "The Sun is at the center of the Solar System.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.5634,
+      "trust_score": 0.7011,
+      "explanation": "Verified (70.1% trust score): 1 source supports this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Sun]: The Sun is the star located at the centre of the Solar System. It is a massive sphere of hot plasma, heated to incandescence by nuclear fusion reactions\" Published unknown.",
+      "evidence_count": 1
+    },
+    {
+      "claim": "Photosynthesis converts carbon dioxide and water into glucose.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.4984,
+      "trust_score": 0.349,
+      "explanation": "Verified (34.9% trust score): 1 source supports this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Fractionation of carbon isotopes in oxygenic photosynthesis]: Photosynthesis converts carbon dioxide to carbohydrates via several metabolic pathways that provide energy...\" Published unknown.",
+      "evidence_count": 1
+    },
+    {
+      "claim": "Albert Einstein developed the theory of general relativity.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "conflicted",
+      "confidence": 0.435,
+      "trust_score": 0.5185,
+      "explanation": "Conflicted: Available evidence shows conflicting findings (3 supporting vs 1 contradicting). A primary source (Wikipedia, authority: 0.80) states: \"Article [Theory of relativity]: The theory of relativity comprises two physics theories by Albert Einstein: special relativity and general relativity, proposed and published in ...\".",
+      "evidence_count": 4
+    },
+    {
+      "claim": "The Great Wall of China is visible from space with the naked eye.",
+      "domain": "general",
+      "expected": "contradicted",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 2 evidence items from Wikipedia, but current evidence remains inconclusive or neutral regarding the specific claim.",
+      "evidence_count": 2
+    },
+    {
+      "claim": "Water boils at 100 degrees Celsius at sea level.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 1 evidence item from Wikipedia, but current evidence remains inconclusive or neutral regarding the specific claim.",
+      "evidence_count": 1
+    },
+    {
+      "claim": "Aspirin is used to relieve mild to moderate pain.",
+      "domain": "healthcare",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.6156,
+      "trust_score": 0.7216,
+      "explanation": "Verified (72.2% trust score): 1 out of 2 sources support this claim. The primary source (OpenFDA, authority: 0.98) states: \"FDA Drug Label for Rapidol Aspirin: Indications: Uses Temporary relief of minor aches and pains due to: a cold headache backache muscular aches toothache minor pains from arthri...\" Published FDA Regist.",
+      "evidence_count": 2
+    },
+    {
+      "claim": "This iron tablet cures the headache.",
+      "domain": "healthcare",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 4 evidence items from PubMed, but current evidence remains inconclusive or neutral regarding the specific claim.",
+      "evidence_count": 4
+    },
+    {
+      "claim": "CVE-2021-44228 is associated with Log4Shell.",
+      "domain": "cybersecurity",
+      "expected": "verified",
+      "actual": "contradicted",
+      "confidence": 0.6692,
+      "trust_score": 0.0,
+      "explanation": "Contradicted (3 contradicting sources): Authoritative evidence contradicts this claim. The primary source (mitre, authority: 0.97) states: \"Technique [S1125]: [AcidRain](https://attack.mitre.org/software/S1125) is an ELF binary targeting modems and routers using MIPS architecture.(Citation: AcidRain JAGS 2022) [Acid...\" Published 2025-04-15. No supporting evidence was found from any authoritative database.",
+      "evidence_count": 3
+    },
+    {
+      "claim": "The Trojan virus is the most dangerous cyber attack.",
+      "domain": "cybersecurity",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0
+    },
+    {
+      "claim": "Transformers were introduced in Attention Is All You Need.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.5647,
+      "trust_score": 0.7027,
+      "explanation": "Verified (70.3% trust score): 1 source supports this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Vision transformer]: and autonomous driving. Transformers were introduced in Attention Is All You Need (2017), and have found widespread use in natural language processing\" Published unknown.",
+      "evidence_count": 1
+    },
+    {
+      "claim": "XYZMED123 cures all bacterial infections.",
+      "domain": "healthcare",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 4 evidence items from PubMed, but current evidence remains inconclusive or neutral regarding the specific claim.",
+      "evidence_count": 4
+    },
+    {
+      "claim": "The Earth is flat.",
+      "domain": "general",
+      "expected": "contradicted",
+      "actual": "verified",
+      "confidence": 0.661,
+      "trust_score": 0.7711,
+      "explanation": "Verified (77.1% trust score): 2 out of 2 sources support this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Tanith Lee bibliography]: Wolf at the Door and Other Rare Tales (2019) The Heart of the Moon (2019) The Empress of Dreams (2021) The Earth is Flat: Tales from the Flat ...\" Published unknown.",
+      "evidence_count": 2
+    },
+    {
+      "claim": "Python was created by Guido van Rossum.",
+      "domain": "general",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.8214,
+      "trust_score": 0.8714,
+      "explanation": "Verified (87.1% trust score): 4 out of 4 sources support this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Python License]: current releases is the Python Software Foundation License. Python was created by Guido van Rossum and the initial copyright was held by his employer, ...\" Published unknown.",
+      "evidence_count": 4
+    },
+    {
+      "claim": "HTML is a programming language.",
+      "domain": "general",
+      "expected": "contradicted",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0
+    }
+  ]
+}

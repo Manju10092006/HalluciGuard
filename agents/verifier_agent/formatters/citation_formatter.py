@@ -5,7 +5,16 @@ from schemas.models import Passage, EvidenceItem, EntailmentLabel
 class CitationFormatter:
     """Formats evidence passages into EvidenceItem schemas."""
 
-    def format_evidence(self, passage: Passage, nli_result: Dict[str, Any], credibility: float) -> EvidenceItem:
+    def __init__(self, evidence_scorer: Any = None) -> None:
+        self.evidence_scorer = evidence_scorer
+
+    def format_evidence(
+        self,
+        passage: Passage,
+        nli_result: Dict[str, Any],
+        credibility: float,
+        claim: str = "",
+    ) -> EvidenceItem:
         """
         Combine passage metadata with NLI scores and credibility into an EvidenceItem.
         """
@@ -19,14 +28,25 @@ class CitationFormatter:
         if len(pub_date) > 10:
             pub_date = pub_date[:10]
 
-        label = nli_result.get('label', EntailmentLabel.NEUTRAL)
-        if not isinstance(label, EntailmentLabel):
-            if label in ('entailment', 'supports'):
+        if self.evidence_scorer and claim:
+            ev_class = self.evidence_scorer.classify_evidence(claim, passage, nli_result)
+            if ev_class == "SUPPORTING":
                 label = EntailmentLabel.ENTAILMENT
-            elif label in ('contradiction', 'contradicts'):
+            elif ev_class == "CONTRADICTING":
                 label = EntailmentLabel.CONTRADICTION
             else:
                 label = EntailmentLabel.NEUTRAL
+        else:
+            label_raw = nli_result.get('label', EntailmentLabel.NEUTRAL)
+            if not isinstance(label_raw, EntailmentLabel):
+                if label_raw in ('entailment', 'supports'):
+                    label = EntailmentLabel.ENTAILMENT
+                elif label_raw in ('contradiction', 'contradicts'):
+                    label = EntailmentLabel.CONTRADICTION
+                else:
+                    label = EntailmentLabel.NEUTRAL
+            else:
+                label = label_raw
 
         source_name = getattr(passage, 'source', '') or getattr(passage, 'source_id', '') or "unknown"
         if nli_result.get('degraded', False):
@@ -43,7 +63,14 @@ class CitationFormatter:
             credibility_score=float(credibility)
         )
 
-    def format_all(self, passages: List[Passage], nli_results: List[Dict[str, Any]], domain: str, reliability_manager: Any) -> List[EvidenceItem]:
+    def format_all(
+        self,
+        passages: List[Passage],
+        nli_results: List[Dict[str, Any]],
+        domain: str,
+        reliability_manager: Any,
+        claim: str = "",
+    ) -> List[EvidenceItem]:
         """
         Batch format all passages.
         """
@@ -51,6 +78,6 @@ class CitationFormatter:
         for passage, nli in zip(passages, nli_results):
             source_id = getattr(passage, 'source_id', '') or passage.source or "unknown"
             credibility = reliability_manager.get_credibility(domain, source_id)
-            formatted_items.append(self.format_evidence(passage, nli, credibility))
+            formatted_items.append(self.format_evidence(passage, nli, credibility, claim=claim))
 
         return formatted_items

@@ -1,0 +1,590 @@
+{
+  "metrics": {
+    "accuracy": 0.7428571428571429,
+    "total_evaluated": 35,
+    "errors": 0,
+    "confusion_matrix": {
+      "verified": {
+        "verified": 12,
+        "contradicted": 0,
+        "unverified": 7,
+        "conflicted": 0
+      },
+      "contradicted": {
+        "verified": 0,
+        "contradicted": 1,
+        "unverified": 2,
+        "conflicted": 0
+      },
+      "unverified": {
+        "verified": 0,
+        "contradicted": 0,
+        "unverified": 13,
+        "conflicted": 0
+      },
+      "conflicted": {
+        "verified": 0,
+        "contradicted": 0,
+        "unverified": 0,
+        "conflicted": 0
+      }
+    },
+    "per_class": {
+      "verified": {
+        "TP": 12,
+        "FP": 0,
+        "FN": 7,
+        "precision": 1.0,
+        "recall": 0.6316,
+        "f1": 0.7742
+      },
+      "contradicted": {
+        "TP": 1,
+        "FP": 0,
+        "FN": 2,
+        "precision": 1.0,
+        "recall": 0.3333,
+        "f1": 0.5
+      },
+      "unverified": {
+        "TP": 13,
+        "FP": 9,
+        "FN": 0,
+        "precision": 0.5909,
+        "recall": 1.0,
+        "f1": 0.7429
+      },
+      "conflicted": {
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    },
+    "macro_precision": 0.8636,
+    "macro_recall": 0.655,
+    "macro_f1": 0.6724,
+    "false_verification_rate": 0.0,
+    "false_contradiction_rate": 0.0,
+    "latency": {
+      "avg_ms": 17548,
+      "p50_ms": 16153,
+      "p95_ms": 34752,
+      "min_ms": 2255,
+      "max_ms": 62774
+    },
+    "domains": {
+      "general": {
+        "total": 8,
+        "correct": 6,
+        "accuracy": 0.75
+      },
+      "healthcare": {
+        "total": 8,
+        "correct": 8,
+        "accuracy": 1.0
+      },
+      "cybersecurity": {
+        "total": 8,
+        "correct": 5,
+        "accuracy": 0.625
+      },
+      "ai_research": {
+        "total": 6,
+        "correct": 3,
+        "accuracy": 0.5
+      },
+      "finance": {
+        "total": 5,
+        "correct": 4,
+        "accuracy": 0.8
+      }
+    },
+    "calibration_buckets": {
+      "0.0-0.2": {
+        "count": 23,
+        "correct": 14,
+        "accuracy": 0.6087
+      },
+      "0.2-0.4": {
+        "count": 0,
+        "correct": 0,
+        "accuracy": 0.0
+      },
+      "0.4-0.6": {
+        "count": 6,
+        "correct": 6,
+        "accuracy": 1.0
+      },
+      "0.6-0.8": {
+        "count": 6,
+        "correct": 6,
+        "accuracy": 1.0
+      },
+      "0.8-1.0": {
+        "count": 0,
+        "correct": 0,
+        "accuracy": 0.0
+      }
+    }
+  },
+  "results": [
+    {
+      "claim": "Paris is the capital of France.",
+      "domain": "general",
+      "category": "direct_support",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.5649,
+      "trust_score": 0.7029,
+      "explanation": "Verified (70.3% trust score): 1 source supports this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Paris (disambiguation)]: Paris is the capital of France, which may consist",
+      "evidence_count": 1,
+      "latency_ms": 62774,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "The Eiffel Tower is located in London.",
+      "domain": "general",
+      "category": "direct_contradiction",
+      "expected": "contradicted",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 3 evidence items from Wikipedia, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 3,
+      "latency_ms": 24688,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Amazon company was built by Sundar Pichai.",
+      "domain": "general",
+      "category": "entity_confusion",
+      "expected": "contradicted",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 2 evidence items from Wikipedia, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 2,
+      "latency_ms": 15277,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "The Moon is made of green cheese.",
+      "domain": "general",
+      "category": "insufficient_evidence",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 2 evidence items from Wikipedia, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 2,
+      "latency_ms": 4486,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "The Sun is at the center of the Solar System.",
+      "domain": "general",
+      "category": "direct_support",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.194,
+      "trust_score": 0.0,
+      "explanation": "Verified (0.0% trust score): 1 source supports this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Formation and evolution of the Solar System]: The formation of the Solar Sy",
+      "evidence_count": 1,
+      "latency_ms": 6008,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "Photosynthesis converts carbon dioxide and water into glucose.",
+      "domain": "general",
+      "category": "direct_support",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.4859,
+      "trust_score": 0.314,
+      "explanation": "Verified (31.4% trust score): 1 out of 2 sources support this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Photosynthesis]: Photosynthesis is a system of biological process",
+      "evidence_count": 2,
+      "latency_ms": 19186,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "The Earth is flat.",
+      "domain": "general",
+      "category": "adversarial_debunk",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 2 evidence items from Wikipedia, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 2,
+      "latency_ms": 2255,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "Python was created by Guido van Rossum.",
+      "domain": "general",
+      "category": "direct_support",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.667,
+      "trust_score": 0.7776,
+      "explanation": "Verified (77.8% trust score): 2 out of 2 sources support this claim. The primary source (Wikipedia, authority: 0.80) states: \"Article [Guido van Rossum]: Guido van Rossum is a Dutch programmer. He is ",
+      "evidence_count": 2,
+      "latency_ms": 12048,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Aspirin is used to relieve mild to moderate pain.",
+      "domain": "healthcare",
+      "category": "medication_use",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.6156,
+      "trust_score": 0.7216,
+      "explanation": "Verified (72.2% trust score): 2 out of 2 sources support this claim. The primary source (OpenFDA, authority: 0.98) states: \"FDA Drug Label for Rapidol Aspirin: Indications: Uses Temporary relief of mi",
+      "evidence_count": 2,
+      "latency_ms": 17787,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "This iron tablet cures the headache.",
+      "domain": "healthcare",
+      "category": "unverified_remedy",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 4 evidence items from PubMed, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 4,
+      "latency_ms": 17532,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Paracetamol is commonly used to relieve fever.",
+      "domain": "healthcare",
+      "category": "medication_use",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.6806,
+      "trust_score": 0.8417,
+      "explanation": "Verified (84.2% trust score): 1 source supports this claim. The primary source (PubMed, authority: 0.97) states: \"PubMed [PMID:37151075] Study (2024): Paracetamol (Acetaminophen) is a very common OTC ",
+      "evidence_count": 1,
+      "latency_ms": 8473,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "Aspirin cures every type of cancer.",
+      "domain": "healthcare",
+      "category": "exaggerated_claim",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 3 evidence items from OpenFDA, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 3,
+      "latency_ms": 22604,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "XYZMED123 cures all bacterial infections.",
+      "domain": "healthcare",
+      "category": "insufficient_evidence",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 1 evidence item from pubmed_central, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources",
+      "evidence_count": 1,
+      "latency_ms": 14041,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Metformin is used in the treatment of type 2 diabetes.",
+      "domain": "healthcare",
+      "category": "medication_use",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.7631,
+      "trust_score": 0.8825,
+      "explanation": "Verified (88.2% trust score): 2 out of 2 sources support this claim. The primary source (OpenFDA, authority: 0.98) states: \"FDA Drug Label for Metformin Hydrochloride: Indications: 1 INDICATIONS & USA",
+      "evidence_count": 2,
+      "latency_ms": 17431,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "Ibuprofen is a nonsteroidal anti-inflammatory drug.",
+      "domain": "healthcare",
+      "category": "drug_class",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.5855,
+      "trust_score": 0.6105,
+      "explanation": "Verified (61.1% trust score): 1 out of 3 sources support this claim. The primary source (OpenFDA, authority: 0.98) states: \"FDA Drug Label for Ibuprofen Dye Free: Indications: Uses temporarily relieve",
+      "evidence_count": 3,
+      "latency_ms": 17569,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "Water cure completely eliminates type 1 diabetes.",
+      "domain": "healthcare",
+      "category": "unverified_remedy",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 1 evidence item from pubmed_central, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources",
+      "evidence_count": 1,
+      "latency_ms": 14712,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "CVE-2021-44228 is associated with Log4Shell.",
+      "domain": "cybersecurity",
+      "category": "cve_alias",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.7265,
+      "trust_score": 0.8176,
+      "explanation": "Verified (81.8% trust score): 1 out of 2 sources support this claim. The primary source (cisa, authority: 0.96) states: \"CISA Known Exploited Vulnerability [CVE-2021-44228] Apache Log4j2 (Apache Log4j",
+      "evidence_count": 2,
+      "latency_ms": 9628,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "The Trojan virus is the most dangerous cyber attack.",
+      "domain": "cybersecurity",
+      "category": "subjective_claim",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0,
+      "latency_ms": 19220,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Log4Shell is a vulnerability in Apache Log4j.",
+      "domain": "cybersecurity",
+      "category": "vulnerability_fact",
+      "expected": "verified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0,
+      "latency_ms": 9222,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "CVE-2021-44228 affects Microsoft Word.",
+      "domain": "cybersecurity",
+      "category": "wrong_product",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0,
+      "latency_ms": 16153,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "CVE-9999-99999 is a critical remote code execution vulnerability.",
+      "domain": "cybersecurity",
+      "category": "nonsense_cve",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0,
+      "latency_ms": 25573,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "T1059 is a MITRE ATT&CK technique for Command and Scripting Interpreter.",
+      "domain": "cybersecurity",
+      "category": "mitre_technique",
+      "expected": "verified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 1 evidence item from mitre, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 1,
+      "latency_ms": 12573,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "CVE-2021-44228 is a known exploited vulnerability in CISA KEV catalog.",
+      "domain": "cybersecurity",
+      "category": "cisa_kev",
+      "expected": "verified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0,
+      "latency_ms": 5763,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "EternalBlue is an exploit developed by Microsoft for internal testing.",
+      "domain": "cybersecurity",
+      "category": "threat_origin",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 1 evidence item from mitre, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 1,
+      "latency_ms": 17179,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Transformers were introduced in the paper Attention Is All You Need.",
+      "domain": "ai_research",
+      "category": "paper_contribution",
+      "expected": "verified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 1 evidence item from arxiv, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 1,
+      "latency_ms": 27656,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "The Attention Is All You Need paper was authored by Vaswani et al.",
+      "domain": "ai_research",
+      "category": "authorship",
+      "expected": "verified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0,
+      "latency_ms": 33924,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "ResNet was introduced in Attention Is All You Need.",
+      "domain": "ai_research",
+      "category": "wrong_paper",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 1 evidence item from arxiv, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 1,
+      "latency_ms": 11276,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "XYZABC999 was published at NeurIPS in 2024.",
+      "domain": "ai_research",
+      "category": "fictitious_paper",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "No supporting or contradicting evidence was found from any authoritative source.",
+      "evidence_count": 0,
+      "latency_ms": 36686,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "BERT stands for Bidirectional Encoder Representations from Transformers.",
+      "domain": "ai_research",
+      "category": "acronym_fact",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.4616,
+      "trust_score": 0.5286,
+      "explanation": "Verified (52.9% trust score): 1 out of 2 sources support this claim. The primary source (arxiv, authority: 0.90) states: \"Paper Title [Bidirectional Encoder Representations from Transformers (BERT): A",
+      "evidence_count": 2,
+      "latency_ms": 5666,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "LoRA enables low-rank adaptation of large language models.",
+      "domain": "ai_research",
+      "category": "methodology",
+      "expected": "verified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 1 evidence item from arxiv, but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credible sources.",
+      "evidence_count": 1,
+      "latency_ms": 10599,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "The 1992 Indian securities scam involved stockbroker Harshad Mehta.",
+      "domain": "finance",
+      "category": "financial_history",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.5797,
+      "trust_score": 0.7206,
+      "explanation": "Verified (72.1% trust score): 1 source supports this claim. The primary source (web source (www.slideshare.net), authority: 0.80) states: \"# 1992 INDIAN STOCK MARKET SCAM Harshad Mehta The document di",
+      "evidence_count": 1,
+      "latency_ms": 12987,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Apple Inc trades under the ticker symbol AAPL on NASDAQ.",
+      "domain": "finance",
+      "category": "ticker_symbol",
+      "expected": "verified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 2 evidence items from web source (www.google.com), but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between cr",
+      "evidence_count": 2,
+      "latency_ms": 13959,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Tesla Inc was founded in 1850.",
+      "domain": "finance",
+      "category": "temporal_contradiction",
+      "expected": "contradicted",
+      "actual": "contradicted",
+      "confidence": 0.5406,
+      "trust_score": 0.0,
+      "explanation": "Contradicted (1 contradicting source): Authoritative evidence contradicts this claim. The primary source (web source (en.wikipedia.org), authority: 0.80) states: \"Tesla, Inc. is an electric vehicle ma",
+      "evidence_count": 1,
+      "latency_ms": 24433,
+      "retrieval_method": "primary_only"
+    },
+    {
+      "claim": "NonsenseCorp999 reported 500 billion revenue in 2023.",
+      "domain": "finance",
+      "category": "fictitious_corporate",
+      "expected": "unverified",
+      "actual": "unverified",
+      "confidence": 0.0,
+      "trust_score": 0.0,
+      "explanation": "Unverified: Evaluated 3 evidence items from web source (www.sec.gov), but current evidence remains inconclusive or neutral regarding the specific claim. Note: There is a genuine conflict between credi",
+      "evidence_count": 3,
+      "latency_ms": 18184,
+      "retrieval_method": "hybrid_tavily"
+    },
+    {
+      "claim": "Microsoft Corporation was co-founded by Bill Gates and Paul Allen.",
+      "domain": "finance",
+      "category": "corporate_founders",
+      "expected": "verified",
+      "actual": "verified",
+      "confidence": 0.7606,
+      "trust_score": 0.4438,
+      "explanation": "Verified (44.4% trust score): 2 out of 7 sources support this claim. The primary source (SEC EDGAR, authority: 0.95) states: \"SEC Form 8-K by CROWN CASTLE INTERNATIONAL CORP  (CCI)  (CIK 0001051470) (",
+      "evidence_count": 7,
+      "latency_ms": 26658,
+      "retrieval_method": "hybrid_tavily"
+    }
+  ]
+}
