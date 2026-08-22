@@ -48,6 +48,7 @@ async def test_healthcare_pubmed_central_uses_ncbi_eutilities() -> None:
     client = FakeClient([
         {"esearchresult": {"idlist": ["123456"]}},
         {"result": {"123456": {"title": "PMC Evidence", "pubdate": "2024 Jan"}}},
+        "<article-set />",
     ])
     adapter = HealthcareAdapter()
 

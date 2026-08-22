@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from retrievers.hybrid import HybridRetriever
 from nli.robust_entailment import NLIEngine, _decision, _normalize_scores
+from api.pipeline import VerificationPipeline
 from scorers.evidence_scorer import EvidenceScorer
 from schemas.models import EntailmentLabel, Passage, VerdictLabel
 
@@ -171,7 +172,7 @@ def test_evidence_scorer_flags_strong_contradiction():
     )
 
     assert result["contradiction_score"] > 0.5
-    assert result["verdict"] == VerdictLabel.LIKELY_HALLUCINATED
+    assert result["verdict"] == VerdictLabel.CONTRADICTED
 
 
 def test_evidence_scorer_does_not_treat_strong_neutral_as_support():
@@ -194,4 +195,72 @@ def test_evidence_scorer_does_not_treat_strong_neutral_as_support():
 
     assert result["support_score"] == 0.0
     assert result["contradiction_score"] == 0.0
-    assert result["verdict"] == VerdictLabel.INSUFFICIENT_EVIDENCE
+    assert result["verdict"] == VerdictLabel.UNVERIFIED
+
+
+def test_evidence_scorer_rejects_discussion_context_as_literal_support():
+    scorer = EvidenceScorer()
+    passage = _passage(
+        "general",
+        "The claim that Exampleton is made of crystal is a fictional legend.",
+    ).model_copy(update={"relevance_score": 0.9})
+    nli = [{
+        "label": EntailmentLabel.ENTAILMENT,
+        "entailment_score": 0.98,
+        "contradiction_score": 0.01,
+        "neutral_score": 0.01,
+    }]
+
+    result = scorer.score_evidence(
+        "Exampleton is made of crystal", [passage], nli, "general"
+    )
+
+    assert result["support_score"] == 0.0
+    assert result["verdict"] == VerdictLabel.UNVERIFIED
+
+
+def test_pipeline_relevance_gate_filters_before_nli():
+    passages = [
+        _passage("general", "Relevant support").model_copy(update={"relevance_score": 0.8}),
+        _passage("general", "Unrelated apparent contradiction").model_copy(update={"relevance_score": 0.1}),
+    ]
+
+    relevant = VerificationPipeline._select_relevant_passages(passages)
+
+    assert [passage.snippet for passage in relevant] == ["Relevant support"]
+
+
+def test_pipeline_relevance_gate_keeps_only_strongest_passage_per_source():
+    passages = [
+        _passage("general", "Direct statement").model_copy(update={"relevance_score": 0.9}),
+        _passage("general", "Tangential page").model_copy(update={"relevance_score": 0.7}),
+        _passage("second_source", "Independent statement").model_copy(update={"relevance_score": 0.8}),
+    ]
+
+    relevant = VerificationPipeline._select_relevant_passages(passages)
+
+    assert [passage.snippet for passage in relevant] == [
+        "Direct statement", "Independent statement"
+    ]
+
+
+def test_aspirin_like_authoritative_evidence_reaches_verified_aggregation():
+    scorer = EvidenceScorer()
+    passage = _passage(
+        "openfda",
+        "The official drug label states that the medicine provides temporary relief of minor aches and pains.",
+    ).model_copy(update={"relevance_score": 0.85})
+    nli = [{
+        "label": EntailmentLabel.ENTAILMENT,
+        "entailment_score": 0.96,
+        "contradiction_score": 0.01,
+        "neutral_score": 0.03,
+        "degraded": False,
+    }]
+
+    result = scorer.score_evidence(
+        "Aspirin is used to treat mild pain.", [passage], nli, "healthcare"
+    )
+
+    assert result["support_score"] >= 0.30
+    assert result["verdict"] == VerdictLabel.VERIFIED

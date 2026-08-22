@@ -12,7 +12,7 @@ class SqliteCache:
 
     # Bump when retrieval/NLI/scoring semantics change so stale decisions are
     # never silently reused after an algorithm upgrade.
-    CACHE_SCHEMA_VERSION = "verifier-v2.1"
+    CACHE_SCHEMA_VERSION = "verifier-v2.2"
 
     def __init__(self, db_path: str = "verification_cache.db", ttl_seconds: int = 86400) -> None:
         self.db_path = db_path
@@ -46,8 +46,31 @@ class SqliteCache:
         key_input = f"{self.CACHE_SCHEMA_VERSION}:{domain.lower().strip()}:{normalized}"
         return hashlib.sha256(key_input.encode("utf-8")).hexdigest()
 
+    def is_enabled(self) -> bool:
+        """Check if verifier cache is enabled via env var or settings."""
+        import os
+        env_val = os.getenv("VERIFIER_CACHE_ENABLED", "").lower().strip()
+        if env_val in ("false", "0", "off", "no"):
+            return False
+        if env_val in ("true", "1", "on", "yes"):
+            return True
+        try:
+            from config.settings import get_settings
+            return get_settings().verifier_cache_enabled
+        except Exception:
+            return True
+
+    async def _ensure_db_initialized(self) -> None:
+        """Ensure the table exists before executing queries."""
+        if not getattr(self, "_db_initialized", False):
+            await self.init_db()
+            self._db_initialized = True
+
     async def get(self, domain: str, query: str) -> Optional[Dict[str, Any]]:
         """Retrieve a cached result if it hasn't expired."""
+        if not self.is_enabled():
+            return None
+        await self._ensure_db_initialized()
         key = self._normalize_key(domain, query)
         try:
             import aiosqlite
@@ -76,6 +99,9 @@ class SqliteCache:
 
     async def set(self, domain: str, query: str, payload: Dict[str, Any]) -> None:
         """Store a result in the cache."""
+        if not self.is_enabled():
+            return
+        await self._ensure_db_initialized()
         key = self._normalize_key(domain, query)
         timestamp = datetime.now(timezone.utc).isoformat()
         payload_str = json.dumps(payload)

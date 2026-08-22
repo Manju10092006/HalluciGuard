@@ -96,7 +96,17 @@ _shared_client: Optional[ResilientHttpClient] = None
 
 def get_client() -> ResilientHttpClient:
     global _shared_client
-    if _shared_client is None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if (
+        _shared_client is None
+        or getattr(_shared_client, "_loop", None) != loop
+        or getattr(_shared_client.client, "is_closed", False)
+    ):
         logger.info('Initializing shared HTTP client')
         _shared_client = ResilientHttpClient()
+        _shared_client._loop = loop
     return _shared_client

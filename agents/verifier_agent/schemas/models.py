@@ -19,9 +19,9 @@ class EntailmentLabel(str, Enum):
 
 class VerdictLabel(str, Enum):
     VERIFIED = "verified"
-    LIKELY_HALLUCINATED = "likely_hallucinated"
-    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
-    MIXED_EVIDENCE = "mixed_evidence"
+    CONTRADICTED = "contradicted"
+    UNVERIFIED = "unverified"
+    CONFLICTED = "conflicted"
 
 
 class PipelineStage(str, Enum):
@@ -45,6 +45,8 @@ class Passage(BaseModel):
     snippet: str
     source_id: str = ""
     relevance_score: float = 0.0
+    source_confidence_hint: float = 0.0
+    relation_check: Optional[Dict[str, Any]] = None
 
 
 class SuspiciousClaim(BaseModel):
@@ -61,6 +63,8 @@ class VerifierInputV2(BaseModel):
     query_id: str
     domain: str
     suspicious_claims: list[SuspiciousClaim]
+    retrieval_mode: str = "hybrid"  # "hybrid", "primary_only", "tavily_only"
+    source_mode: Optional[str] = None
 
 
 class EvidenceItem(BaseModel):
@@ -72,6 +76,8 @@ class EvidenceItem(BaseModel):
     entailment_label: EntailmentLabel
     entailment_score: float = Field(ge=0.0, le=1.0)
     credibility_score: float = Field(ge=0.0, le=1.0)
+    source_confidence_hint: float = 0.0
+    relation_check: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +113,7 @@ class ClaimReport(BaseModel):
     retrieved_documents: int = 0
     reranked_documents: int = 0
     verified_evidence: int = 0
+    retrieval_trace: Optional[dict] = None
 
 
 class PipelineStageStatus(BaseModel):
@@ -120,6 +127,10 @@ class VerifierOutputV2(BaseModel):
     query_id: str
     domain: str
     domain_validated: bool
+    adapter: str = "general"
+    sources_attempted: list[str] = []
+    sources_succeeded: list[str] = []
+    sources_failed: list[str] = []
     retrieved_sources: int
     verified_sources: int
     claim_evidence: list[ClaimReport]
