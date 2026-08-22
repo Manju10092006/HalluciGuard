@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Tuple
 
 from schemas.models import Passage, VerdictLabel, EntailmentLabel
 from .source_reliability import SourceReliabilityManager
+from .relation_verifier import RelationVerifier
 
 
 class EvidenceScorer:
@@ -22,10 +23,11 @@ class EvidenceScorer:
       - Calibrated Confidence: independent of Trust, non-zero for both VERIFIED and CONTRADICTED
     """
 
-    MIN_NLI_SIGNAL = 0.40
+    MIN_NLI_SIGNAL = 0.35  # Aligned with decision-grade evidence selection threshold
 
     def __init__(self, credibility_config: Dict[str, Any] | None = None) -> None:
         self.reliability_manager = SourceReliabilityManager()
+        self.relation_verifier = RelationVerifier()
 
     def _get_relevance_gate_threshold(self) -> float:
         """Get the relevance gate threshold from settings, fallback to 0.20."""
@@ -80,8 +82,7 @@ class EvidenceScorer:
             "allegation", "alleged", "belief", "fiction", "fictional",
             "folklore", "hoax", "legend", "myth", "mythical", "purported",
             "fable", "proverb", "idiom", "saying", "trope", "metaphor",
-            "fanciful", "absurdity", "nursery", "rhyme", "untrue", "false",
-            "disproven", "debunked", "misconception", "expression", "phrase",
+            "fanciful", "absurdity", "nursery", "rhyme", "expression", "phrase",
             "idiomatic", "children", "folktale", "origin", "origins",
             "etymology", "meaning", "riddle", "joke", "metaphorical",
         }
@@ -110,24 +111,45 @@ class EvidenceScorer:
         Decision Flow:
           1. Relevance Gate: If relevance_score < evidence_relevance_gate (default 0.20) -> 'IRRELEVANT'
           2. Validity Check: If NLI inference was degraded or marked invalid -> 'NEUTRAL'
-          3. Non-assertive Context: If passage discusses myth/idiom/misconception -> 'NEUTRAL'
-          4. NLI Signal:
+          3. Relation Check Override: If object/relation mismatch -> 'CONTRADICTING' (bypasses word-coverage suppression)
+          4. Non-assertive Context: If passage discusses myth/idiom/misconception -> 'NEUTRAL'
+          5. NLI Signal:
              - Entailment >= MIN_NLI_SIGNAL and Entailment > Contradiction -> 'SUPPORTING'
              - Contradiction >= MIN_NLI_SIGNAL and Contradiction > Entailment -> 'CONTRADICTING'
              - Otherwise -> 'NEUTRAL'
         """
         gate_threshold = self._get_relevance_gate_threshold()
         rel_score = float(getattr(passage, "relevance_score", 0.5) or 0.0)
-        if rel_score < gate_threshold:
+        hint_score = float(getattr(passage, "source_confidence_hint", 0.0) or 0.0)
+        if max(rel_score, hint_score) < gate_threshold and rel_score < gate_threshold:
             return "IRRELEVANT"
 
         # Check if NLI inference was degraded or invalid
         if nli.get("nli_degraded", False) or nli.get("validity_factor", 1.0) == 0.0:
             return "NEUTRAL"
 
+        # Structured Relation Verification Check
+        rel_result = self.relation_verifier.verify_relation(claim, [passage])
+        if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
+            # Direct contradiction at relation level overrides false entailment or neutral
+            # Bypasses the word-coverage suppression check completely
+            return "CONTRADICTING"
+        elif rel_result.status == "MATCH":
+            return "SUPPORTING"
+
         # Guard against myths / proverbs / common misconceptions matching
         # assertively if the passage qualifies them as untrue, figurative, or an idiom.
         full_text = f"{getattr(passage, 'title', '')} {passage.snippet}"
+        snippet_lower = full_text.lower()
+        refutation_phrases = (
+            "disproven", "debunked", "misconception", "hoax", "untrue",
+            "falsely", "refuted", "no evidence", "scientifically disproven",
+            "incorrectly claimed", "not true", "not associated", "is false",
+        )
+        has_explicit_refutation = any(rf in snippet_lower for rf in refutation_phrases)
+        if has_explicit_refutation and not any(neg in claim.lower() for neg in ("not", "never", "disproven", "false", "myth")):
+            return "CONTRADICTING"
+
         if self._is_non_assertive_claim_context(claim, full_text):
             return "NEUTRAL"
 
@@ -216,6 +238,7 @@ class EvidenceScorer:
         contradicting_sources: set[str] = set()
 
         for passage, nli in zip(passages, nli_results):
+            rel_result = self.relation_verifier.verify_relation(claim, [passage])
             evidence_class = self.classify_evidence(claim, passage, nli)
             classification_counts[evidence_class.lower()] += 1
 
@@ -226,6 +249,16 @@ class EvidenceScorer:
             contradiction = self._bounded(nli.get("contradiction_score"))
             neutral = self._bounded(nli.get("neutral_score"))
             validity_factor = 0.0 if nli.get("nli_degraded", False) else float(nli.get("validity_factor", 1.0))
+
+            # Apply relation verification signal calibration
+            if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
+                contradiction = max(contradiction, 0.95)
+                entailment = 0.0
+                neutral = 0.05
+            elif rel_result.status == "MATCH":
+                entailment = max(entailment, 0.95)
+                contradiction = 0.0
+                neutral = 0.05
 
             source_id = str(
                 getattr(passage, "source_id", "")

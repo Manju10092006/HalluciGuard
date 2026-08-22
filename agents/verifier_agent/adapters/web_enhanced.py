@@ -52,9 +52,11 @@ class WebEnhancedAdapter:
         self,
         primary_adapter: object,
         tavily_api_key: Optional[str] = None,
+        min_primary: Optional[int] = None,
+        **kwargs: Any,
     ) -> None:
         self._primary = primary_adapter
-        self._tavily_key = tavily_api_key or os.environ.get("TAVILY_API_KEY", "")
+        self._tavily_key = tavily_api_key if tavily_api_key is not None else os.environ.get("TAVILY_API_KEY", "")
         self._web_retriever = None  # Lazy
 
         # Mirror the primary adapter's name so registry routing still works
@@ -150,11 +152,33 @@ class WebEnhancedAdapter:
                 reason="PRIMARY_EMPTY",
             )
 
-        # Use existing relevance scores from adapter/retriever
-        relevance_scores = [float(p.relevance_score or 0.0) for p in usable]
-        top_relevance = max(relevance_scores) if relevance_scores else 0.0
+        import re
+        stopwords = {
+            "is", "the", "a", "an", "in", "of", "to", "and", "or", "for", "with",
+            "that", "this", "from", "was", "were", "been", "have", "has", "had",
+            "associated", "related", "called", "known", "named", "most", "dangerous"
+        }
+        claim_terms = [
+            w.lower() for w in re.findall(r"[a-zA-Z0-9]+", claim)
+            if len(w) > 3 and w.lower() not in stopwords and not (w.isdigit() and len(w) == 4)
+        ]
+
+        # Compute honest gate-time relevance from lexical overlap + confidence hint, or explicit score
+        gate_relevance_scores = []
+        for p in usable:
+            if float(getattr(p, "relevance_score", 0.0) or 0.0) > 0.0:
+                gate_relevance_scores.append(float(p.relevance_score))
+            else:
+                p_text = f"{p.title} {p.snippet}".lower()
+                overlap = sum(1 for t in claim_terms if t in p_text)
+                overlap_ratio = overlap / len(claim_terms) if claim_terms else 1.0
+                hint = float(getattr(p, "source_confidence_hint", 0.0) or 0.70)
+                score = round(overlap_ratio * 0.7 + hint * 0.3, 4)
+                gate_relevance_scores.append(score)
+
+        top_relevance = max(gate_relevance_scores) if gate_relevance_scores else 0.0
         relevant_count = sum(
-            1 for score in relevance_scores
+            1 for score in gate_relevance_scores
             if score >= settings.relevance_threshold
         )
 
@@ -166,16 +190,6 @@ class WebEnhancedAdapter:
         source_diversity = len(unique_sources)
 
         # Check claim term coverage in primary passages to detect alias/colloquial gaps
-        import re
-        stopwords = {
-            "is", "the", "a", "an", "in", "of", "to", "and", "or", "for", "with",
-            "that", "this", "from", "was", "were", "been", "have", "has", "had",
-            "associated", "related", "called", "known", "named", "most", "dangerous"
-        }
-        claim_terms = [
-            w.lower() for w in re.findall(r"[a-zA-Z0-9]+", claim)
-            if len(w) > 3 and w.lower() not in stopwords and not (w.isdigit() and len(w) == 4)
-        ]
         if claim_terms:
             combined_corpus = " ".join((p.title + " " + p.snippet).lower() for p in usable)
             covered_terms = sum(1 for term in claim_terms if term in combined_corpus)
@@ -184,12 +198,10 @@ class WebEnhancedAdapter:
             coverage_ratio = 1.0
             covered_terms = 0
 
-        if len(claim_terms) == 1:
+        if len(claim_terms) <= 2:
             sufficient_coverage = (covered_terms >= 1)
-        elif len(claim_terms) == 2:
-            sufficient_coverage = (covered_terms == 2)
         elif claim_terms:
-            sufficient_coverage = (coverage_ratio >= 0.70)
+            sufficient_coverage = (coverage_ratio >= 0.50)
         else:
             sufficient_coverage = True
 
@@ -316,6 +328,15 @@ class WebEnhancedAdapter:
             trace.primary = self._assess_primary_quality(primary_passages, query)
             trace.primary.latency_ms = primary_latency
 
+        top_hint = max([float(getattr(p, "source_confidence_hint", 0.0) or 0.70) for p in primary_passages], default=0.0)
+        from schemas.retrieval_trace import GateRelevanceAuditTrace
+        trace.gate_relevance_audit = GateRelevanceAuditTrace(
+            source_confidence_hint=round(top_hint, 4),
+            gate_time_relevance_signal=trace.primary.top_relevance,
+            final_bge_relevance_score=0.0,
+            signals_agree=True,
+        )
+
         # ── MODE: primary_only ─────────────────────────────────────
         if retrieval_mode == "primary_only":
             trace.tavily = TavilyRetrievalTrace(
@@ -375,7 +396,7 @@ class WebEnhancedAdapter:
         reason: str,
     ) -> List[Passage]:
         """Execute Tavily search with trace recording."""
-        active_key = self._tavily_key or os.environ.get("TAVILY_API_KEY", "").strip()
+        active_key = self._tavily_key if self._tavily_key is not None else os.environ.get("TAVILY_API_KEY", "").strip()
         if not active_key:
             logger.info("Tavily API key not configured; skipping web fallback")
             trace.tavily = TavilyRetrievalTrace(

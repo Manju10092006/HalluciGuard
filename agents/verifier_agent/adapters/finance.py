@@ -149,7 +149,8 @@ class FinanceAdapter:
                         publication_date=str(date)[:10],
                         snippet=f"SEC Form {form} by {entity} ({date}): {desc[:350]}",
                         source_id=f"sec_{entity}",
-                        relevance_score=0.5,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.80,
                     )
                 )
             return passages
@@ -189,7 +190,8 @@ class FinanceAdapter:
                                 publication_date="unknown",
                                 snippet=f"World Bank indicator {item.get('id')} [{item.get('name')}]: {source_note[:350]}",
                                 source_id=f"wb_{item.get('id')}",
-                                relevance_score=0.5,
+                                relevance_score=0.0,
+                                source_confidence_hint=0.75,
                             )
                         )
                         if len(passages) >= k:
@@ -230,7 +232,8 @@ class FinanceAdapter:
                         publication_date="unknown",
                         snippet=f"Overview for {data.get('Name', data['Symbol'])} ({data['Symbol']}): {data.get('Description', '')[:350]}",
                         source_id=f"alpha_{data['Symbol']}",
-                        relevance_score=0.5,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.85,
                     )
                 ]
             return []
