@@ -4,6 +4,18 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Literal, TypedDict
 
+from .schemas import (
+    ClaimReport,
+    CorrectionRequest,
+    CorrectionResult,
+    DetectorResult,
+    Evidence,
+    JudgeResult,
+    MemoryResult,
+    ReverificationResult,
+    VerifierResult,
+)
+
 AgentStatus = Literal["started", "completed", "failed", "skipped", "scheduled"]
 TerminalStatus = Literal[
     "accepted", "corrected", "rejected", "partial_success", "failed", "human_review", "fallback"
@@ -43,7 +55,16 @@ class HalluciGuardState(TypedDict, total=False):
     created_at: str
     updated_at: str
 
-    # Shared inter-agent contract
+    # Canonical Shared Contracts (Phase 1+)
+    detector_result: DetectorResult | dict[str, Any]
+    verifier_result: VerifierResult | dict[str, Any]
+    judge_result: JudgeResult | dict[str, Any]
+    correction_request: CorrectionRequest | dict[str, Any]
+    correction_result: CorrectionResult | dict[str, Any]
+    reverification_result: ReverificationResult | dict[str, Any]
+    memory_result: MemoryResult | dict[str, Any]
+
+    # Shared inter-agent contract (Legacy / Backward-compatibility)
     detector: dict[str, Any]
     route: str
     claims: list[dict[str, Any]]
