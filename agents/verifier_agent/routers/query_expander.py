@@ -90,19 +90,59 @@ class QueryExpander:
         if resolution.canonical_query and resolution.canonical_query.lower() != clean_q.lower():
             queries.append(resolution.canonical_query)
 
-        # Subject-predicate expansion for relationship claims (e.g. 'X was created by Y' -> 'X creator', 'X created by')
-        created_match = re.search(
-            r"^([A-Za-z0-9\s]+?)\s+(?:was\s+)?(?:created|developed|invented|founded|written|authored|discovered)\s+by\s+",
+        # Bidirectional relational query generation
+        # 1. Passive creation: "Java was created by James Gosling" -> "Java created by", "who created Java"
+        passive_create = re.search(
+            r"^([A-Za-z0-9\s\-]+?)\s+(?:was|is|were)?\s*(?:originally\s+)?(created|developed|invented|founded|written|authored|discovered|built)\s+by\s+([A-Za-z0-9\s\-]+)",
             clean_q,
             re.IGNORECASE,
         )
-        if created_match:
-            subj = created_match.group(1).strip()
-            if subj and len(subj) > 2:
-                queries.append(f"{subj} created by")
+        if passive_create:
+            creation = passive_create.group(1).strip()
+            verb = passive_create.group(2).lower()
+            if creation and len(creation) > 2:
+                queries.append(f"{creation} {verb} by")
+                queries.append(f"who {verb} {creation}")
 
+        # 2. Active creation: "Ram Charan invented the Java programming language" -> "Java programming language inventor", "who created Java programming language"
+        active_create = re.search(
+            r"^([A-Za-z0-9\s\-]+?)\s+(created|developed|invented|founded|built|designed)\s+(?:the\s+)?([A-Za-z0-9\s\-]+)",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if active_create and not any(w in active_create.group(1).lower() for w in ("was", "is", "were", "that", "which")):
+            verb = active_create.group(2).lower()
+            creation = active_create.group(3).strip()
+            if creation and len(creation) > 2:
+                queries.append(f"{creation} {verb} by")
+                queries.append(f"who {verb} {creation}")
+
+        # 3. Kinship / Family: "Chiranjeevi is the father of Allu Arjun" -> "Allu Arjun father", "Allu Arjun parents"
+        kin_match = re.search(
+            r"^([A-Za-z0-9\s\-]+?)\s+is\s+(?:the\s+)?(?:maternal\s+|paternal\s+)?(father|mother|parent|son|daughter)\s+of\s+([A-Za-z0-9\s\-]+)",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if kin_match:
+            rel_type = kin_match.group(2).lower()
+            person_b = kin_match.group(3).strip()
+            queries.append(f"{person_b} {rel_type}")
+            queries.append(f"{person_b} family")
+
+        # 4. Starring / Film roles: "Ram Charan starred in Game Changer" -> "Game Changer cast", "Game Changer starring"
+        star_match = re.search(
+            r"^([A-Za-z0-9\s\-]+?)\s+(?:starred\s+in|acted\s+in|played\s+in)\s+([A-Za-z0-9\s\-]+)",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if star_match:
+            film = star_match.group(2).strip()
+            queries.append(f"{film} cast")
+            queries.append(f"{film} starring")
+
+        # 5. Capital relations: "Hyderabad is the capital of India" -> "capital of India"
         capital_match = re.search(
-            r"^([A-Za-z0-9\s]+?)\s+is\s+the\s+capital\s+of\s+([A-Za-z0-9\s]+)",
+            r"^([A-Za-z0-9\s\-]+?)\s+is\s+the\s+capital\s+of\s+([A-Za-z0-9\s\-]+)",
             clean_q,
             re.IGNORECASE,
         )
@@ -110,8 +150,9 @@ class QueryExpander:
             country = capital_match.group(2).strip()
             queries.append(f"capital of {country}")
 
+        # 6. Location relations: "The Eiffel Tower is located in London" -> "Eiffel Tower location"
         location_match = re.search(
-            r"^([A-Za-z0-9\s]+?)\s+is\s+(?:located\s+in|in)\s+([A-Za-z0-9\s]+)",
+            r"^([A-Za-z0-9\s\-]+?)\s+is\s+(?:located\s+in|in)\s+([A-Za-z0-9\s\-]+)",
             clean_q,
             re.IGNORECASE,
         )
@@ -128,7 +169,7 @@ class QueryExpander:
                 seen.add(qn)
                 unique_queries.append(q.strip())
 
-        return unique_queries[:3]
+        return unique_queries[:4]
 
     def expand(self, query: str, domain: str) -> str:
         """Helper returning just the expanded query string for backward compatibility."""

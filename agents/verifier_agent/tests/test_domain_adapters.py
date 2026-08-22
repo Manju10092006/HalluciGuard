@@ -115,7 +115,7 @@ async def test_general_adapter_page_summary():
         p = passages[0]
         assert p.source == "wikipedia"
         assert "scientifically disproven" in p.snippet
-        assert p.relevance_score >= 0.80
+        assert p.source_confidence_hint >= 0.80
 
 
 def test_general_adapter_noise_filtering():

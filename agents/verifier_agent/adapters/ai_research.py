@@ -111,7 +111,8 @@ class AiResearchAdapter:
                     publication_date=published[:10],
                     snippet=f"Paper Title [{title}]: {summary[:300]}",
                     source_id=f"arxiv_{url_id.split('/')[-1]}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.80,
                 ))
             return passages
         except Exception as e:
@@ -143,7 +144,8 @@ class AiResearchAdapter:
                     publication_date=str(year),
                     snippet=f"Abstract [{title} ({year})]: {abstract[:300]}",
                     source_id=f"s2_{item.get('paperId', 'paper')}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.85,
                 ))
             return passages
         except Exception as e:
@@ -177,7 +179,8 @@ class AiResearchAdapter:
                     publication_date=publication_date,
                     snippet=f"Publication [{title}]: {abstract[:300]}",
                     source_id=f"crossref_{url_val.split('/')[-1]}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.80,
                 ))
             return passages
         except Exception as e:

@@ -45,6 +45,8 @@ class Passage(BaseModel):
     snippet: str
     source_id: str = ""
     relevance_score: float = 0.0
+    source_confidence_hint: float = 0.0
+    relation_check: Optional[Dict[str, Any]] = None
 
 
 class SuspiciousClaim(BaseModel):
@@ -74,6 +76,8 @@ class EvidenceItem(BaseModel):
     entailment_label: EntailmentLabel
     entailment_score: float = Field(ge=0.0, le=1.0)
     credibility_score: float = Field(ge=0.0, le=1.0)
+    source_confidence_hint: float = 0.0
+    relation_check: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------

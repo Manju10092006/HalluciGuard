@@ -80,6 +80,22 @@ def _print_retrieval_trace(trace: dict) -> None:
     print(f"  Candidates       : {merged.get('candidate_count', 0)}")
     print(f"  After Dedup      : {merged.get('deduplicated_count', 0)}")
 
+    audit = trace.get("gate_relevance_audit")
+    if audit:
+        print(f"\n  --- GATE RELEVANCE AUDIT ---")
+        print(f"  Source Confidence Hint     : {audit.get('source_confidence_hint', 0.0):.4f}")
+        print(f"  Gate-Time Signal (Overlap) : {audit.get('gate_time_relevance_signal', 0.0):.4f}")
+        print(f"  Final BGE Relevance Score  : {audit.get('final_bge_relevance_score', 0.0):.4f}")
+        print(f"  Signals Agree              : {audit.get('signals_agree', False)}")
+
+    rel = trace.get("relation_check")
+    if rel:
+        print(f"\n  --- RELATION VERIFICATION LAYER ---")
+        print(f"  Claim Triple       : ({rel.get('claim_subject', '')}, {rel.get('claim_relation', '')}, {rel.get('claim_object', '')})")
+        print(f"  Evidence Triple    : ({rel.get('evidence_subject', '')}, {rel.get('evidence_relation', '')}, {rel.get('evidence_object', '')})")
+        print(f"  Relation Result    : {rel.get('check_result', 'N/A')}")
+        print(f"  Combination Rule   : {rel.get('combination_rule_applied', 'N/A')}")
+
 
 async def verify_custom_claim(
     claim_text: str,

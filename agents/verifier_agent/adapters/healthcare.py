@@ -275,7 +275,8 @@ class HealthcareAdapter:
                             publication_date=pub_date,
                             snippet=snippet[:450],
                             source_id=f"pubmed_{pm_id}",
-                            relevance_score=0.75,
+                            relevance_score=0.0,
+                            source_confidence_hint=0.75,
                         )
                     )
             return passages
@@ -354,7 +355,8 @@ class HealthcareAdapter:
                         publication_date=pub_date,
                         snippet=snippet[:450],
                         source_id=f"pmc_{pmc_uid}",
-                        relevance_score=0.75,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.75,
                     )
                 )
             return passages
@@ -432,7 +434,8 @@ class HealthcareAdapter:
                         publication_date="FDA Registered",
                         snippet=f"FDA Drug Label for {brand}: {desc[:400]}",
                         source_id=f"openfda_{item_id}",
-                        relevance_score=0.80,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.80,
                     )
                 )
             return passages
@@ -477,7 +480,8 @@ class HealthcareAdapter:
                         publication_date="unknown",
                         snippet=f"Clinical Study [{nctId}] (Status: {status}): {title}. Summary: {summary[:350]}",
                         source_id=f"clinicaltrials_{nctId}",
-                        relevance_score=0.70,
+                        relevance_score=0.0,
+                        source_confidence_hint=0.70,
                     )
                 )
             return passages
@@ -512,7 +516,8 @@ class HealthcareAdapter:
                             publication_date="WHO Official",
                             snippet=f"WHO Global Health Observatory Indicator [{ind_code}]: {ind_name}. Official World Health Organization global health surveillance data.",
                             source_id=f"who_{ind_code.lower()}",
-                            relevance_score=0.75,
+                            relevance_score=0.0,
+                            source_confidence_hint=0.75,
                         )
                     )
                 if len(passages) >= k:

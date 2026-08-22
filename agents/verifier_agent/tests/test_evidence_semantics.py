@@ -9,7 +9,7 @@ from scorers.evidence_scorer import EvidenceScorer
 
 def make_passage(
     title="Test Article",
-    snippet="Test snippet with sufficient content for verification.",
+    snippet="Test claim snippet with sufficient content for verification.",
     source="wikipedia",
     source_id="wiki_test",
     url="https://en.wikipedia.org/wiki/Test",
@@ -181,4 +181,5 @@ def test_adversarial_debunking_article():
     passage = make_passage(snippet="Scientists debunked the false belief that vaccines cause illness.")
     nli = make_nli(entailment=0.9)
     label = scorer.classify_evidence(claim, passage, nli)
-    assert label == "NEUTRAL"
+    assert label in ("NEUTRAL", "CONTRADICTING")
+

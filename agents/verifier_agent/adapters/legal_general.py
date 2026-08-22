@@ -100,7 +100,8 @@ class LegalGeneralAdapter:
                     publication_date=str(date_filed)[:10],
                     snippet=f"Legal opinion [{case_name}]: {snippet[:300]}",
                     source_id=f"courtlistener_{item.get('cluster_id', item.get('id', 'opinion'))}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.80,
                 ))
             return passages
         except Exception as e:
@@ -131,7 +132,8 @@ class LegalGeneralAdapter:
                     publication_date="unknown",
                     snippet=f"Legal Reference [{title}]: {snippet[:300]}",
                     source_id=f"wiki_{title_url}",
-                    relevance_score=0.5
+                    relevance_score=0.0,
+                    source_confidence_hint=0.70,
                 ))
             return passages
         except Exception as e:
