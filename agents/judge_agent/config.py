@@ -6,7 +6,7 @@ No hardcoded thresholds. Policy-driven behavioral governance.
 
 import enum
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Dict, Any
 
 
 class Decision(enum.Enum):
@@ -73,6 +73,26 @@ class ConflictType(enum.Enum):
     SAFETY_VIOLATION = "SAFETY_VIOLATION"
     PARTIAL_DISAGREEMENT = "PARTIAL_DISAGREEMENT"
     NO_CONFLICT = "NO_CONFLICT"
+
+
+@dataclass
+class CorrectionRequest:
+    execution_id: str
+    user_query: str
+    original_response: str
+    claims_to_correct: List[Dict[str, Any]] = field(default_factory=list)
+    claims_to_preserve: List[Dict[str, Any]] = field(default_factory=list)
+    trusted_evidence: List[Dict[str, Any]] = field(default_factory=list)
+    contradictory_evidence: List[Dict[str, Any]] = field(default_factory=list)
+    correction_instructions: str = ""
+
+
+@dataclass
+class ReverificationResult:
+    passed: bool
+    reverified_claims: List[Dict[str, Any]] = field(default_factory=list)
+    new_conflicts_detected: bool = False
+    reason: str = ""
 
 
 @dataclass
