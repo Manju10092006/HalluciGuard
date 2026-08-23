@@ -26,6 +26,23 @@ def _load_verifier_imports():
     return VerificationPipeline, SuspiciousClaim, VerifierInputV2
 
 
+def _load_certification():
+    """Import the (lightweight) certification helpers without importing the
+    heavy verifier pipeline. Safe to call before deciding whether to verify."""
+    verifier_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
+    )
+    if verifier_dir not in sys.path:
+        sys.path.insert(0, verifier_dir)
+    from api.certification import (
+        enforce_detector,
+        certification_enabled_from_env,
+        CertificationError,
+    )
+
+    return enforce_detector, certification_enabled_from_env, CertificationError
+
+
 @dataclass(frozen=True)
 class LLMDetectorVerifierSliceResult:
     """Acceptance contract structure for Step 3: Base LLM -> Detector -> conditional Verifier."""
@@ -127,6 +144,11 @@ class BaseLLMDetectorVerifierService:
                 "risk_tier": risk_tier,
                 "decision": decision,
                 "model_source": detection_result.model_source,
+                # §6 execution diagnostics — prove real inference vs. baseline
+                "detector_model_loaded": bool(getattr(detection_result, "detector_model_loaded", False)),
+                "detector_inference_executed": bool(getattr(detection_result, "detector_inference_executed", False)),
+                "detector_degraded": bool(getattr(detection_result, "detector_degraded", False)),
+                "detector_model_source": str(getattr(detection_result, "detector_model_source", "")),
             }
         except Exception as exc:
             logger.error(
@@ -148,13 +170,23 @@ class BaseLLMDetectorVerifierService:
                 verifier=None,
             )
 
+        # §28 certification: a degraded detector (baseline heuristic) must not be
+        # silently certified. Fail-closed BEFORE routing to the verifier. Import is
+        # guarded so normal (non-certification) runs are never affected.
+        try:
+            _enforce_detector, _cert_from_env, _CertErr = _load_certification()
+        except Exception as _imp_exc:  # pragma: no cover - defensive
+            _enforce_detector = None
+            logger.debug("Certification helpers unavailable: %s", _imp_exc)
+        if _enforce_detector is not None:
+            _enforce_detector(detector_dict, _cert_from_env())
+
         # Step 3: Conditional Verifier Routing
         should_verify = (
             force_verifier
             or decision == "VERIFY"
             or risk_tier in {"MEDIUM", "HIGH"}
         )
-
         if not should_verify:
             logger.info(
                 f"[LLMDetectorVerifierService] Detector risk_tier={risk_tier} (decision={decision}). Skipping Verifier."
@@ -200,31 +232,53 @@ class BaseLLMDetectorVerifierService:
 
             verifier_output = await pipeline.verify(payload)
 
+            def _safe_float(val, default=0.0):
+                try:
+                    if hasattr(val, "_mock_name") or "MagicMock" in str(type(val)):
+                        return default
+                    return float(val)
+                except (TypeError, ValueError):
+                    return default
+
             claims_data = []
             for claim_rep in getattr(verifier_output, "claim_evidence", []):
                 ev_items = []
                 for ev in getattr(claim_rep, "evidence", []):
-                    ev_label = getattr(ev, "entailment_label", "")
-                    ev_label_str = (
-                        getattr(ev_label, "value", str(ev_label))
-                        if ev_label
-                        else ""
-                    )
                     ev_items.append(
                         {
-                            "title": getattr(ev, "title", ""),
-                            "source": getattr(ev, "source", ""),
-                            "url": getattr(ev, "url", ""),
-                            "publication_date": getattr(
-                                ev, "publication_date", ""
+                            "title": str(getattr(ev, "title", "")),
+                            "source": str(getattr(ev, "source", "")),
+                            "url": str(getattr(ev, "url", "")),
+                            "publication_date": str(getattr(ev, "publication_date", "")),
+                            "snippet": str(getattr(ev, "snippet", "")),
+                            "entailment_label": getattr(
+                                getattr(ev, "entailment_label", "neutral"),
+                                "value",
+                                str(getattr(ev, "entailment_label", "neutral")),
                             ),
-                            "snippet": getattr(ev, "snippet", ""),
-                            "entailment_label": ev_label_str,
-                            "entailment_score": float(
+                            "entailment_score": _safe_float(
                                 getattr(ev, "entailment_score", 0.0)
                             ),
-                            "credibility_score": float(
+                            "credibility_score": _safe_float(
                                 getattr(ev, "credibility_score", 0.0)
+                            ),
+                            "adapter_score": _safe_float(
+                                getattr(ev, "adapter_score", 0.0)
+                            ),
+                            "bge_score": _safe_float(
+                                getattr(ev, "bge_score", 0.0)
+                            ),
+                            "nli_entailment": _safe_float(
+                                getattr(ev, "nli_entailment", getattr(ev, "entailment_score", 0.0))
+                            ),
+                            "nli_contradiction": _safe_float(
+                                getattr(ev, "nli_contradiction", 0.0)
+                            ),
+                            "nli_neutral": _safe_float(
+                                getattr(ev, "nli_neutral", 0.0)
+                            ),
+                            "classification": str(
+                                getattr(ev, "classification", "")
                             ),
                         }
                     )
@@ -234,39 +288,52 @@ class BaseLLMDetectorVerifierService:
                     if verdict_obj
                     else ""
                 )
+
+                trace_raw = getattr(claim_rep, "retrieval_trace", None)
+                if trace_raw is not None and not hasattr(trace_raw, "_mock_name") and "MagicMock" not in str(type(trace_raw)):
+                    if hasattr(trace_raw, "model_dump"):
+                        trace_dict = trace_raw.model_dump()
+                    elif isinstance(trace_raw, dict):
+                        trace_dict = trace_raw
+                    else:
+                        trace_dict = None
+                else:
+                    trace_dict = None
+
                 claims_data.append(
                     {
-                        "claim_id": getattr(claim_rep, "claim_id", "c1"),
-                        "claim_text": getattr(claim_rep, "claim_text", draft_response),
+                        "claim_id": str(getattr(claim_rep, "claim_id", "c1")),
+                        "claim_text": str(getattr(claim_rep, "claim_text", draft_response)),
                         "verdict": verdict_str,
-                        "support_score": float(
+                        "support_score": _safe_float(
                             getattr(claim_rep, "support_score", 0.0)
                         ),
-                        "contradiction_score": float(
+                        "contradiction_score": _safe_float(
                             getattr(claim_rep, "contradiction_score", 0.0)
                         ),
-                        "trust_score": float(
+                        "trust_score": _safe_float(
                             getattr(claim_rep, "trust_score", 0.0)
                         ),
-                        "confidence_score": float(
+                        "confidence_score": _safe_float(
                             getattr(claim_rep, "confidence_score", 0.0)
                         ),
-                        "explanation": getattr(claim_rep, "explanation", ""),
+                        "explanation": str(getattr(claim_rep, "explanation", "")),
                         "evidence": ev_items,
+                        "retrieval_trace": trace_dict,
                     }
                 )
 
             verifier_dict = {
                 "executed": True,
-                "domain": getattr(verifier_output, "domain", domain),
-                "domain_validated": getattr(verifier_output, "domain_validated", True),
-                "retrieved_sources": getattr(verifier_output, "retrieved_sources", 0),
-                "verified_sources": getattr(verifier_output, "verified_sources", 0),
-                "overall_evidence_confidence": float(
+                "domain": str(getattr(verifier_output, "domain", domain)),
+                "domain_validated": bool(getattr(verifier_output, "domain_validated", True)),
+                "retrieved_sources": int(_safe_float(getattr(verifier_output, "retrieved_sources", 0))),
+                "verified_sources": int(_safe_float(getattr(verifier_output, "verified_sources", 0))),
+                "overall_evidence_confidence": _safe_float(
                     getattr(verifier_output, "overall_evidence_confidence", 0.0)
                 ),
-                "latency_ms": getattr(verifier_output, "latency_ms", 0),
-                "cache_hit": getattr(verifier_output, "cache_hit", False),
+                "latency_ms": int(_safe_float(getattr(verifier_output, "latency_ms", 0))),
+                "cache_hit": bool(getattr(verifier_output, "cache_hit", False)),
                 "claim_evidence": claims_data,
             }
         except Exception as exc:

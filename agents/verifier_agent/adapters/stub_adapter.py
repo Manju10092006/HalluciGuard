@@ -24,7 +24,7 @@ class StubAdapter:
             is_stub=True
         )
 
-    async def search(self, query: str, k: int = 5) -> List[Passage]:
+    async def search(self, query: str, k: int = 5, **kwargs) -> List[Passage]:
         logger.info(f"{self.name} adapter not yet implemented")
         return []
 
