@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, List, Optional
 
-from config import Decision, Severity, EvidenceQuality, SystemHealth
+from config import Decision, Severity, EvidenceQuality, SystemHealth, CorrectionRequest, ReverificationResult
 from decision_policies import DomainPolicy, DomainPolicyRegistry, DEFAULT_POLICY_REGISTRY
 from evidence_governance import EvidenceGovernanceEngine, EvidenceSetGovernanceReport
 from coverage_analyzer import CoverageAnalyzer, CoverageReport
@@ -545,3 +545,108 @@ class DecisionIntelligenceEngine:
             })
 
         return claim_verdicts, claim_decisions
+
+    def build_correction_request(
+        self,
+        execution_id: str,
+        user_query: str,
+        original_response: str,
+        judge_verdict: JudgeVerdict
+    ) -> CorrectionRequest:
+        """
+        PHASE J4 — Build canonical CorrectionRequest payload for Snehith's Corrector.
+        Separates claims_to_correct from claims_to_preserve.
+        """
+        claims_to_correct = []
+        claims_to_preserve = []
+        trusted_evidence = []
+        contradictory_evidence = []
+
+        for cd in judge_verdict.claim_decisions:
+            if cd.get("action") == "CORRECT":
+                claims_to_correct.append({
+                    "claim_id": cd.get("claim_id"),
+                    "claim_text": cd.get("claim_text"),
+                    "status": cd.get("status"),
+                    "reason": cd.get("reason"),
+                    "evidence_ids": cd.get("evidence_ids", [])
+                })
+            else:
+                claims_to_preserve.append({
+                    "claim_id": cd.get("claim_id"),
+                    "claim_text": cd.get("claim_text"),
+                    "status": cd.get("status")
+                })
+
+        for cv in judge_verdict.claim_verdicts:
+            if cv.get("action") == "CORRECT":
+                contradictory_evidence.append({
+                    "claim_id": cv.get("claim_id"),
+                    "evidence_snippet": cv.get("evidence_text"),
+                    "source": cv.get("source"),
+                    "contradiction_score": cv.get("nli_contradiction")
+                })
+            elif cv.get("status") == "VERIFIED":
+                trusted_evidence.append({
+                    "claim_id": cv.get("claim_id"),
+                    "evidence_snippet": cv.get("evidence_text"),
+                    "source": cv.get("source"),
+                    "entailment_score": cv.get("nli_entailment")
+                })
+
+        instructions = (
+            f"Modify only the {len(claims_to_correct)} claim(s) flagged in claims_to_correct using "
+            f"the supplied contradictory_evidence and trusted_evidence. "
+            f"Preserve all {len(claims_to_preserve)} claim(s) in claims_to_preserve without altering facts."
+        )
+
+        return CorrectionRequest(
+            execution_id=execution_id,
+            user_query=user_query,
+            original_response=original_response,
+            claims_to_correct=claims_to_correct,
+            claims_to_preserve=claims_to_preserve,
+            trusted_evidence=trusted_evidence,
+            contradictory_evidence=contradictory_evidence,
+            correction_instructions=instructions
+        )
+
+    def evaluate_reverification(
+        self,
+        reverification_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        PHASE J5 — Correction / Re-verification Gate.
+        Evaluates whether a correction produced a safe, supported result.
+        Returns passed=True (COMMIT) or passed=False (ROLLBACK).
+        """
+        passed = reverification_result.get("passed", False)
+        new_conflicts = reverification_result.get("new_conflicts_detected", False)
+        claims = reverification_result.get("reverified_claims", [])
+
+        all_supported = all(c.get("verdict") == "VERIFIED" for c in claims) if claims else False
+
+        if passed and all_supported and not new_conflicts:
+            return {
+                "decision": "ACCEPT",
+                "action": "COMMIT",
+                "passed": True,
+                "reason": "Correction successfully re-verified by Verifier. Safe to commit.",
+                "reverified_claims": claims
+            }
+        elif new_conflicts:
+            return {
+                "decision": "REJECT",
+                "action": "ROLLBACK",
+                "passed": False,
+                "reason": "Correction introduced new source conflicts. Rolling back to prevent new hallucination.",
+                "reverified_claims": claims
+            }
+        else:
+            return {
+                "decision": "REJECT",
+                "action": "ROLLBACK",
+                "passed": False,
+                "reason": "Correction failed re-verification. Rolling back to safe state.",
+                "reverified_claims": claims
+            }
