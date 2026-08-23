@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Dict, Any, Optional
 
 from schemas.models import EntailmentLabel
@@ -69,6 +70,62 @@ class NLIEngine:
         self.pipeline = None
         self._is_available = True
         self._load_attempts = 0
+
+        # --- §15 engine-level execution diagnostics (real-execution-only proof) ---
+        # Per-item results already carry a `degraded` flag; these expose whether
+        # the DeBERTa model actually loaded and a real forward pass ran on the
+        # most recent call, so certification mode can fail-closed on fallback.
+        self.last_status: str = "not_run"  # executed | degraded | unavailable | not_run
+        self.last_inference_executed: bool = False
+        self.last_degraded: bool = False
+        self.last_device: str = "unknown"
+        self.last_latency_ms: int = 0
+        self.last_batch_size: int = 0
+
+    def _reset_run_diagnostics(self) -> None:
+        self.last_status = "not_run"
+        self.last_inference_executed = False
+        self.last_degraded = False
+        self.last_latency_ms = 0
+        self.last_batch_size = 0
+
+    def is_loaded(self) -> bool:
+        """True iff the NLI pipeline is loaded and usable."""
+        return self.pipeline is not None and self._is_available
+
+    def _detect_device(self) -> str:
+        """Best-effort device read from the loaded HF pipeline (never raises)."""
+        pipe = self.pipeline
+        if pipe is None:
+            return "unknown"
+        try:
+            dev = getattr(pipe, "device", None)
+            if dev is not None:
+                return str(dev)
+        except Exception:
+            pass
+        model = getattr(pipe, "model", None)
+        try:
+            dev = getattr(model, "device", None)
+            if dev is not None:
+                return str(dev)
+        except Exception:
+            pass
+        return "unknown"
+
+    def diagnostics(self) -> dict:
+        """Return the last-run execution proof for tracing/certification (§15/§26)."""
+        return {
+            "component": "deberta_nli",
+            "model": self.model_name,
+            "loaded": self.is_loaded(),
+            "inference_executed": self.last_inference_executed,
+            "degraded": self.last_degraded,
+            "status": self.last_status,
+            "device": self.last_device,
+            "latency_ms": self.last_latency_ms,
+            "batch_size": self.last_batch_size,
+        }
 
     def _load_model(self) -> None:
         if self.pipeline is not None or not self._is_available:
@@ -203,6 +260,8 @@ class NLIEngine:
         """
         Classify multiple evidence passages against a single claim.
         """
+        self._reset_run_diagnostics()
+
         if not evidences:
             return []
 
@@ -218,11 +277,16 @@ class NLIEngine:
                 "Returning degraded neutral results from batch_classify (model %s unavailable)",
                 self.model_name,
             )
+            self.last_status = "unavailable"
+            self.last_degraded = True
+            self.last_inference_executed = False
             return [self.classify(claim, ev) for ev in evidences]
 
         try:
             batch = [{"text": ev, "text_pair": claim} for ev in evidences]
+            _t0 = time.perf_counter()
             raw_results = self.pipeline(batch)
+            self.last_latency_ms = int((time.perf_counter() - _t0) * 1000)
             id2label = self._get_id2label()
 
             outputs: List[Dict[str, Any]] = []
@@ -250,6 +314,12 @@ class NLIEngine:
                         "degraded": False,
                     }
                 )
+            # Real DeBERTa inference succeeded — record execution proof.
+            self.last_status = "executed"
+            self.last_inference_executed = True
+            self.last_degraded = False
+            self.last_device = self._detect_device()
+            self.last_batch_size = len(evidences)
             return outputs
         except Exception as e:
             logger.warning(
@@ -257,4 +327,7 @@ class NLIEngine:
                 self.model_name,
                 e,
             )
+            self.last_status = "degraded"
+            self.last_degraded = True
+            self.last_inference_executed = False
             return [self.classify(claim, ev) for ev in evidences]
