@@ -252,3 +252,104 @@ async def test_hybrid_primary_then_fallback(enhanced, mock_primary):
     trace = enhanced.last_retrieval_trace
     assert trace.primary.called is True
     assert trace.tavily.called is True
+
+
+# Test 12: DuplicateRemover canonical URL deduplication
+def test_duplicate_remover_canonical_url_dedup():
+    from aggregation.duplicate_remover import DuplicateRemover
+
+    remover = DuplicateRemover()
+    passages = [
+        _make_passage(url="https://example.com/article?utm_source=twitter&utm_medium=social#overview", snippet="First article detailed excerpt on subject alpha.", relevance_score=0.9),
+        _make_passage(url="https://EXAMPLE.COM/article/?utm_campaign=summer", snippet="First article alternate snippet with some different words.", relevance_score=0.8),
+        _make_passage(url="https://example.com/different-article", snippet="Completely unrelated topic concerning gamma rays and particle physics.", relevance_score=0.7),
+    ]
+
+    deduped = remover.remove_duplicates(passages)
+    assert len(deduped) == 2
+    assert deduped[0].url.startswith("https://example.com/article")
+    assert deduped[1].url == "https://example.com/different-article"
+
+
+# Test 13: DuplicateRemover Jaccard overlap > 85% deduplication
+def test_duplicate_remover_jaccard_overlap():
+    from aggregation.duplicate_remover import DuplicateRemover
+
+    remover = DuplicateRemover(overlap_threshold=0.85)
+    base_text = "The quick brown fox jumps over the lazy dog near the river bank in the morning."
+    similar_text = "The quick brown fox jumps over the lazy dog near the river bank in the morning today."
+    different_text = "Quantum computing relies on qubits and superposition for rapid parallel computation."
+
+    passages = [
+        _make_passage(url="https://example.com/p1", snippet=base_text, relevance_score=0.9),
+        _make_passage(url="https://example.com/p2", snippet=similar_text, relevance_score=0.85),
+        _make_passage(url="https://example.com/p3", snippet=different_text, relevance_score=0.7),
+    ]
+
+    deduped = remover.remove_duplicates(passages)
+    assert len(deduped) == 2
+    assert deduped[0].snippet == base_text
+    assert deduped[1].snippet == different_text
+
+
+# Test 14: RetrievalContext request-local contextvars isolation
+def test_retrieval_context_telemetry():
+    from retrieval.context import get_retrieval_context, reset_retrieval_context
+
+    ctx = reset_retrieval_context()
+    assert ctx.sources_attempted == []
+    assert ctx.sources_succeeded == []
+    assert ctx.sources_failed == []
+
+    ctx.record_attempt("pubmed")
+    ctx.record_attempt("pubmed")  # Idempotent
+    ctx.record_success("pubmed")
+    ctx.record_attempt("who")
+    ctx.record_failure("who")
+
+    assert ctx.sources_attempted == ["pubmed", "who"]
+    assert ctx.sources_succeeded == ["pubmed"]
+    assert ctx.sources_failed == ["who"]
+
+    # Reset clears everything
+    fresh_ctx = reset_retrieval_context()
+    assert fresh_ctx.sources_attempted == []
+    assert fresh_ctx is not ctx
+
+
+# Test 15: QueryExpander relation and predicate expansion
+def test_query_expander_relations():
+    from routers.query_expander import QueryExpander
+
+    expander = QueryExpander()
+
+    # Passive creation expansion
+    queries = expander.generate_search_queries("Java was created by James Gosling", "general")
+    assert any("created by" in q.lower() or "who created" in q.lower() for q in queries)
+
+    # Active creation expansion
+    queries_active = expander.generate_search_queries("Guido van Rossum developed Python", "general")
+    assert any("developed by" in q.lower() or "who developed" in q.lower() for q in queries_active)
+
+    # Capital relation
+    queries_cap = expander.generate_search_queries("Paris is the capital of France", "general")
+    assert any("capital of france" in q.lower() for q in queries_cap)
+
+
+# Test 16: DuplicateRemover URL-less title + source deduplication
+def test_duplicate_remover_title_source_fallback():
+    from aggregation.duplicate_remover import DuplicateRemover
+
+    remover = DuplicateRemover()
+    passages = [
+        _make_passage(title="WHO Report", source="who", url="", snippet="First excerpt from the WHO report on global health trends.", relevance_score=0.9),
+        _make_passage(title="WHO Report", source="who", url="", snippet="Different excerpt but same title and source without url.", relevance_score=0.8),
+        _make_passage(title="CDC Guidance", source="cdc", url="", snippet="CDC guidance on viral infection control.", relevance_score=0.7),
+    ]
+
+    deduped = remover.remove_duplicates(passages)
+    assert len(deduped) == 2
+    assert deduped[0].title == "WHO Report"
+    assert deduped[1].title == "CDC Guidance"
+
+

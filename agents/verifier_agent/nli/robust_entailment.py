@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from schemas.models import EntailmentLabel
@@ -96,6 +97,63 @@ class NLIEngine:
         self.pipeline = None
         self._is_available = True
 
+        # --- §15 engine-level execution diagnostics (real-execution-only proof) ---
+        # This is the canonical pipeline NLI engine (see nli/__init__.py). It mirrors
+        # nli/entailment.py's diagnostics so the pipeline can build a ModelExecutionTrace
+        # (§26) and certification can fail-closed on fallback (§28). The decision logic
+        # below (_normalize_scores/_decision, batch alignment) is intentionally unchanged.
+        self.last_status: str = "not_run"  # executed | degraded | unavailable | not_run
+        self.last_inference_executed: bool = False
+        self.last_degraded: bool = False
+        self.last_device: str = "unknown"
+        self.last_latency_ms: int = 0
+        self.last_batch_size: int = 0
+
+    def _reset_run_diagnostics(self) -> None:
+        self.last_status = "not_run"
+        self.last_inference_executed = False
+        self.last_degraded = False
+        self.last_latency_ms = 0
+        self.last_batch_size = 0
+
+    def is_loaded(self) -> bool:
+        """True iff the NLI pipeline is loaded and usable."""
+        return self.pipeline is not None and self._is_available
+
+    def _detect_device(self) -> str:
+        """Best-effort device read from the loaded HF pipeline (never raises)."""
+        pipe = self.pipeline
+        if pipe is None:
+            return "unknown"
+        try:
+            dev = getattr(pipe, "device", None)
+            if dev is not None:
+                return str(dev)
+        except Exception:
+            pass
+        model = getattr(pipe, "model", None)
+        try:
+            dev = getattr(model, "device", None)
+            if dev is not None:
+                return str(dev)
+        except Exception:
+            pass
+        return "unknown"
+
+    def diagnostics(self) -> dict:
+        """Return the last-run execution proof for tracing/certification (§15/§26)."""
+        return {
+            "component": "deberta_nli",
+            "model": self.model_name,
+            "loaded": self.is_loaded(),
+            "inference_executed": self.last_inference_executed,
+            "degraded": self.last_degraded,
+            "status": self.last_status,
+            "device": self.last_device,
+            "latency_ms": self.last_latency_ms,
+            "batch_size": self.last_batch_size,
+        }
+
     def _load_model(self) -> None:
         if self.pipeline is not None or not self._is_available:
             return
@@ -151,6 +209,8 @@ class NLIEngine:
         evidences: List[str],
         model_name: str | None = None,
     ) -> List[Dict[str, Any]]:
+        # §15/§26 execution proof: reset first so an empty call reads "not_run".
+        self._reset_run_diagnostics()
         if not evidences:
             return []
         if model_name and model_name != self.model_name:
@@ -159,13 +219,18 @@ class NLIEngine:
             self._is_available = True
         self._load_model()
         if not self._is_available or self.pipeline is None:
+            self.last_status = "unavailable"
+            self.last_degraded = True
+            self.last_inference_executed = False
             return [self._neutral() for _ in evidences]
         try:
             batch = [
                 {"text": evidence or "", "text_pair": claim or ""}
                 for evidence in evidences
             ]
+            _t0 = time.perf_counter()
             raw_batch = self.pipeline(batch)
+            self.last_latency_ms = int((time.perf_counter() - _t0) * 1000)
             if not isinstance(raw_batch, list) or len(raw_batch) != len(evidences):
                 raise ValueError("NLI batch output is not aligned with input batch")
             id2label = self._get_id2label()
@@ -175,9 +240,18 @@ class NLIEngine:
                 outputs.append(
                     _decision(scores) if sum(scores.values()) > 0 else self._neutral()
                 )
+            # Real DeBERTa inference succeeded — record execution proof.
+            self.last_status = "executed"
+            self.last_inference_executed = True
+            self.last_degraded = False
+            self.last_device = self._detect_device()
+            self.last_batch_size = len(evidences)
             return outputs
         except Exception as exc:
             logger.warning("Batched NLI failed; retrying individually: %s", exc)
+            self.last_status = "degraded"
+            self.last_degraded = True
+            self.last_inference_executed = False
             return [
                 self.classify(claim, evidence, model_name=self.model_name)
                 for evidence in evidences

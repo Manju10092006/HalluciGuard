@@ -1,0 +1,46 @@
+{
+  "baseline_metadata": {
+    "frozen_at": "2026-08-22",
+    "branch": "verifier-v2-stabilization",
+    "commit": "85f32e5",
+    "description": "Canonical Phase 0 baseline — do not overwrite; use for before/after comparison",
+    "claim_count": 35,
+    "retrieval_mode": "hybrid (default)",
+    "cache_enabled": false
+  },
+  "metrics": {
+    "accuracy": 0.6571428571428571,
+    "total_evaluated": 35,
+    "errors": 0,
+    "macro_precision": 0.6818,
+    "macro_recall": 0.5942,
+    "macro_f1": 0.5918,
+    "false_verification_rate": 0.0,
+    "false_contradiction_rate": 0.0312,
+    "latency": {
+      "avg_ms": 8704,
+      "p50_ms": 6659,
+      "p95_ms": 18924,
+      "min_ms": 920,
+      "max_ms": 44112
+    },
+    "domains": {
+      "general": { "total": 8, "correct": 5, "accuracy": 0.625 },
+      "healthcare": { "total": 8, "correct": 8, "accuracy": 1.0 },
+      "cybersecurity": { "total": 8, "correct": 4, "accuracy": 0.5 },
+      "ai_research": { "total": 6, "correct": 3, "accuracy": 0.5 },
+      "finance": { "total": 5, "correct": 3, "accuracy": 0.6 }
+    },
+    "per_class": {
+      "verified": { "precision": 1.0, "recall": 0.5263, "f1": 0.6897 },
+      "contradicted": { "precision": 0.5, "recall": 0.3333, "f1": 0.4 },
+      "unverified": { "precision": 0.5455, "recall": 0.9231, "f1": 0.6857 },
+      "conflicted": { "precision": 0.0, "recall": 0.0, "f1": 0.0 }
+    }
+  },
+  "known_failures": [
+    { "claim": "Paris is the capital of France.", "expected": "verified", "actual": "conflicted", "failure_type": "disambiguation_page" },
+    { "claim": "Amazon company was built by Sundar Pichai.", "expected": "contradicted", "actual": "unverified", "failure_type": "entity_confusion_retrieval" },
+    { "claim": "The Earth is flat.", "expected": "unverified", "actual": "contradicted", "failure_type": "label_ambiguity_debunk" }
+  ]
+}

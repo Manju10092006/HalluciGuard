@@ -75,6 +75,27 @@ class DetectionResult(BaseModel):
         description="Identifier of the model that produced this result."
     )
 
+    # --- §6 Detector execution diagnostics (additive; safe defaults) ---
+    # These make it impossible for a failed detector load to masquerade as real
+    # ML inference. They are informational only and do not change routing in the
+    # resilient production path; certification mode reads them to fail-closed.
+    detector_model_loaded: bool = Field(
+        default=False,
+        description="True iff the HaluEval classifier weights actually loaded into memory.",
+    )
+    detector_inference_executed: bool = Field(
+        default=False,
+        description="True iff a real forward pass produced this probability (not the heuristic baseline).",
+    )
+    detector_degraded: bool = Field(
+        default=False,
+        description="True when the detector fell back to the hardcoded baseline instead of running the model.",
+    )
+    detector_model_source: str = Field(
+        default="",
+        description="Concrete provenance: resolved model dir / HF id when loaded, or 'baseline-heuristic' when degraded.",
+    )
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -82,7 +103,11 @@ class DetectionResult(BaseModel):
                 "hallucination_probability": 0.05,
                 "risk_level": "LOW",
                 "next_action": "Accept",
-                "model_source": "halueval-distilbert"
+                "model_source": "halueval-distilbert",
+                "detector_model_loaded": True,
+                "detector_inference_executed": True,
+                "detector_degraded": False,
+                "detector_model_source": "artifacts/halueval-detector-final"
             }
         }
 

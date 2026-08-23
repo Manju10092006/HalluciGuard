@@ -41,16 +41,26 @@ class CitationFormatter:
             if not isinstance(label_raw, EntailmentLabel):
                 if label_raw in ('entailment', 'supports'):
                     label = EntailmentLabel.ENTAILMENT
+                    ev_class = "SUPPORTING"
                 elif label_raw in ('contradiction', 'contradicts'):
                     label = EntailmentLabel.CONTRADICTION
+                    ev_class = "CONTRADICTING"
                 else:
                     label = EntailmentLabel.NEUTRAL
+                    ev_class = "NEUTRAL"
             else:
                 label = label_raw
+                ev_class = label_raw.value.upper()
 
         source_name = getattr(passage, 'source', '') or getattr(passage, 'source_id', '') or "unknown"
         if nli_result.get('degraded', False):
             source_name += " [estimated]"
+
+        entail_score = float(nli_result.get('entailment_score', 0.0))
+        contra_score = float(nli_result.get('contradiction_score', 0.0))
+        neutral_score = float(nli_result.get('neutral_score', 0.0))
+        adapter_score = float(getattr(passage, 'source_confidence_hint', 0.0))
+        bge_score = float(getattr(passage, 'relevance_score', 0.0))
 
         return EvidenceItem(
             title=getattr(passage, 'title', '') or "Reference Passage",
@@ -59,8 +69,15 @@ class CitationFormatter:
             url=url,
             publication_date=pub_date,
             entailment_label=label,
-            entailment_score=float(nli_result.get('entailment_score', 0.0)),
-            credibility_score=float(credibility)
+            entailment_score=entail_score,
+            credibility_score=float(credibility),
+            source_confidence_hint=adapter_score,
+            adapter_score=adapter_score,
+            bge_score=bge_score,
+            nli_entailment=entail_score,
+            nli_contradiction=contra_score,
+            nli_neutral=neutral_score,
+            classification=ev_class,
         )
 
     def format_all(

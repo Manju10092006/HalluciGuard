@@ -30,21 +30,24 @@ class DuplicateRemover:
             reverse=True
         )
         
+        from adapters.web_retriever import _normalize_url
+
         for p in sorted_passages:
-            # Strategy 1: Exact URL match
-            if p.url:
-                if p.url in seen_urls:
+            # Strategy 1: Canonical URL match
+            norm_url = _normalize_url(p.url) if p.url else None
+            if norm_url:
+                if norm_url in seen_urls:
                     continue
                 
-            # Strategy 3: Same title + same source
+            # Strategy 2: Same title + same source (for URL-less passages)
             source_val = p.source
             title_source_key = None
-            if p.title and source_val:
+            if not norm_url and p.title and source_val:
                 title_source_key = f"{p.title.lower()}::{source_val.lower()}"
                 if title_source_key in seen_title_sources:
                     continue
                 
-            # Strategy 2: Token overlap >85% between snippets
+            # Strategy 3: Token overlap >85% between snippets
             is_overlap = False
             for up in unique_passages:
                 overlap = self._compute_token_overlap(p.snippet, up.snippet)
@@ -54,7 +57,9 @@ class DuplicateRemover:
                     
             if not is_overlap:
                 unique_passages.append(p)
-                if p.url:
+                if norm_url:
+                    seen_urls.add(norm_url)
+                elif p.url:
                     seen_urls.add(p.url)
                 if title_source_key:
                     seen_title_sources.add(title_source_key)
@@ -63,8 +68,9 @@ class DuplicateRemover:
 
     def _compute_token_overlap(self, text1: str, text2: str) -> float:
         """Compute Jaccard similarity on word tokens."""
-        set1 = set(text1.lower().split())
-        set2 = set(text2.lower().split())
+        import re
+        set1 = set(re.findall(r"\b\w+\b", text1.lower())) if text1 else set()
+        set2 = set(re.findall(r"\b\w+\b", text2.lower())) if text2 else set()
         if not set1 or not set2:
             return 0.0
         intersection = set1.intersection(set2)

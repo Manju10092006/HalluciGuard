@@ -16,6 +16,9 @@ def __getattr__(name: str):
             LLMDetectorVerifierSliceResult,
         )
         return locals()[name]
+    if name in ("N8NRetrievalClient", "N8NRetrievalResult"):
+        from .n8n_retrieval_client import N8NRetrievalClient, N8NRetrievalResult
+        return locals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -28,5 +31,8 @@ __all__ = [
     "LLMDetectorSliceResult",
     "BaseLLMDetectorVerifierService",
     "LLMDetectorVerifierSliceResult",
+    "N8NRetrievalClient",
+    "N8NRetrievalResult",
 ]
+
 

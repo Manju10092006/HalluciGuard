@@ -82,3 +82,9 @@ verify_and_clean_crops.py
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Multi-agent orchestration scratch (explorer/reviewer/worker session data)
+.agents/
+
+# Generated benchmark/certification result dumps (regenerable output)
+benchmark_results_certified.json
