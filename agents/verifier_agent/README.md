@@ -170,7 +170,7 @@ sequenceDiagram
     deactivate N8N
     VD->>BGE: Score Semantic Relevance (Claim, Passages)
     activate BGE
-    BGE-->>VD: bge_score ∈ [0.0, 1.0] (Gating at 0.20)
+    BGE-->>VD: bge_score in [0.0, 1.0] (Gating at 0.20)
     deactivate BGE
     VD->>NLI: Inference: Premise=Passage, Hypothesis=Claim
     activate NLI
@@ -371,7 +371,8 @@ graph TD
 > [!NOTE]
 > **Strict Classification Invariant:**  
 > The Verifier asserts that:  
-> $$\text{supporting\_count} + \text{contradicting\_count} + \text{neutral\_count} + \text{irrelevant\_count} \equiv \text{total\_passages}$$
+> $$N_{\text{supporting}} + N_{\text{contradicting}} + N_{\text{neutral}} + N_{\text{irrelevant}} \equiv N_{\text{total}}$$
+> *(In runtime code: `supporting_count + contradicting_count + neutral_count + irrelevant_count == total_passages`)*
 
 ---
 
@@ -385,7 +386,7 @@ flowchart TD
     classDef confl fill:#F5F3FF,stroke:#7C3AED,stroke-width:2px,color:#4C1D95;
 
     A[Evidence Scoring Inputs] --> B{Conflict Condition?}
-    B -->|support >= 0.30 AND contra >= 0.30 AND |supp-contra| < 0.15| C[CONFLICTED]:::confl
+    B -->|support >= 0.30 AND contra >= 0.30 AND abs diff < 0.15| C[CONFLICTED]:::confl
     B -->|No| D{Support Dominance?}
     D -->|support_score >= 0.30 AND support > contra| E[VERIFIED]:::verified
     D -->|No| F{Contradiction Dominance?}
@@ -426,7 +427,7 @@ $$\text{where } \text{Bonus}_{\text{src}} = \min\left(0.15, 0.05 \times \max(0, 
 ### 4. Calibrated Confidence Score
 $$\text{Strength} = \max(S_{\text{support}}, S_{\text{contra}})$$
 $$\text{Consensus} = \max(0.10, 1.0 - \min(S_{\text{support}}, S_{\text{contra}}))$$
-$$\text{CountFactor} = 0.75 + 0.25 \times \min\left(1.0, \frac{N_{\text{verified\_passages}}}{3.0}\right)$$
+$$\text{CountFactor} = 0.75 + 0.25 \times \min\left(1.0, \frac{N_{\text{verified}}}{3.0}\right)$$
 $$\mathbf{Confidence} = \text{Strength} \times \text{Consensus} \times \text{CountFactor}$$
 
 ---
