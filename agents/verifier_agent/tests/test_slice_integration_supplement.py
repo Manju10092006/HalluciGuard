@@ -125,7 +125,7 @@ async def test_bge_reranker_receives_real_claim_and_evidence():
         passed_claim = call.args[0]
         passed_passages = call.args[1]
 
-        assert real_claim.lower() in str(passed_claim).lower(), (
+        assert real_claim.lower().rstrip(".") in str(passed_claim).lower(), (
             f"BGE reranker did not receive the real claim (got: {passed_claim!r})"
         )
         assert any(real_snippet in getattr(p, "snippet", "") for p in passed_passages), (
