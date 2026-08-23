@@ -304,20 +304,65 @@ class ClaimDecomposer:
     # Regex fallback path (spaCy unavailable)
     # ------------------------------------------------------------------
     def _decompose_regex(self, text: str) -> List[str]:
-        """Conservative sentence-level split; never emits conjunction fragments."""
+        """Conservative sentence-level split with pronoun resolution and object distribution."""
         claims: List[str] = []
         seen: set[str] = set()
+        last_subject: Optional[str] = None
+
         for segment in _COARSE_SPLIT_RE.split(text):
             for raw in re.split(r"(?<=[.!?])\s+", segment.strip()):
                 stripped = self._strip_prefix(raw)
                 if not stripped:
                     continue
                 key = self._normalize_key(stripped)
-                if key in _FILLER_EXACT or key in seen:
+                if key in _FILLER_EXACT:
                     continue
-                # Require a minimally complete clause: >=3 words.
-                if len(key.split()) < 3:
-                    continue
-                seen.add(key)
-                claims.append(stripped.strip().rstrip(".").strip())
+
+                # Pronoun resolution: e.g. "It is also a major city" -> "Hyderabad is also a major city"
+                pronoun_match = re.match(
+                    r"^(it|this|that|they|he|she)\b(\s+(?:is|was|are|were|also|has|have|can|will)\b.*)$",
+                    stripped,
+                    re.IGNORECASE,
+                )
+                if pronoun_match and last_subject:
+                    stripped = f"{last_subject}{pronoun_match.group(2)}"
+                    key = self._normalize_key(stripped)
+                else:
+                    # Extract candidate subject phrase before verb / copula
+                    subj_match = re.match(
+                        r"^([A-Z][a-zA-Z0-9\s'-]+?)\s+(?:is|are|was|were|cures|treats|causes|has|have|contains|located)\b",
+                        stripped,
+                    )
+                    if subj_match:
+                        cand_subj = subj_match.group(1).strip()
+                        if cand_subj.lower() not in _RESOLVABLE_PRONOUNS and len(cand_subj.split()) <= 4:
+                            last_subject = cand_subj
+
+                # Object distribution: e.g. "Vitamin C cures cancer and diabetes" -> "Vitamin C cures cancer", "Vitamin C cures diabetes"
+                dist_match = re.match(
+                    r"^(.+?\b(?:cures|treats|causes|prevents|produces|contains|includes|is responsible for)\b)\s+([a-zA-Z0-9\s]+?)\s+and\s+([a-zA-Z0-9\s]+)$",
+                    stripped,
+                    re.IGNORECASE,
+                )
+                candidates: List[str] = []
+                if dist_match:
+                    prefix_part = dist_match.group(1).strip()
+                    first_obj = dist_match.group(2).strip()
+                    second_obj = dist_match.group(3).strip()
+                    if len(first_obj.split()) <= 4 and len(second_obj.split()) <= 4:
+                        candidates = [f"{prefix_part} {first_obj}", f"{prefix_part} {second_obj}"]
+
+                if not candidates:
+                    candidates = [stripped]
+
+                for cand in candidates:
+                    cand_clean = cand.strip().rstrip(".").strip()
+                    cand_key = self._normalize_key(cand_clean)
+                    if not cand_clean or cand_key in _FILLER_EXACT or cand_key in seen:
+                        continue
+                    if len(cand_key.split()) < 3:
+                        continue
+                    seen.add(cand_key)
+                    claims.append(cand_clean)
+
         return claims
