@@ -1,0 +1,1033 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "halluciguard-verify-v2",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "4e78c056-cdac-4f8a-b6e7-50afb37ff4b8",
+      "name": "Receive Claim",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        3872,
+        2800
+      ],
+      "webhookId": "d5967815-ce68-437b-bce7-f7bc13896c8e"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"qwen/qwen3-14b\", temperature: 0.1, max_tokens: 3000, messages: [{ role: \"system\", content: \"You are the RETRIEVAL PREPARATION stage of an evidence acquisition service. You do NOT judge whether the claim is true and you NEVER output a verdict. Given a factual claim: (1) normalize it into a clean self-contained sentence WITHOUT changing its factual meaning; (2) classify the single best DOMAIN purely for source ROUTING from exactly: general, healthcare, cybersecurity, ai_research, finance; (3) generate 2-4 effective retrieval search queries (always include the claim itself as one query); (4) extract salient entities (people, orgs, CVEs, tickers, paper titles) as short strings; (5) set time_sensitive true if the claim depends on recent or current events. Domain classification is ROUTING ONLY and does not determine truth. Return ONLY the JSON object, no markdown and no prose.\" }, { role: \"user\", content: $json.body.claim }], response_format: { type: \"json_schema\", json_schema: { name: \"retrieval_analysis\", strict: true, schema: { type: \"object\", properties: { normalized_claim: { type: \"string\" }, domain: { type: \"string\", enum: [\"general\",\"healthcare\",\"cybersecurity\",\"ai_research\",\"finance\"] }, queries: { type: \"array\", items: { type: \"string\" }, minItems: 1, maxItems: 3 }, entities: { type: \"array\", items: { type: \"string\" } }, time_sensitive: { type: \"boolean\" } }, required: [\"normalized_claim\",\"domain\",\"queries\",\"entities\",\"time_sensitive\"], additionalProperties: false } } } }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "c74dc733-9dd1-4d08-ac36-7f0b699ba0dd",
+      "name": "Analyze Claim",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        4096,
+        2800
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "GWNuY3O3kYSOdVi2",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Receive Claim').first().json.body || {};\nconst claim = String(body.claim ?? '').trim();\nif (!claim) { throw new Error('claim_required'); }\n\nconst validDomains = ['general','healthcare','cybersecurity','ai_research','finance'];\n\n// Parse Analyze Claim (OpenRouter Chat Completions) output into a structured object\nlet analysis = {};\ntry {\n  const resp = $('Analyze Claim').first().json || {};\n  let content = '';\n  if (resp.choices && resp.choices[0] && resp.choices[0].message) {\n    content = resp.choices[0].message.content;\n  }\n  if (content && typeof content === 'object') {\n    analysis = content;\n  } else if (typeof content === 'string' && content.trim()) {\n    const s = content.trim().replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();\n    analysis = JSON.parse(s);\n  }\n} catch (e) { analysis = {}; }\n\nlet domain = String(analysis.domain ?? body.domain ?? 'general').trim().toLowerCase().replace(/[\\s-]+/g,'_');\nif (!validDomains.includes(domain)) { domain = 'general'; }\n\nconst retrievalMode = ['hybrid','primary_only','tavily_only'].includes(body.retrieval_mode) ? body.retrieval_mode : 'hybrid';\nconst forceTavily = Boolean(body.force_tavily ?? false);\nconst maxResults = Number.isFinite(Number(body.max_results)) ? Math.max(1, Math.min(20, Number(body.max_results))) : 5;\nconst requestId = String(body.request_id ?? '').trim() || ('n8n-' + Date.now() + '-' + Math.random().toString(36).slice(2,8));\n\nconst normalizedClaim = String(analysis.normalized_claim ?? claim).replace(/\\s+/g,' ').trim();\n\nlet queries = Array.isArray(analysis.queries) ? analysis.queries.filter(q => typeof q === 'string' && q.trim()).map(q => q.trim()) : [];\nif (!queries.length) { queries = [normalizedClaim]; }\nqueries = queries.slice(0,3);\n\nconst entities = Array.isArray(analysis.entities) ? analysis.entities.filter(x => typeof x === 'string' && x.trim()) : [];\nconst timeSensitive = Boolean(analysis.time_sensitive ?? false);\n\nconst runPrimary = retrievalMode !== 'tavily_only';\n\nreturn [{ json: {\n  request_id: requestId,\n  claim,\n  normalized_claim: normalizedClaim,\n  domain,\n  domain_is_routing_only: true,\n  queries,\n  entities,\n  time_sensitive: timeSensitive,\n  retrieval_mode: retrievalMode,\n  force_tavily: forceTavily,\n  max_results: maxResults,\n  run_primary: runPrimary,\n  t_start: Date.now(),\n  workflow_version: '2.0.0',\n} }];"
+      },
+      "id": "4d8cd096-2331-47c7-9de0-222f52862083",
+      "name": "Build Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4320,
+        2800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "runprimary",
+              "leftValue": "={{ $json.run_primary }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2f84ebfb-e1c7-44dc-90a3-cd5387751dfd",
+      "name": "Should Run Primary",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4544,
+        2800
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.domain }}",
+                    "rightValue": "general",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "general"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.domain }}",
+                    "rightValue": "healthcare",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "healthcare"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.domain }}",
+                    "rightValue": "cybersecurity",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "cybersecurity"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.domain }}",
+                    "rightValue": "ai_research",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "ai_research"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.domain }}",
+                    "rightValue": "finance",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "finance"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "general_fallback"
+        }
+      },
+      "id": "e3ba4f48-f50a-494c-beef-62186b794b92",
+      "name": "Domain Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        4768,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://en.wikipedia.org/w/api.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "action",
+              "value": "query"
+            },
+            {
+              "name": "list",
+              "value": "search"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "srlimit",
+              "value": "={{ $('Build Context').first().json.max_results }}"
+            },
+            {
+              "name": "srsearch",
+              "value": "={{ $('Build Context').first().json.normalized_claim }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "02de6821-f7bf-447a-b67d-239cbfa07dfd",
+      "name": "Wikipedia Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5216,
+        2048
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Context').first().json;\nconst claim = ctx.normalized_claim || ctx.claim || \"\";\nconst nowIso = new Date().toISOString();\nfunction clean(s){ return (s||\"\").toString().replace(/<[^>]+>/g,\" \").replace(/\\s+/g,\" \").trim(); }\nconst claimTokens = claim.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);\nfunction adapterScore(text){\n  const t = (text||\"\").toLowerCase();\n  if(!claimTokens.length) return null;\n  let hit = 0; const seen = {};\n  for(const w of claimTokens){ if(!seen[w]){ seen[w]=1; if(t.indexOf(w) !== -1) hit++; } }\n  const uniq = Object.keys(seen).length;\n  return uniq ? Math.round((hit/uniq)*100)/100 : null;\n}\nconst evidence = [];\nconst attempted = [];\nfunction add(source, source_id, title, url, snippet, method, published_at){\n  const snip = clean(snippet).slice(0, 800);\n  if(!url && !snip) return;\n  evidence.push({\n    source, source_type: \"PRIMARY\", source_id: source_id || \"\",\n    title: clean(title), url: url || \"\", snippet: snip,\n    published_at: published_at || null, query_used: claim,\n    retrieval_method: method, adapter_score: adapterScore(title + \" \" + snippet),\n    retrieved_at: nowIso, retrieval_status: \"success\"\n  });\n}\n// Wikipedia\ntry {\n  const arr = (($('Wikipedia Search').first().json.query)||{}).search || [];\n  if(arr.length !== undefined) attempted.push(\"wikipedia\");\n  for(const r of arr){\n    const url = \"https://en.wikipedia.org/wiki/\" + encodeURIComponent(String(r.title||\"\").replace(/ /g,\"_\"));\n    add(\"wikipedia\", \"PAGEID:\"+(r.pageid||\"\"), r.title, url, r.snippet, \"wikipedia_api_search\");\n  }\n} catch(e) {}\n// PubMed\ntry {\n  const res = ($('PubMed Summary').first().json.result)||{};\n  const uids = res.uids || [];\n  attempted.push(\"pubmed\");\n  for(const uid of uids){\n    const rec = res[uid]; if(!rec) continue;\n    const url = \"https://pubmed.ncbi.nlm.nih.gov/\" + uid + \"/\";\n    const snip = (rec.title||\"\") + \" (\" + (rec.source||\"\") + \", \" + (rec.pubdate||\"\") + \")\";\n    add(\"pubmed\", \"PMID:\"+uid, rec.title, url, snip, \"pubmed_esearch_efetch\", rec.pubdate||null);\n  }\n} catch(e) {}\n// OpenFDA\ntry {\n  const results = ($('OpenFDA Search').first().json.results)||[];\n  attempted.push(\"openfda\");\n  for(const r of results){\n    const of = r.openfda || {};\n    const id = (of.spl_id && of.spl_id[0]) || (r.id) || \"\";\n    const name = (of.brand_name && of.brand_name[0]) || (of.generic_name && of.generic_name[0]) || \"FDA drug label\";\n    const snipParts = [];\n    if(r.indications_and_usage) snipParts.push(String(r.indications_and_usage[0]||\"\"));\n    if(r.purpose) snipParts.push(String(r.purpose[0]||\"\"));\n    const url = id ? (\"https://labels.fda.gov/#search?query=\"+encodeURIComponent(name)) : \"https://open.fda.gov/apis/drug/label/\";\n    add(\"openfda\", \"SPL:\"+id, name + \" (FDA label)\", url, snipParts.join(\" \"), \"openfda_drug_label\");\n  }\n} catch(e) {}\n// NVD\ntry {\n  const vs = ($('NVD CVE Search').first().json.vulnerabilities)||[];\n  attempted.push(\"nvd\");\n  for(const v of vs){\n    const cve = v.cve || {}; const id = cve.id || \"\";\n    const d = (cve.descriptions||[]).find(x => x.lang === \"en\");\n    const url = id ? (\"https://nvd.nist.gov/vuln/detail/\"+id) : \"\";\n    add(\"nvd\", id, id, url, d ? d.value : \"\", \"nvd_cve_api\", (cve.published||null));\n  }\n} catch(e) {}\n// arXiv (Atom XML)\ntry {\n  const it = $('arXiv Search').first().json;\n  const xml = (it && (it.data || it.body)) ? (it.data || it.body) : \"\";\n  if(xml) attempted.push(\"arxiv\");\n  const entries = String(xml).split(\"<entry>\").slice(1);\n  for(const en of entries){\n    const t = (en.match(/<title>([\\s\\S]*?)<\\/title>/)||[])[1] || \"\";\n    const sum = (en.match(/<summary>([\\s\\S]*?)<\\/summary>/)||[])[1] || \"\";\n    const idm = (en.match(/<id>([\\s\\S]*?)<\\/id>/)||[])[1] || \"\";\n    const pub = (en.match(/<published>([\\s\\S]*?)<\\/published>/)||[])[1] || null;\n    add(\"arxiv\", idm.trim(), t, idm.trim(), sum, \"arxiv_atom_api\", pub);\n  }\n} catch(e) {}\n// SEC EDGAR\ntry {\n  const j = $('SEC EDGAR Search').first().json;\n  const hits = (j && j.hits && j.hits.hits) ? j.hits.hits : [];\n  attempted.push(\"sec_edgar\");\n  for(const h of hits){\n    const src = h._source || {}; const id = h._id || \"\";\n    const acc = (id.split(\":\")[0]||\"\"); const file = (id.split(\":\")[1]||\"\");\n    const accNo = acc.replace(/-/g,\"\");\n    const ciks = src.ciks || (src.cik ? [src.cik] : []);\n    const cikNum = ciks.length ? String(ciks[0]).replace(/^0+/,\"\") : \"\";\n    const url = (cikNum && file && accNo) ? (\"https://www.sec.gov/Archives/edgar/data/\"+cikNum+\"/\"+accNo+\"/\"+file) : \"https://www.sec.gov/cgi-bin/srqsb\";\n    const names = (src.display_names||[]).join(\", \");\n    const title = (src.form || src.file_type || \"SEC Filing\") + (names ? (\" - \"+names) : \"\");\n    add(\"sec_edgar\", id, title, url, \"Filing \"+id+\" \"+names+\" dated \"+(src.file_date||\"\"), \"sec_edgar_fulltext\", (src.file_date||null));\n  }\n} catch(e) {}\nreturn [{ json: {\n  primary_evidence: evidence,\n  sources_attempted: Array.from(new Set(attempted)),\n  primary_count: evidence.length,\n  t_primary_done: Date.now()\n} }];"
+      },
+      "id": "f5f9aebd-ecfc-4617-8577-907000f0508c",
+      "name": "Assemble Primary Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5440,
+        2496
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Context').first().json;\nconst ev = ($json.primary_evidence) || [];\nfunction validUrl(u){ return /^https?:\\/\\//i.test(u||\"\"); }\nconst usable = ev.filter(e => validUrl(e.url) && (e.snippet||\"\").length >= 40);\nconst usable_count = usable.length;\nconst diversity = new Set(usable.map(e => e.source)).size;\nconst relevant = usable.filter(e => (e.adapter_score === null) || (e.adapter_score >= 0.3));\nconst quality_sufficient = (usable_count >= 2) && (relevant.length >= 2);\nconst mode = ctx.retrieval_mode;\nlet should_call_tavily = false;\nlet tavily_skip_reason = null;\nif(ctx.force_tavily){ should_call_tavily = true; }\nelse if(mode === 'primary_only'){ should_call_tavily = false; tavily_skip_reason = 'MODE_PRIMARY_ONLY'; }\nelse if(quality_sufficient){ should_call_tavily = false; tavily_skip_reason = \"PRIMARY_EVIDENCE_SUFFICIENT\"; }\nelse { should_call_tavily = true; }\nlet reason;\nif(quality_sufficient) reason = \"Primary produced \" + usable_count + \" usable candidate(s) across \" + diversity + \" source(s).\";\nelse reason = \"Primary insufficient: \" + usable_count + \" usable candidate(s), \" + relevant.length + \" relevant, diversity \" + diversity + \".\";\nreturn [{ json: {\n  primary_evidence: ev,\n  sources_attempted: $json.sources_attempted || [],\n  primary_count: $json.primary_count || ev.length,\n  usable_count, source_diversity: diversity, quality_sufficient,\n  should_call_tavily, tavily_skip_reason, quality_reason: reason,\n  t_primary_done: $json.t_primary_done || Date.now()\n} }];"
+      },
+      "id": "ee8186b9-3cb9-4b85-8ad0-89149ff547eb",
+      "name": "Quality Evaluation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5664,
+        2496
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "calltavily",
+              "leftValue": "={{ $json.should_call_tavily }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b96c7c57-b134-4de8-a0eb-2189a02944dd",
+      "name": "Should Call Tavily",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5888,
+        2496
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Context').first().json;\nconst queries = (ctx.queries && ctx.queries.length) ? ctx.queries.slice(0, 3) : [ctx.normalized_claim];\nconst inc = ctx.tavily_include_domains || [];\nconst t_tavily_start = Date.now();\nreturn queries.filter(Boolean).map(q => ({ json: {\n  query: q, include_domains: inc, max_results: ctx.max_results, t_tavily_start\n} }));"
+      },
+      "id": "1cfd0114-3716-41c2-a2b1-5e80e496ee49",
+      "name": "Split Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6112,
+        2432
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpTemplatedCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json.query, max_results: $json.max_results, search_depth: \"advanced\", include_answer: false, include_raw_content: false, include_domains: $json.include_domains }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "12bbd620-9c64-4c60-a736-03d49ee6235b",
+      "name": "Tavily Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        6336,
+        2432
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpTemplatedCustomAuth": {
+          "id": "KcziBLIFVP0pkOye",
+          "name": "Tavily API (Manjunath R)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Context').first().json;\nconst maxr = ctx.max_results || 5;\nlet t_tavily_start = Date.now();\nconst searchResults = [];\nlet queryCount = 0;\ntry {\n  for(const it of $('Tavily Search').all()){\n    queryCount++;\n    const j = it.json || {};\n    if(j.t_tavily_start) t_tavily_start = j.t_tavily_start;\n    const rs = j.results || [];\n    for(const r of rs){ searchResults.push({ title: r.title||\"\", url: r.url||\"\", content: r.content||\"\", score: (typeof r.score === \"number\" ? r.score : null) }); }\n  }\n} catch(e) {}\ntry { t_tavily_start = $('Split Queries').first().json.t_tavily_start || t_tavily_start; } catch(e) {}\nconst seen = new Set();\nconst deduped = [];\nfor(const r of searchResults){\n  const key = (r.url||\"\").split(\"#\")[0].replace(/\\/$/,\"\").toLowerCase();\n  if(!key || seen.has(key)) continue;\n  seen.add(key); deduped.push(r);\n}\ndeduped.sort((a,b) => (b.score||0) - (a.score||0));\nconst top = deduped.slice(0, Math.max(maxr, 5));\nreturn [{ json: {\n  urls: top.map(r => r.url).filter(Boolean),\n  search_results: top,\n  query_count: queryCount,\n  search_result_count: searchResults.length,\n  deduped_url_count: deduped.length,\n  t_tavily_start,\n  t_tavily_search_done: Date.now(),\n  t_extract_start: Date.now()\n} }];"
+      },
+      "id": "16f123e7-0f43-4876-bcb6-c492683578b3",
+      "name": "Collect Search URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6560,
+        2432
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/extract",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpTemplatedCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ urls: $('Collect Search URLs').first().json.urls, extract_depth: \"basic\", format: \"markdown\" }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "edd8a1ce-5d6b-4109-b1f2-20aa6ee4c3d5",
+      "name": "Tavily Extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        6784,
+        2432
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpTemplatedCustomAuth": {
+          "id": "KcziBLIFVP0pkOye",
+          "name": "Tavily API (Manjunath R)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Context').first().json;\nconst claim = ctx.normalized_claim || ctx.claim || \"\";\nconst nowIso = new Date().toISOString();\nfunction clean(s){ return (s||\"\").toString().replace(/\\s+/g,\" \").trim(); }\nconst claimTokens = claim.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);\nfunction adapterScore(text){ const t=(text||\"\").toLowerCase(); if(!claimTokens.length) return null; let hit=0; const seen={}; for(const w of claimTokens){ if(!seen[w]){ seen[w]=1; if(t.indexOf(w)!==-1) hit++; } } const uniq=Object.keys(seen).length; return uniq?Math.round((hit/uniq)*100)/100:null; }\nconst collect = $('Collect Search URLs').first().json;\nconst searchResults = collect.search_results || [];\nconst extractedByUrl = {};\nlet extractedCount = 0; let extractFailed = 0;\ntry {\n  const ex = $('Tavily Extract').first().json || {};\n  const rs = ex.results || [];\n  for(const r of rs){ if(r.url){ extractedByUrl[r.url.replace(/\\/$/,\"\")] = r.raw_content || r.content || \"\"; extractedCount++; } }\n  const fr = ex.failed_results || ex.failed || [];\n  extractFailed = Array.isArray(fr) ? fr.length : 0;\n} catch(e) {}\nconst evidence = [];\nfor(const r of searchResults){\n  const canon = (r.url||\"\").replace(/\\/$/,\"\");\n  const extracted = extractedByUrl[canon];\n  const usedExtract = !!(extracted && extracted.length > 0);\n  const content = usedExtract ? extracted : (r.content||\"\");\n  const snip = clean(content).slice(0, 1500);\n  if(!r.url && !snip) continue;\n  evidence.push({\n    source: \"tavily_web\", source_type: \"WEB_FALLBACK\", source_id: r.url||\"\",\n    title: clean(r.title), url: r.url||\"\", snippet: snip,\n    published_at: null, query_used: claim,\n    retrieval_method: usedExtract ? \"tavily_search_extract\" : \"tavily_search_snippet\",\n    adapter_score: (typeof r.score === \"number\" ? r.score : adapterScore(r.title+\" \"+content)),\n    retrieved_at: nowIso,\n    retrieval_status: usedExtract ? \"success\" : \"extract_unavailable\"\n  });\n}\nconst t_extract_done = Date.now();\nconst tavily = {\n  called: true,\n  reason: ctx.force_tavily ? 'FORCE_TAVILY' : (ctx.retrieval_mode === 'tavily_only' ? 'MODE_TAVILY_ONLY' : 'PRIMARY_EVIDENCE_INSUFFICIENT'),\n  query_count: collect.query_count || 0,\n  result_count: collect.search_result_count || 0,\n  extracted_count: extractedCount,\n  extract_failed_count: extractFailed,\n  latency_ms: (t_extract_done - (collect.t_tavily_start || t_extract_done)),\n  extraction_latency_ms: (t_extract_done - (collect.t_extract_start || t_extract_done))\n};\nreturn [{ json: { tavily_evidence: evidence, tavily, t_extract_done } }];"
+      },
+      "id": "91bd8d48-96da-4a9a-a428-1837d1e68dea",
+      "name": "Normalize Tavily",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7008,
+        2432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Context').first().json;\nconst tEnd = Date.now();\nlet primaryEvidence = []; let sourcesAttempted = []; let quality = null; let tPrimaryDone = null;\ntry {\n  const q = $('Quality Evaluation').first().json;\n  primaryEvidence = q.primary_evidence || [];\n  sourcesAttempted = q.sources_attempted || [];\n  tPrimaryDone = q.t_primary_done || null;\n  quality = { called: true, sources_attempted: sourcesAttempted, result_count: q.primary_count || primaryEvidence.length, usable_count: q.usable_count || 0, quality_sufficient: !!q.quality_sufficient, reason: q.quality_reason || \"\" };\n} catch(e) {\n  quality = { called: false, sources_attempted: [], result_count: 0, usable_count: 0, quality_sufficient: false, reason: ctx.run_primary ? 'PRIMARY_STAGE_DID_NOT_RUN' : 'SKIPPED_MODE_TAVILY_ONLY' };\n}\nlet tavilyEvidence = []; let tavily = null;\ntry {\n  const t = $('Normalize Tavily').first().json;\n  tavilyEvidence = t.tavily_evidence || [];\n  tavily = t.tavily;\n} catch(e) {\n  let reason = \"PRIMARY_EVIDENCE_SUFFICIENT\";\n  try {\n    const q = $('Quality Evaluation').first().json;\n    if(q && q.tavily_skip_reason) reason = q.tavily_skip_reason;\n  } catch(e2) {}\n  tavily = { called: false, reason, query_count: 0, result_count: 0, extracted_count: 0 };\n}\nconst primaryCount = primaryEvidence.length;\nconst tavilyCount = tavilyEvidence.length;\nconst all = primaryEvidence.concat(tavilyEvidence);\nconst mergedCount = all.length;\nfunction canon(u){ return (u||\"\").split(\"#\")[0].replace(/\\/$/,\"\").toLowerCase(); }\nconst seenUrl = new Set(); const seenContent = new Set(); const deduped = [];\nfor(const e of all){\n  const ku = canon(e.url);\n  const kc = (e.snippet||\"\").toLowerCase().slice(0, 180);\n  if(ku && seenUrl.has(ku)) continue;\n  if(kc && seenContent.has(kc)) continue;\n  if(ku) seenUrl.add(ku);\n  if(kc) seenContent.add(kc);\n  deduped.push(e);\n}\ndeduped.forEach((e,i) => { e.rank = i; });\nconst total_latency_ms = tEnd - (ctx.t_start || tEnd);\nconst primary_latency_ms = (tPrimaryDone && ctx.t_start) ? (tPrimaryDone - ctx.t_start) : null;\nconst tavily_latency_ms = (tavily && tavily.latency_ms != null) ? tavily.latency_ms : null;\nconst extraction_latency_ms = (tavily && tavily.extraction_latency_ms != null) ? tavily.extraction_latency_ms : null;\nconst trace = [];\ntrace.push({ stage: \"analyze\", status: \"success\", detail: \"normalized + domain routing (routing only, non-authoritative)\" });\ntrace.push({ stage: \"domain_router\", status: \"success\", detail: ctx.domain });\nif(quality.called) trace.push({ stage: \"primary_retrieval\", status: \"success\", detail: sourcesAttempted.join(\", \") });\nelse trace.push({ stage: \"primary_retrieval\", status: \"skipped\", detail: quality.reason });\nif(tavily.called) trace.push({ stage: \"tavily_fallback\", status: \"success\", detail: tavily.reason });\nelse trace.push({ stage: \"tavily_fallback\", status: \"skipped\", detail: tavily.reason });\ntrace.push({ stage: \"merge_dedup\", status: \"success\", detail: \"merged \" + mergedCount + \" -> \" + deduped.length });\nreturn [{ json: {\n  request_id: ctx.request_id,\n  claim: ctx.claim,\n  normalized_claim: ctx.normalized_claim,\n  domain: ctx.domain,\n  domain_is_routing_only: true,\n  queries: ctx.queries,\n  entities: ctx.entities,\n  time_sensitive: ctx.time_sensitive,\n  workflow_version: ctx.workflow_version,\n  retrieval: {\n    mode: ctx.retrieval_mode,\n    primary: quality,\n    tavily: tavily\n  },\n  evidence: deduped,\n  counts: { primary: primaryCount, tavily: tavilyCount, merged: mergedCount, deduplicated: deduped.length },\n  performance: { total_latency_ms, primary_latency_ms, tavily_latency_ms, extraction_latency_ms },\n  trace,\n  authoritative_verdict: null,\n  note: \"Retrieval service only. No verdict is computed by n8n. The Python HalluciGuard backend runs BGE + DeBERTa and owns the authoritative verdict.\"\n} }];"
+      },
+      "id": "df08eb6a-f4d1-46ee-847c-c96b70665997",
+      "name": "Prepare Retrieval Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7232,
+        2496
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "bfc6b90d-d215-445a-8367-3f5ff52a26fe",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        7456,
+        2496
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "db",
+              "value": "pubmed"
+            },
+            {
+              "name": "retmode",
+              "value": "json"
+            },
+            {
+              "name": "retmax",
+              "value": "={{ $('Build Context').first().json.max_results }}"
+            },
+            {
+              "name": "term",
+              "value": "={{ $('Build Context').first().json.normalized_claim }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "1e726e6e-0db8-4eee-8e8f-28d4e77d37a2",
+      "name": "PubMed Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        4992,
+        2240
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "db",
+              "value": "pubmed"
+            },
+            {
+              "name": "retmode",
+              "value": "json"
+            },
+            {
+              "name": "id",
+              "value": "={{ ($('PubMed Search').first().json.esearchresult.idlist || []).join(',') }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "a143b3d0-21fe-4cdc-8a84-712d0e7ecb21",
+      "name": "PubMed Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5216,
+        2240
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://api.fda.gov/drug/label.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search",
+              "value": "={{ $('Build Context').first().json.normalized_claim }}"
+            },
+            {
+              "name": "limit",
+              "value": "={{ $('Build Context').first().json.max_results }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "eb9fb43d-ff3d-4b5d-a787-5ab97d7b05e6",
+      "name": "OpenFDA Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5216,
+        2432
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "keywordSearch",
+              "value": "={{ $('Build Context').first().json.normalized_claim }}"
+            },
+            {
+              "name": "resultsPerPage",
+              "value": "={{ $('Build Context').first().json.max_results }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "1c4b22ac-d4c0-4e4d-ad5c-81d448603e8e",
+      "name": "NVD CVE Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5216,
+        2624
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "http://export.arxiv.org/api/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search_query",
+              "value": "=all:{{ $('Build Context').first().json.normalized_claim }}"
+            },
+            {
+              "name": "sortBy",
+              "value": "relevance"
+            },
+            {
+              "name": "sortOrder",
+              "value": "descending"
+            },
+            {
+              "name": "max_results",
+              "value": "={{ $('Build Context').first().json.max_results }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "e58d105a-0cb0-42bd-9972-aba811162207",
+      "name": "arXiv Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5216,
+        2816
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://efts.sec.gov/LATEST/search-index",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $('Build Context').first().json.normalized_claim }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "HalluciGuardRetrieval/2.0 (contact@halluciguard.local)"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "9270559e-61d0-433c-a4e4-c49d8b9ce503",
+      "name": "SEC EDGAR Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5216,
+        3008
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Receive Claim": {
+      "main": [
+        [
+          {
+            "node": "Analyze Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Claim": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "Should Run Primary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Run Primary": {
+      "main": [
+        [
+          {
+            "node": "Domain Switch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Domain Switch": {
+      "main": [
+        [
+          {
+            "node": "Wikipedia Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PubMed Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenFDA Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NVD CVE Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "arXiv Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SEC EDGAR Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wikipedia Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wikipedia Search": {
+      "main": [
+        [
+          {
+            "node": "Assemble Primary Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Primary Evidence": {
+      "main": [
+        [
+          {
+            "node": "Quality Evaluation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Evaluation": {
+      "main": [
+        [
+          {
+            "node": "Should Call Tavily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Call Tavily": {
+      "main": [
+        [
+          {
+            "node": "Split Queries",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Retrieval Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Queries": {
+      "main": [
+        [
+          {
+            "node": "Tavily Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily Search": {
+      "main": [
+        [
+          {
+            "node": "Collect Search URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Search URLs": {
+      "main": [
+        [
+          {
+            "node": "Tavily Extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily Extract": {
+      "main": [
+        [
+          {
+            "node": "Normalize Tavily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Tavily": {
+      "main": [
+        [
+          {
+            "node": "Prepare Retrieval Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Retrieval Response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PubMed Search": {
+      "main": [
+        [
+          {
+            "node": "PubMed Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PubMed Summary": {
+      "main": [
+        [
+          {
+            "node": "Assemble Primary Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenFDA Search": {
+      "main": [
+        [
+          {
+            "node": "Assemble Primary Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NVD CVE Search": {
+      "main": [
+        [
+          {
+            "node": "Assemble Primary Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "arXiv Search": {
+      "main": [
+        [
+          {
+            "node": "Assemble Primary Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEC EDGAR Search": {
+      "main": [
+        [
+          {
+            "node": "Assemble Primary Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "70f68411-53e8-4adb-a0bb-ea19b9ca62c3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "327ec7bb1891ab15c88ec320a7fb396a2fb658cf033c652bc92ea641ebf02190"
+  },
+  "nodeGroups": [],
+  "id": "APFmIXSvTi2gHYp2",
+  "tags": []
+}
