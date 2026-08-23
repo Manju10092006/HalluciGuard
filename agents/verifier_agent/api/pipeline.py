@@ -44,6 +44,7 @@ from models import ModelRouter
 from cache import SqliteCache
 from metrics import MetricsCollector, PerformanceTracker
 from utils.logging import setup_logger
+from api.certification import CertificationError
 
 
 class VerificationPipeline:
@@ -75,6 +76,107 @@ class VerificationPipeline:
         self.cache = SqliteCache()
         self.metrics = MetricsCollector()
         self.logger = setup_logger("pipeline")
+        from config.settings import get_settings
+        self.settings = get_settings()
+        self._n8n_client = None
+
+        # --- Certification mode (§28/§29/§30) ---
+        self.certification_mode = bool(getattr(self.settings, "certification_mode", False))
+        # Cache is used only when explicitly enabled AND not certifying: a cached
+        # result must never stand in as proof that the models ran this run (§30).
+        self.cache_enabled = (
+            bool(getattr(self.settings, "cache_enabled", True))
+            and bool(getattr(self.settings, "verifier_cache_enabled", True))
+            and not self.certification_mode
+        )
+        if self.certification_mode:
+            self.logger.warning(
+                "CERTIFICATION MODE ENABLED — fail-closed: detector/BGE/NLI fallback "
+                "and mock/empty/malformed evidence will raise CertificationError; cache bypassed."
+            )
+        # Last-run model execution diagnostics (populated per sub-claim).
+        self._last_reranker_diag: Dict[str, Any] | None = None
+        self._last_nli_diag: Dict[str, Any] | None = None
+
+    @property
+    def n8n_client(self):
+        if self._n8n_client is None:
+            try:
+                from services.n8n_retrieval_client import N8NRetrievalClient
+            except ImportError:
+                import sys
+                from pathlib import Path
+                root_dir = str(Path(__file__).resolve().parent.parent.parent.parent)
+                if root_dir not in sys.path:
+                    sys.path.insert(0, root_dir)
+                from services.n8n_retrieval_client import N8NRetrievalClient
+
+            self._n8n_client = N8NRetrievalClient(
+                webhook_url=self.settings.n8n_retrieval_webhook_url,
+                health_url=self.settings.n8n_health_webhook_url,
+                auth_mode=self.settings.n8n_auth_mode,
+                header_name=getattr(self.settings, "n8n_header_name", "X-API-Key"),
+                webhook_secret=self.settings.n8n_webhook_secret,
+                timeout_seconds=self.settings.n8n_timeout_seconds,
+            )
+        return self._n8n_client
+
+    # ------------------------------------------------------------------
+    # Certification enforcement + model health (§28/§29)
+    # ------------------------------------------------------------------
+    def _enforce_certification_reranker(self, diag: Dict[str, Any] | None) -> None:
+        from api.certification import enforce_reranker
+        enforce_reranker(diag or {}, self.certification_mode)
+
+    def _enforce_certification_nli(
+        self, diag: Dict[str, Any] | None, evidence_present: bool
+    ) -> None:
+        from api.certification import enforce_nli
+        enforce_nli(diag or {}, self.certification_mode, evidence_present)
+
+    def _enforce_certification_evidence(self, raw_passages: List[Passage]) -> None:
+        from api.certification import enforce_retrieval_evidence
+        enforce_retrieval_evidence(
+            raw_passages,
+            self.certification_mode,
+            bool(getattr(self.settings, "mock_mode", False)),
+        )
+
+    def health_check(self, probe: bool = True) -> Dict[str, Any]:
+        """Explicit verifier model health (§29): BGE_READY / NLI_READY / N8N_READY.
+
+        When ``probe`` is True this actually attempts to load BGE and NLI (real
+        readiness, not inferred from imports). DETECTOR_READY is reported by the
+        detector/service layer, not here.
+        """
+        bge_ready = False
+        nli_ready = False
+        if probe:
+            try:
+                self.reranker._load_model()
+                bge_ready = self.reranker.model is not None and self.reranker._is_available
+            except Exception as exc:
+                self.logger.warning("BGE health probe failed: %s", exc)
+            try:
+                self.nli_engine._load_model()
+                nli_ready = self.nli_engine.is_loaded()
+            except Exception as exc:
+                self.logger.warning("NLI health probe failed: %s", exc)
+        n8n_ready = bool(
+            getattr(self.settings, "n8n_retrieval_enabled", False)
+            and getattr(self.settings, "n8n_retrieval_webhook_url", "")
+            and (
+                getattr(self.settings, "n8n_auth_mode", "none") == "none"
+                or getattr(self.settings, "n8n_webhook_secret", None)
+            )
+        )
+        return {
+            "BGE_READY": bge_ready,
+            "NLI_READY": nli_ready,
+            "N8N_READY": n8n_ready,
+            "CERTIFICATION_MODE": self.certification_mode,
+            "CACHE_ENABLED": self.cache_enabled,
+        }
 
     # ------------------------------------------------------------------
     # Evidence gating and confidence calibration
@@ -246,7 +348,11 @@ class VerificationPipeline:
 
         for claim in payload.suspicious_claims:
             try:
-                cached_data = await self.cache.get(validated_domain, claim.text)
+                cached_data = (
+                    await self.cache.get(validated_domain, claim.text)
+                    if self.cache_enabled
+                    else None
+                )
                 if cached_data:
                     self.metrics.record_cache_hit()
                     self.logger.info("Cache hit for claim: %s", claim.claim_id)
@@ -282,30 +388,68 @@ class VerificationPipeline:
 
                     with tracker.track(PipelineStage.RETRIEVAL):
                         retrieval_start = time.time()
-                        search_queries = self.query_expander.generate_search_queries(
-                            sub_claim, validated_domain
-                        )
-                        if not search_queries:
-                            search_queries = [expanded_query]
-
                         all_raw: List[Passage] = []
-                        for q in search_queries:
-                            try:
-                                search_kwargs = {}
-                                if hasattr(adapter, 'last_retrieval_trace'):
-                                    search_kwargs['retrieval_mode'] = payload.retrieval_mode
-                                if getattr(payload, 'source_mode', None):
-                                    search_kwargs['source_mode'] = payload.source_mode
-                                q_passages = await adapter.search(q, **search_kwargs)
-                                all_raw.extend(q_passages)
-                            except Exception as e:
-                                self.logger.error(
-                                    "Adapter retrieval failed for query '%s': %s",
-                                    q,
-                                    e,
+                        n8n_trace_obj = None
+
+                        # ── N8N Retrieval Service V2 Integration ──────────────
+                        if getattr(self.settings, "n8n_retrieval_enabled", True):
+                            force_tav = (payload.retrieval_mode == "tavily_only")
+                            n8n_res = await self.n8n_client.retrieve_evidence(
+                                claim=sub_claim,
+                                domain=validated_domain,
+                                retrieval_mode=payload.retrieval_mode,
+                                force_tavily=force_tav,
+                                max_results=5,
+                                request_id=request_id,
+                            )
+                            n8n_trace_obj = n8n_res.trace
+                            if n8n_res.success and n8n_res.passages:
+                                all_raw.extend(n8n_res.passages)
+                            elif not n8n_res.success:
+                                self.logger.warning(
+                                    "n8n retrieval failed (%s); falling back to Python adapters.",
+                                    n8n_res.error,
                                 )
-                                adapter_failures.append(
-                                    f"{validated_domain}:{str(e)[:100]}"
+                                adapter_failures.append(f"n8n:{str(n8n_res.error)[:80]}")
+
+                        # ── Python Retrieval Fallback (when n8n is disabled / failed / returned 0) ──
+                        if not all_raw:
+                            search_queries = self.query_expander.generate_search_queries(
+                                sub_claim, validated_domain
+                            )
+                            if not search_queries:
+                                search_queries = [expanded_query]
+
+                            for q in search_queries:
+                                try:
+                                    search_kwargs = {}
+                                    if hasattr(adapter, 'last_retrieval_trace'):
+                                        search_kwargs['retrieval_mode'] = payload.retrieval_mode
+                                    if getattr(payload, 'source_mode', None):
+                                        search_kwargs['source_mode'] = payload.source_mode
+                                    q_passages = await adapter.search(q, **search_kwargs)
+                                    all_raw.extend(q_passages)
+                                except Exception as e:
+                                    self.logger.error(
+                                        "Adapter retrieval failed for query '%s': %s",
+                                        q,
+                                        e,
+                                    )
+                                    adapter_failures.append(
+                                        f"{validated_domain}:{str(e)[:100]}"
+                                    )
+
+                        # Attach n8n trace to adapter trace or initialize retrieval trace
+                        if n8n_trace_obj:
+                            if getattr(adapter, "last_retrieval_trace", None):
+                                adapter.last_retrieval_trace.n8n_trace = n8n_trace_obj
+                            else:
+                                from schemas.retrieval_trace import RetrievalTrace
+                                adapter.last_retrieval_trace = RetrievalTrace(
+                                    requested_domain=validated_domain,
+                                    primary_adapter=getattr(adapter, "name", "n8n_retrieval_service_v2"),
+                                    retrieval_mode=payload.retrieval_mode,
+                                    n8n_trace=n8n_trace_obj,
                                 )
 
                         # Deduplicate raw passages by unique URL/ID/title
@@ -323,6 +467,10 @@ class VerificationPipeline:
                         )
                         total_retrieved += len(raw_passages)
                         claim_retrieved += len(raw_passages)
+
+                        # §28 certification: refuse mock/empty/malformed evidence.
+                        self._enforce_certification_evidence(raw_passages)
+
 
                     with tracker.track(PipelineStage.AGGREGATION):
                         aggregated_passages = self.aggregator.aggregate([raw_passages])
@@ -353,6 +501,17 @@ class VerificationPipeline:
                                     or (trace_obj.gate_relevance_audit.gate_time_relevance_signal < 0.25 and top_bge < 0.25)
                                 )
 
+                        # §13/§26 BGE execution proof — record real-inference vs. fallback.
+                        self._last_reranker_diag = self.reranker.diagnostics()
+                        _rr_trace = getattr(adapter, "last_retrieval_trace", None)
+                        if _rr_trace is not None:
+                            from schemas.retrieval_trace import ModelExecutionTrace
+                            _rr_trace.reranker_execution = ModelExecutionTrace(
+                                **self._last_reranker_diag
+                            )
+                        # §28 certification: a fallback BGE score must never be certified.
+                        self._enforce_certification_reranker(self._last_reranker_diag)
+
                     with tracker.track(PipelineStage.NLI):
                         nli_start = time.time()
                         relevant_passages = self._select_relevant_passages(
@@ -369,6 +528,19 @@ class VerificationPipeline:
                         )
                         self.metrics.record_nli_inference(
                             int((time.time() - nli_start) * 1000)
+                        )
+
+                        # §15/§26 DeBERTa execution proof — record real-inference vs. fallback.
+                        self._last_nli_diag = self.nli_engine.diagnostics()
+                        _nli_trace = getattr(adapter, "last_retrieval_trace", None)
+                        if _nli_trace is not None:
+                            from schemas.retrieval_trace import ModelExecutionTrace
+                            _nli_trace.nli_execution = ModelExecutionTrace(
+                                **self._last_nli_diag
+                            )
+                        # §28 certification: degraded NLI on real evidence must not be certified.
+                        self._enforce_certification_nli(
+                            self._last_nli_diag, evidence_present=bool(relevant_passages)
                         )
 
                         # Run relation verification and attach trace
@@ -503,12 +675,20 @@ class VerificationPipeline:
                         ),
                     )
 
-                if claim_evidence_items:
+                if claim_evidence_items and self.cache_enabled:
                     await self.cache.set(
                         validated_domain, claim.text, report.model_dump()
                     )
                 claim_reports.append(report)
 
+            except CertificationError:
+                # Fail-closed: a certification failure must surface as a controlled
+                # error, never be masked as a benign UNVERIFIED verdict (§28/§45).
+                self.logger.error(
+                    "Certification failure while processing claim %s — aborting verification.",
+                    claim.claim_id,
+                )
+                raise
             except Exception as e:
                 self.logger.error(
                     "Pipeline error processing claim %s: %s",
@@ -558,7 +738,15 @@ class VerificationPipeline:
                 )
             )
 
-        sources_attempted = getattr(adapter, "sources_attempted", [adapter.name])
+        sources_attempted = list(getattr(adapter, "sources_attempted", []))
+        if not sources_attempted:
+            collected = []
+            for r in claim_reports:
+                if r.retrieval_trace and hasattr(r.retrieval_trace, "sources_used"):
+                    collected.extend(r.retrieval_trace.sources_used or [])
+                elif r.retrieval_trace and isinstance(r.retrieval_trace, dict):
+                    collected.extend(r.retrieval_trace.get("sources_used", []))
+            sources_attempted = list(dict.fromkeys(collected)) or [adapter.name]
         sources_succeeded = getattr(adapter, "sources_succeeded", [adapter.name] if total_retrieved > 0 else [])
         sources_failed = getattr(adapter, "sources_failed", [] if total_retrieved > 0 else [adapter.name])
 

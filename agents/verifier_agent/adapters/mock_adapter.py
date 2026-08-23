@@ -23,7 +23,7 @@ class MockAdapter:
     def metadata(self) -> AdapterMetadata:
         return self.wrapped.metadata
 
-    async def search(self, query: str, k: int = 5) -> List[Passage]:
+    async def search(self, query: str, k: int = 5, **kwargs) -> List[Passage]:
         try:
             if os.path.exists(self._fixture_path):
                 with open(self._fixture_path, "r") as f:

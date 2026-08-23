@@ -54,6 +54,7 @@ class CybersecurityAdapter:
         query: str,
         k: int = 5,
         source_mode: Optional[str] = None,
+        **kwargs,
     ) -> List[Passage]:
         passages: List[Passage] = []
         try:

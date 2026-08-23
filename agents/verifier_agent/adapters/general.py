@@ -182,7 +182,7 @@ class GeneralAdapter:
 
         return False
 
-    async def search(self, query: str, k: int = 5) -> List[Passage]:
+    async def search(self, query: str, k: int = 5, **kwargs) -> List[Passage]:
         passages: List[Passage] = []
         cleaned_q = self._clean_query(query)
         if not cleaned_q:
