@@ -27,9 +27,9 @@ class DomainProxyAdapter:
             is_stub=False,
         )
 
-    async def search(self, query: str, k: int = 5) -> List[Passage]:
+    async def search(self, query: str, k: int = 5, **kwargs) -> List[Passage]:
         search = getattr(self.delegate, "search")
-        return await search(query, k)
+        return await search(query, k, **kwargs)
 
     def credibility_of(self, source_id: str) -> float:
         for source in self.profile.api_sources:

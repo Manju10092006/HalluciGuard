@@ -24,6 +24,13 @@ class VerdictLabel(str, Enum):
     CONFLICTED = "conflicted"
 
 
+class EvidenceClassification(str, Enum):
+    SUPPORTING = "supporting"
+    CONTRADICTING = "contradicting"
+    NEUTRAL = "neutral"
+    IRRELEVANT = "irrelevant"
+
+
 class PipelineStage(str, Enum):
     DOMAIN_VALIDATION = "domain_validation"
     CLAIM_DECOMPOSITION = "claim_decomposition"
@@ -78,6 +85,12 @@ class EvidenceItem(BaseModel):
     credibility_score: float = Field(ge=0.0, le=1.0)
     source_confidence_hint: float = 0.0
     relation_check: Optional[Dict[str, Any]] = None
+    adapter_score: float = 0.0
+    bge_score: float = 0.0
+    nli_entailment: float = 0.0
+    nli_contradiction: float = 0.0
+    nli_neutral: float = 0.0
+    classification: str = ""
 
 
 # ---------------------------------------------------------------------------

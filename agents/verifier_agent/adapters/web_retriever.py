@@ -84,6 +84,8 @@ _TRACKING_PARAMS = frozenset([
 
 def _normalize_url(url: str) -> str:
     """Normalize a URL for deduplication: remove fragments, tracking params, trailing slashes."""
+    if not url or not url.strip():
+        return ""
     url, _frag = urldefrag(url)
     parsed = urlparse(url)
     # Remove tracking query params
@@ -240,6 +242,7 @@ class TavilyWebRetriever:
         search_depth: str = "advanced",
         include_domains: Optional[List[str]] = None,
         exclude_domains: Optional[List[str]] = None,
+        **kwargs,
     ) -> List[Passage]:
         """
         Search the web via Tavily and return normalized Passage objects.

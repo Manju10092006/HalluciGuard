@@ -95,16 +95,28 @@ class DetectorAgent:
         # Load model on first call
         self._ensure_model_loaded()
 
-        # Run HaluEval classifier inference
+        # Run HaluEval classifier inference.
+        # detector_* diagnostics below guarantee that a failed load can never be
+        # mistaken for real ML inference (spec §6).
+        model_loaded = bool(getattr(self._inference, "_loaded", False))
+        inference_executed = False
+        degraded = False
+        if model_loaded:
+            model_source = str(getattr(self._inference, "model_path", "") or "halueval-distilbert")
+        else:
+            model_source = "baseline-heuristic"
+
         try:
-            if getattr(self._inference, "_loaded", False):
+            if model_loaded:
                 result = self._inference.predict(user_query, llm_response)
                 hallucination_prob = result.hallucination_probability
                 confidence_score = result.confidence_score
+                inference_executed = True
             else:
-                # Heuristic baseline risk calculation
+                # Heuristic baseline risk calculation (detector NOT proven — degraded)
                 hallucination_prob = 0.08
                 confidence_score = 0.92
+                degraded = True
         except Exception as e:
             logger.error(f"[Detector] Inference failed: {e}")
             return self._default_result(f"Inference error: {e}")
@@ -115,7 +127,9 @@ class DetectorAgent:
 
         logger.info(
             f"[Detector] hallucination_probability={hallucination_prob:.4f} "
-            f"risk_level={risk_level.value} next_action={next_action.value}"
+            f"risk_level={risk_level.value} next_action={next_action.value} "
+            f"model_loaded={model_loaded} inference_executed={inference_executed} "
+            f"degraded={degraded}"
         )
 
         return DetectionResult(
@@ -123,6 +137,11 @@ class DetectorAgent:
             hallucination_probability=round(hallucination_prob, 4),
             risk_level=risk_level,
             next_action=next_action,
+            model_source=model_source,
+            detector_model_loaded=model_loaded,
+            detector_inference_executed=inference_executed,
+            detector_degraded=degraded,
+            detector_model_source=model_source,
         )
 
     def _determine_risk_level(self, hallucination_prob: float) -> RiskLevel:
@@ -162,5 +181,10 @@ class DetectorAgent:
             hallucination_probability=0.50,
             risk_level=RiskLevel.MEDIUM,
             next_action=NextAction.ACCEPT,
+            model_source="baseline-heuristic",
+            detector_model_loaded=bool(getattr(self._inference, "_loaded", False)),
+            detector_inference_executed=False,
+            detector_degraded=True,
+            detector_model_source=f"default:{reason}",
         )
 

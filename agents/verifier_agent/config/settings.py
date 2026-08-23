@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     enable_domain_classifier: bool = False
     enable_confidence_calibration: bool = True
 
+    # -- Certification mode (§28/§29/§30) --
+    # OFF by default: normal production stays resilient / fail-soft.
+    # When ON (env CERTIFICATION_MODE=true): detector/BGE/NLI fallback and
+    # mock/empty/malformed evidence become CONTROLLED FAILURES instead of being
+    # silently certified, and the cache is bypassed so a cached result can never
+    # be presented as proof that the models executed this run.
+    certification_mode: bool = False
+    # env CACHE_ENABLED — independent kill-switch for the verifier result cache.
+    cache_enabled: bool = True
+
     # -- Model selections --
     nli_model: str = "cross-encoder/nli-deberta-v3-base"
     reranker_model: str = "BAAI/bge-reranker-large"
@@ -54,6 +64,18 @@ class Settings(BaseSettings):
     evidence_relevance_gate: float = 0.20
     # Default retrieval mode: hybrid (primary + fallback), primary_only, tavily_only
     default_retrieval_mode: str = "hybrid"
+    # Bounded BGE candidates scored at retrieval quality gate (before Tavily decision)
+    gate_max_candidates: int = 5
+    gate_use_bge: bool = True
+
+    # -- n8n Retrieval Service V2 --
+    n8n_retrieval_enabled: bool = True
+    n8n_retrieval_webhook_url: str = "https://manjusogala.app.n8n.cloud/webhook/halluciguard-verify-v2"
+    n8n_health_webhook_url: str = "https://manjusogala.app.n8n.cloud/webhook/halluciguard-health"
+    n8n_auth_mode: str = "header"  # "header" (default) or "none"
+    n8n_header_name: str = "X-API-Key"
+    n8n_webhook_secret: Optional[str] = None
+    n8n_timeout_seconds: float = 60.0
 
     # -- Server --
     verifier_port: int = 8002
