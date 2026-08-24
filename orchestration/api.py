@@ -265,6 +265,15 @@ async def _execute_verification(
             generation_mode=request.generation_mode,
             conversation_history=request.conversation_history,
         )
+        claims_ev = (result.get("verifier") or {}).get("claim_evidence", [])
+        if claims_ev:
+            has_c = any("contradict" in str(c.get("verdict", "")).lower() or "hallucinat" in str(c.get("verdict", "")).lower() for c in claims_ev)
+            has_v = any(str(c.get("verdict", "")).lower() in ("verified", "supported", "verdictlabel.verified") or (str(c.get("verdict", "")).lower().startswith("verif") and "unverif" not in str(c.get("verdict", "")).lower()) for c in claims_ev)
+            has_conf = any("conflict" in str(c.get("verdict", "")).lower() for c in claims_ev)
+            derived_status = "contradicted" if has_c else "conflicted" if has_conf else "verified" if has_v else "unverified"
+        else:
+            derived_status = result.get("verification_status", "unverified")
+
         resp = {
             "execution_id": result.get("execution_id"),
             "request_id": result.get("request_id"),
@@ -272,7 +281,7 @@ async def _execute_verification(
             "draft_response": result.get("draft_response") or result.get("llm_response"),
             "final_response": result.get("final_response") or result.get("draft_response", result.get("llm_response")),
             "terminal_status": result.get("terminal_status", "accepted"),
-            "verification_status": result.get("verification_status", "unverified"),
+            "verification_status": derived_status,
             "total_latency_ms": _total_latency_ms(result),
             "detector": result.get("detector"),
             "verifier": result.get("verifier"),
