@@ -15,6 +15,7 @@ from pydantic import BaseModel, EmailStr, Field
 from services.base_llm_service import BaseLLMService
 
 from .auth import (
+    authenticate_google_user,
     authenticate_user,
     clear_user_history,
     get_user_by_token,
@@ -44,6 +45,10 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str = Field(min_length=3, description="User email address")
     password: str = Field(min_length=1, description="User password")
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(min_length=10, description="Google OAuth ID Token JWT")
 
 
 class SaveHistoryRequest(BaseModel):
@@ -139,6 +144,23 @@ async def auth_login(req: LoginRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Login failed: {exc}") from exc
+
+
+@app.post("/auth/google")
+@app.post("/api/v1/auth/google")
+async def auth_google(req: GoogleAuthRequest) -> Dict[str, Any]:
+    try:
+        user_dict, token = authenticate_google_user(req.credential)
+        return {
+            "status": "success",
+            "access_token": token,
+            "token_type": "bearer",
+            "user": user_dict,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Google authentication failed: {exc}") from exc
 
 
 @app.get("/auth/me")

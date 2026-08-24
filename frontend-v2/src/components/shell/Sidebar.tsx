@@ -180,9 +180,18 @@ export function Sidebar() {
           <div className="my-1 h-px bg-border" />
           <div className="group flex items-center justify-between rounded-lg px-3 py-2 hover:bg-surface-hover transition-colors">
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-signal text-xs font-semibold text-canvas">
-                {user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
-              </div>
+              {user?.picture ? (
+                <img
+                  src={user.picture}
+                  alt={user.name || "User profile"}
+                  className="h-7 w-7 shrink-0 rounded-full object-cover border border-border"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-signal text-xs font-semibold text-canvas">
+                  {user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
+                </div>
+              )}
               <span className="truncate text-[13.5px] font-medium text-text-primary">
                 {user?.name || user?.email || "User"}
               </span>

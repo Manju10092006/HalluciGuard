@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   apiGetMe,
+  apiGoogleAuth,
   apiLogin,
   apiLogout,
   apiRegister,
@@ -40,6 +41,7 @@ export interface AuthContextValue {
   token: string | null;
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signUp: (email: string, password: string, name?: string) => Promise<AuthResult>;
+  signInWithGoogle: (credential: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
 }
 
@@ -70,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             sub: res.user.sub || res.user.id,
             email: res.user.email,
             name: res.user.name,
+            picture: res.user.picture,
             created_at: res.user.created_at,
           });
           setStatus("authenticated");
@@ -93,6 +96,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const signInWithGoogle = useCallback(async (credential: string): Promise<AuthResult> => {
+    try {
+      const res = await apiGoogleAuth(credential);
+      if (res.access_token && res.user) {
+        setStoredToken(res.access_token);
+        setToken(res.access_token);
+        setUser({
+          id: res.user.id,
+          sub: res.user.sub || res.user.id,
+          email: res.user.email,
+          name: res.user.name,
+          picture: res.user.picture,
+          created_at: res.user.created_at,
+        });
+        setStatus("authenticated");
+        return { ok: true };
+      }
+      return { ok: false, error: "Google authentication failed: No token returned." };
+    } catch (err: any) {
+      return {
+        ok: false,
+        error: err?.detail || err?.message || "Google authentication failed",
+      };
+    }
+  }, []);
+
   const signIn = useCallback(async (email: string, password: string): Promise<AuthResult> => {
     try {
       const res = await apiLogin(email, password);
@@ -104,6 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           sub: res.user.sub || res.user.id,
           email: res.user.email,
           name: res.user.name,
+          picture: res.user.picture,
           created_at: res.user.created_at,
         });
         setStatus("authenticated");
@@ -130,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             sub: res.user.sub || res.user.id,
             email: res.user.email,
             name: res.user.name,
+            picture: res.user.picture,
             created_at: res.user.created_at,
           });
           setStatus("authenticated");
@@ -161,6 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     token,
     signIn,
     signUp,
+    signInWithGoogle,
     signOut,
   };
 
@@ -169,6 +201,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  if (!ctx) {
+    return {
+      enabled: false,
+      status: "anonymous",
+      user: null,
+      token: null,
+      signIn: async () => ({ ok: false, error: "Auth context missing" }),
+      signUp: async () => ({ ok: false, error: "Auth context missing" }),
+      signInWithGoogle: async () => ({ ok: false, error: "Auth context missing" }),
+      signOut: async () => {},
+    };
+  }
   return ctx;
 }

@@ -21,6 +21,7 @@ from datetime import timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
+import requests
 
 # Path configuration
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -33,6 +34,11 @@ JWT_SECRET = os.environ.get(
 )
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24 * 7  # 7 days
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "")
 
 
 def _get_db_connection() -> sqlite3.Connection:
@@ -55,10 +61,22 @@ def init_auth_db() -> None:
                 name TEXT NOT NULL,
                 password_salt TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
+                picture TEXT,
+                auth_provider TEXT DEFAULT 'local',
                 created_at TEXT NOT NULL
             )
             """
         )
+        # Migrate existing users table if columns are missing
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN picture TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'local'")
+        except sqlite3.OperationalError:
+            pass
+
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_history (
@@ -86,10 +104,10 @@ def init_auth_db() -> None:
             now = datetime.datetime.now(timezone.utc).isoformat()
             cursor.execute(
                 """
-                INSERT INTO users (id, email, name, password_salt, password_hash, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO users (id, email, name, password_salt, password_hash, picture, auth_provider, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (str(uuid.uuid4()), "demo@halluciguard.ai", "Demo User", salt, pwd_hash, now),
+                (str(uuid.uuid4()), "demo@halluciguard.ai", "Demo User", salt, pwd_hash, None, "local", now),
             )
             conn.commit()
     finally:
@@ -103,16 +121,20 @@ def _hash_password(password: str, salt: str) -> str:
     ).hex()
 
 
-def create_jwt_token(user_id: str, email: str, name: str) -> str:
+def create_jwt_token(
+    user_id: str, email: str, name: str, picture: Optional[str] = None
+) -> str:
     """Generate a signed JWT token containing user identity and expiration."""
     now = datetime.datetime.now(timezone.utc)
-    payload = {
+    payload: Dict[str, Any] = {
         "sub": user_id,
         "email": email,
         "name": name,
         "iat": int(now.timestamp()),
         "exp": int((now + datetime.timedelta(hours=JWT_EXPIRATION_HOURS)).timestamp()),
     }
+    if picture:
+        payload["picture"] = picture
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -205,6 +227,87 @@ def authenticate_user(email: str, password: str) -> Tuple[Dict[str, Any], str]:
         "sub": user_id,
         "email": email_clean,
         "name": display_name,
+        "picture": None,
+        "created_at": created_at,
+    }
+    return user_dict, token
+
+
+def authenticate_google_user(credential: str) -> Tuple[Dict[str, Any], str]:
+    """Validate Google OAuth ID token, sync or create user, and return (user_dict, access_token)."""
+    if not credential:
+        raise ValueError("Google credential token is required")
+
+    # Verify ID token via Google's tokeninfo service
+    try:
+        resp = requests.get(
+            f"https://oauth2.googleapis.com/tokeninfo?id_token={credential}",
+            timeout=10,
+        )
+    except Exception as exc:
+        raise ValueError(f"Failed to connect to Google OAuth validation service: {exc}")
+
+    if resp.status_code != 200:
+        raise ValueError(f"Google token validation failed: {resp.text}")
+
+    google_data = resp.json()
+
+    # Validate audience matches our Google Client ID
+    aud = google_data.get("aud")
+    azp = google_data.get("azp")
+    valid_auds = {GOOGLE_CLIENT_ID, GOOGLE_PROJECT_ID}
+    if aud not in valid_auds and azp not in valid_auds and GOOGLE_CLIENT_ID not in str(aud):
+        raise ValueError("Google token audience mismatch")
+
+    email = (google_data.get("email") or "").strip().lower()
+    if not email:
+        raise ValueError("Google token did not provide a valid email address")
+
+    name = (google_data.get("name") or google_data.get("given_name") or email.split("@")[0]).strip()
+    picture = google_data.get("picture")
+    now = datetime.datetime.now(timezone.utc).isoformat()
+
+    conn = _get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, email, name, picture, created_at FROM users WHERE email = ?",
+            (email,),
+        )
+        row = cursor.fetchone()
+
+        if row:
+            user_id = row["id"]
+            # Update picture or name if changed
+            cursor.execute(
+                "UPDATE users SET picture = coalesce(?, picture), name = coalesce(?, name) WHERE id = ?",
+                (picture, name, user_id),
+            )
+            conn.commit()
+            created_at = row["created_at"]
+        else:
+            user_id = str(uuid.uuid4())
+            salt = secrets.token_hex(16)
+            pwd_hash = _hash_password(secrets.token_urlsafe(32), salt)
+            cursor.execute(
+                """
+                INSERT INTO users (id, email, name, password_salt, password_hash, picture, auth_provider, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, email, name, salt, pwd_hash, picture, "google", now),
+            )
+            conn.commit()
+            created_at = now
+    finally:
+        conn.close()
+
+    token = create_jwt_token(user_id, email, name, picture=picture)
+    user_dict = {
+        "id": user_id,
+        "sub": user_id,
+        "email": email,
+        "name": name,
+        "picture": picture,
         "created_at": created_at,
     }
     return user_dict, token
@@ -220,7 +323,7 @@ def get_user_by_token(token: str) -> Dict[str, Any]:
     conn = _get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, email, name, created_at FROM users WHERE id = ?", (user_id,))
+        cursor.execute("SELECT id, email, name, picture, created_at FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
         if not row:
             raise ValueError("User not found")
@@ -229,6 +332,7 @@ def get_user_by_token(token: str) -> Dict[str, Any]:
             "sub": row["id"],
             "email": row["email"],
             "name": row["name"],
+            "picture": row["picture"] if "picture" in row.keys() else payload.get("picture"),
             "created_at": row["created_at"],
         }
     finally:
