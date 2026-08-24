@@ -282,19 +282,26 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         
         has_contradiction = False
         has_verified = False
+        has_conflicted = False
 
         for report in verifier.get("claim_evidence", []):
-            verdict = report.get("verdict", "")
-            if verdict == "verified":
-                has_verified = True
-            elif verdict == "likely_hallucinated":
+            verdict_raw = str(report.get("verdict", "")).lower()
+            clean_verdict = "unverified"
+            if "contradict" in verdict_raw or "hallucinat" in verdict_raw:
                 has_contradiction = True
+                clean_verdict = "contradicted"
+            elif verdict_raw in ("verified", "supported", "verdictlabel.verified") or (verdict_raw.startswith("verif") and "unverif" not in verdict_raw):
+                has_verified = True
+                clean_verdict = "verified"
+            elif "conflict" in verdict_raw:
+                has_conflicted = True
+                clean_verdict = "conflicted"
 
             claims.append(
                 {
                     "claim_id": report.get("claim_id"),
                     "text": report.get("claim_text"),
-                    "verdict": verdict,
+                    "verdict": clean_verdict,
                 }
             )
             evidence_items = report.get("evidence", [])
@@ -332,6 +339,13 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             },
         )
 
+        overall_status = (
+            "contradicted" if has_contradiction
+            else "conflicted" if has_conflicted
+            else "verified" if has_verified
+            else "unverified"
+        )
+
         return {
             "verifier": verifier,
             "claims": claims,
@@ -340,7 +354,7 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             "retrieved_evidence": evidence_all,
             "ranked_evidence": evidence_all,
             "nli_results": nli_results,
-            "verification_status": "verified" if not has_contradiction else "contradicted",
+            "verification_status": overall_status,
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
             "trace": add_trace(
