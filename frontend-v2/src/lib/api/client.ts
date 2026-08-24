@@ -160,8 +160,24 @@ export interface AuthApiResponse {
     sub: string;
     email: string;
     name: string;
+    picture?: string;
     created_at?: string;
   };
+}
+
+export async function apiGoogleAuth(credential: string): Promise<AuthApiResponse> {
+  const res = await fetch(joinUrl(config.apiBaseUrl, "/auth/google"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ credential }),
+    credentials: "omit",
+    mode: "cors",
+  });
+  if (!res.ok) {
+    const detail = await readErrorDetail(res);
+    throw new ApiError("auth", detail || "Google authentication failed", { status: res.status, detail });
+  }
+  return (await res.json()) as AuthApiResponse;
 }
 
 export async function apiLogin(email: string, password: string): Promise<AuthApiResponse> {
