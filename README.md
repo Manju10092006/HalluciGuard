@@ -18,8 +18,8 @@ pinned: false
 </p>
 
 <p align="center">
-  <a href="https://github.com/Manju10092006/HalluciGuard">Backend</a> •
-  <a href="https://github.com/Manju10092006/HalluciGuard-Frontend">Frontend</a> •
+  <a href="https://frontend-alpha-umber-63.vercel.app"><strong>🌐 Live Web App (Vercel)</strong></a> •
+  <a href="https://github.com/Manju10092006/HalluciGuard">GitHub Repository</a> •
   <a href="https://github.com/Manju10092006/HalluciGuard/issues">Issues</a>
 </p>
 

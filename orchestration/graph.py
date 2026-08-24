@@ -170,7 +170,18 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
 
         detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))
-        route = "verify" if next_action.lower().endswith("verify") else "accept"
+        risk_level = str(detector.get("risk_level", "LOW")).upper()
+        
+        # Verify if detector flags risk, or if mode is stress_test, or if pre-supplied response, or if verification required
+        should_verify = (
+            next_action.lower().endswith("verify")
+            or risk_level in {"MEDIUM", "HIGH"}
+            or state.get("generation_mode") == "stress_test"
+            or bool(state.get("llm_response") and state.get("llm_response") != state.get("draft_response"))
+            or float(detector.get("hallucination_probability", 0.0)) >= 0.05
+            or os.environ.get("ALWAYS_VERIFY", "true").lower() in ("true", "1")
+        )
+        route = "verify" if should_verify else "accept"
 
         # Inter-agent bus messaging
         if route == "accept":
@@ -246,17 +257,19 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
     VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
     node_start = start_timer()
     try:
+        claim_text = state.get("user_query") or state.get("llm_response", "")
         payload = VerifierInputV2(
             query_id=state.get("request_id")
             or state.get("execution_id")
             or str(uuid.uuid4()),
             domain=state.get("domain", "general"),
             suspicious_claims=[
-                SuspiciousClaim(claim_id="c1", text=state["llm_response"])
+                SuspiciousClaim(claim_id="c1", text=claim_text)
             ],
         )
         try:
-            verifier_res = await asyncio.wait_for(VerificationPipeline().verify(payload), timeout=8.0)
+            verifier_timeout = float(os.environ.get("VERIFIER_TIMEOUT_SECONDS", "60.0"))
+            verifier_res = await asyncio.wait_for(VerificationPipeline().verify(payload), timeout=verifier_timeout)
             verifier = _dump(verifier_res)
         except (asyncio.TimeoutError, Exception) as sub_err:
             raise RuntimeError(
