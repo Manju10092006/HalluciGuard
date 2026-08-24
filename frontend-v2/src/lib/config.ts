@@ -25,9 +25,28 @@ function readBool(value: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
+function getApiBaseUrl(): string {
+  // 1. If explicit non-localhost URL is provided via environment
+  const raw = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim();
+  if (raw && !raw.includes("localhost") && !raw.includes("127.0.0.1")) {
+    return raw;
+  }
+  // 2. In browser environment outside localhost (e.g. mobile phone visiting vercel)
+  if (typeof window !== "undefined") {
+    const isLocalhost =
+      window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    if (!isLocalhost) {
+      // Use same-origin relative path (Next.js server-side rewrites proxy to backend)
+      return "";
+    }
+  }
+  // 3. Fallback for local development on PC
+  return raw || "http://localhost:8000";
+}
+
 export const config = {
-  /** Base URL of the frozen FastAPI backend. */
-  apiBaseUrl: readString(process.env.NEXT_PUBLIC_API_BASE_URL, "http://localhost:8000"),
+  /** Base URL of the FastAPI backend. Empty string in production for same-origin proxy. */
+  apiBaseUrl: getApiBaseUrl(),
 
   /** Verification can be slow (retrieval + rerank + NLI). Give it room. */
   apiTimeoutMs: readNumber(process.env.NEXT_PUBLIC_API_TIMEOUT_MS, 120_000),

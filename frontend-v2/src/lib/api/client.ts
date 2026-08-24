@@ -29,7 +29,8 @@ export class ApiError extends Error {
 }
 
 function joinUrl(base: string, path: string): string {
-  return `${base.replace(/\/+$/, "")}${path}`;
+  if (!base || base === "/") return path.startsWith("/") ? path : `/${path}`;
+  return `${base.replace(/\/+$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 const AUTH_TOKEN_KEY = "hg.auth.jwt.v1";

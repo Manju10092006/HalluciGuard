@@ -62,19 +62,10 @@ app = FastAPI(
     description="Production LangGraph supervisor orchestrating OpenRouter Base LLM, Detector, Verifier, and Memory agents with JWT Auth.",
 )
 
-# Configure CORS for Vercel Frontend and Local Development
+# Configure CORS for Vercel Frontend, Mobile Devices, and Local Development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "https://frontend-v2-ashen-five.vercel.app",
-        "https://frontend-v2-c7km8aozi-s-manjunath-reddys-projects.vercel.app",
-        "https://frontend-alpha-umber-63.vercel.app",
-    ],
-    allow_origin_regex=r"^https://.*\.vercel\.app$",
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
