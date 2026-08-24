@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { ShieldCheck, ArrowRight, Loader2, AlertCircle } from "lucide-react";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 
 export default function LandingPage() {
   const { status, signIn, signUp } = useAuth();
@@ -78,6 +79,22 @@ export default function LandingPage() {
 
         {/* Auth Card */}
         <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-6 sm:p-8 shadow-md">
+          {/* Google Sign-In Primary Option */}
+          <div className="mb-5">
+            <GoogleSignInButton
+              onSuccess={() => router.replace("/app")}
+              onError={(err) => setErrorMessage(err)}
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="relative my-5 flex items-center justify-center">
+            <div className="w-full border-t border-line" />
+            <span className="absolute bg-panel px-3 text-[11px] font-medium uppercase tracking-wider text-ink-dim">
+              or continue with email
+            </span>
+          </div>
+
           {/* Mode Switcher */}
           <div className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-panel-raised p-1 border border-line">
             <button

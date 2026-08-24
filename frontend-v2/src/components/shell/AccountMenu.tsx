@@ -7,8 +7,19 @@ import { LogOut, History, ShieldCheck, ChevronDown, User } from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { Button } from "@/components/ui/Button";
 
-function Avatar({ name, size = 28 }: { name: string; size?: number }) {
+function Avatar({ name, picture, size = 28 }: { name: string; picture?: string; size?: number }) {
   const initial = (name || "?").trim().charAt(0).toUpperCase();
+  if (picture) {
+    return (
+      <img
+        src={picture}
+        alt={name || "User profile"}
+        className="rounded-full object-cover border border-line"
+        style={{ width: size, height: size }}
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
   return (
     <span
       aria-hidden="true"
@@ -49,7 +60,7 @@ function AuthedMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <Avatar name={user.name || user.email} />
+        <Avatar name={user.name || user.email} picture={user.picture} />
         <ChevronDown className="h-3.5 w-3.5 text-ink-dim" aria-hidden="true" />
       </button>
 
@@ -59,7 +70,7 @@ function AuthedMenu() {
           className="absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-lg border border-line-strong bg-panel-raised shadow-[0_16px_48px_rgba(0,0,0,0.55)] [animation:hg-rise_0.15s_ease]"
         >
           <div className="flex items-center gap-3 border-b border-line px-4 py-3">
-            <Avatar name={user.name || user.email} size={36} />
+            <Avatar name={user.name || user.email} picture={user.picture} size={36} />
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-ink">{user.name || "Signed in"}</p>
               <p className="truncate text-[12px] text-ink-muted">{user.email}</p>
