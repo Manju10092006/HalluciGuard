@@ -1,6 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_GOOGLE_CLIENT_ID:
+      process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
+      "88154202029-lrr58hkhqmu7td24ln93i6t21jp8hki2.apps.googleusercontent.com",
+  },
   // Vercel builds run type-checking and lint by default. Keep type safety on;
   // don't fail the production build on lint-only issues.
   eslint: {
