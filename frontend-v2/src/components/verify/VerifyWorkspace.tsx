@@ -20,16 +20,20 @@ export function VerifyWorkspace({ initialId }: { initialId?: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const recordedFor = useRef<string | null>(null);
 
-  // Load past history entry if initialId or ?id= is specified
+  // Load past history entry if initialId or ?id= is specified; reset to clean state if navigating to /app
   useEffect(() => {
-    if (!activeId) return;
-    const entries = loadHistory(user?.sub);
-    const found = entries.find((e) => e.id === activeId);
-    if (found && found.result) {
-      recordedFor.current = found.id;
-      v.loadPastRun(found.query, found.result);
+    if (activeId) {
+      const entries = loadHistory(user?.sub);
+      const found = entries.find((e) => e.id === activeId);
+      if (found && found.result) {
+        recordedFor.current = found.id;
+        v.loadPastRun(found.query, found.result);
+      }
+    } else if (recordedFor.current !== null && !initialId) {
+      recordedFor.current = null;
+      v.reset();
     }
-  }, [activeId, user?.sub, v.loadPastRun]);
+  }, [activeId, initialId, user?.sub, v.loadPastRun, v.reset]);
 
   const onSubmit = (query: string, opts: ComposerSubmit) => {
     v.submit(query, { mode: opts.mode, domain: opts.domain, llmResponse: opts.llmResponse });

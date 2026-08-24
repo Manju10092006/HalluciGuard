@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { runVerification, createRequest } from "@/lib/api/verify";
 import { ApiError } from "@/lib/api/client";
+import { classifyUserIntent } from "@/lib/guard/intent";
 import type { GenerationMode, VerificationResult } from "@/lib/api/types";
 
 export type VerifyPhase = "idle" | "running" | "complete" | "error";
@@ -101,6 +102,47 @@ export function useVerification() {
       const controller = new AbortController();
       abortRef.current = controller;
       lastArgs.current = { query: trimmed, opts };
+
+      // Check conversational intent / greetings BEFORE calling /verify backend
+      const intent = classifyUserIntent(trimmed);
+      if (intent.isConversational) {
+        stopTicking();
+        const convText = intent.response || "Hello! What factual claim would you like me to verify?";
+        const conversationalResult: VerificationResult = {
+          executionId: `conv-${Date.now()}`,
+          requestId: `conv-${Date.now()}`,
+          answer: {
+            model: "HalluciGuard Assistant",
+            draft: convText,
+            final: convText,
+          },
+          verificationStatus: null,
+          terminalStatus: "completed",
+          overallVerdict: null,
+          overallConfidence: 1.0,
+          detector: null,
+          verifierSkipped: true,
+          retrieval: null,
+          runtimeModels: null,
+          claims: [],
+          stages: [],
+          trace: [],
+          totalLatencyMs: 15,
+          activeAgents: ["assistant"],
+          disabledAgents: ["verifier", "retrieval"],
+          errors: [],
+          raw: {} as any,
+        };
+
+        setState({
+          phase: "complete",
+          elapsedMs: 15,
+          result: conversationalResult,
+          error: null,
+          query: trimmed,
+        });
+        return;
+      }
 
       startRef.current = Date.now();
       setState({ phase: "running", elapsedMs: 0, result: null, error: null, query: trimmed });
