@@ -58,18 +58,22 @@ app = FastAPI(
 )
 
 # Configure CORS for Vercel Frontend and Local Development
-raw_cors = os.environ.get(
-    "CORS_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000,https://*.vercel.app",
-)
-allowed_origins = [origin.strip() for origin in raw_cors.split(",") if origin.strip()]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins if allowed_origins else ["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://frontend-v2-ashen-five.vercel.app",
+        "https://frontend-v2-c7km8aozi-s-manjunath-reddys-projects.vercel.app",
+        "https://frontend-alpha-umber-63.vercel.app",
+    ],
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
