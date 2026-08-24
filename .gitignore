@@ -88,3 +88,5 @@ verify_and_clean_crops.py
 
 # Generated benchmark/certification result dumps (regenerable output)
 benchmark_results_certified.json
+
+cloudflared.exe

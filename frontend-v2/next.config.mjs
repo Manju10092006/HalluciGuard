@@ -1,8 +1,5 @@
 /** @type {import('next').NextConfig} */
-const backendUrl =
-  process.env.BACKEND_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "https://shannon-diagnosis-ment-striking.trycloudflare.com";
+const backendUrl = process.env.BACKEND_URL;
 
 const nextConfig = {
   reactStrictMode: true,
@@ -11,8 +8,6 @@ const nextConfig = {
       process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
       "88154202029-lrr58hkhqmu7td24ln93i6t21jp8hki2.apps.googleusercontent.com",
   },
-  // Vercel builds run type-checking and lint by default. Keep type safety on;
-  // don't fail the production build on lint-only issues.
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -29,6 +24,9 @@ const nextConfig = {
     ];
   },
   async rewrites() {
+    if (!backendUrl) {
+      return [];
+    }
     return [
       {
         source: "/auth/:path*",
