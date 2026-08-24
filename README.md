@@ -18,7 +18,7 @@ pinned: false
 </p>
 
 <p align="center">
-  <a href="https://frontend-v2-ashen-five.vercel.app"><strong>🌐 Live Web App (Vercel)</strong></a> •
+  <a href="https://halluciguard-ai.vercel.app"><strong>🌐 Live Web App (Vercel)</strong></a> •
   <a href="https://github.com/Manju10092006/HalluciGuard">GitHub Repository</a> •
   <a href="https://github.com/Manju10092006/HalluciGuard/issues">Issues</a>
 </p>
