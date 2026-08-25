@@ -1,238 +1,469 @@
 """
-HalluciGuard - Enterprise Judge Agent Orchestrator
-Main orchestrator class tying together Domain Policy Registry, Evidence Intelligence,
-Source Consensus Engine, Contradiction Taxonomy, Dynamic 11-Signal Calibrator, Decision Intelligence Engine,
-Memory Intelligence, Multi-Agent Negotiation Protocol, and Reproducible Audit Logging.
-Includes Circuit Breaker, Graceful Degradation, and Fallback Policies.
+HalluciGuard - Canonical Judge Agent
+The Chief Decision Officer of HalluciGuard.
+
+The Judge receives VerifierResult from the Verifier and decides what the system should do next:
+  - ACCEPT: Release draft response verbatim
+  - CORRECT: Deliver targeted CorrectionRequest payload to Snehith's Corrector Agent
+  - VERIFY_AGAIN: Request expanded verification pass (if retries available)
+  - REJECT: Block response due to critical safety/contradiction risk
+  - ABSTAIN: Insufficient evidence or unresolvable pipeline degradation
+
+The Judge does NOT perform independent fact-checking or NLI model inference.
+It relies on the authoritative factual investigation produced by the Verifier.
 """
 
 import time
 import logging
-import asyncio
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 
 from config import JudgeConfig, DEFAULT_CONFIG
-from domain_policies import DomainPolicyRegistry, DEFAULT_DOMAIN_REGISTRY
-from evidence_intelligence import EvidenceIntelligenceEngine
-from source_consensus import SourceConsensusEngine
-from contradiction_analyzer import ContradictionTaxonomyAnalyzer
-from claim_criticality import ClaimCriticalityAssessor
-from memory_integration import MemoryIntelligenceEngine
-from nli_engine import NLIEngine
-from confidence_calibrator import DynamicConfidenceCalibrator
-from decision_engine import DecisionIntelligenceEngine
+from domain_policies import DomainPolicyRegistry, DEFAULT_DOMAIN_REGISTRY, DomainPolicy
+from orchestration.schemas import (
+    JudgeResult,
+    CorrectionRequest,
+    ReverificationResult,
+    VerifierResult,
+    ClaimReport,
+    Evidence,
+    DetectorResult,
+    JudgeDecision,
+    SeverityLevel,
+    VerdictLabel,
+    EntailmentLabel,
+    ExecutionStatus,
+)
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("HalluciGuard.JudgeAgent")
 
+
 class JudgeAgent:
+    """
+    Canonical Judge Agent.
+    Evaluates VerifierResult and emits canonical JudgeResult.
+    """
+
     def __init__(self, config: Optional[JudgeConfig] = None):
         self.config = config or DEFAULT_CONFIG
-        logger.info(f"Initializing HalluciGuard Enterprise Judge Agent Engine...")
-
         self.domain_registry = DEFAULT_DOMAIN_REGISTRY
-        self.evidence_intel_engine = EvidenceIntelligenceEngine(config=self.config)
-        self.consensus_engine = SourceConsensusEngine()
-        self.contradiction_analyzer = ContradictionTaxonomyAnalyzer()
-        self.criticality_assessor = ClaimCriticalityAssessor()
-        self.memory_engine = MemoryIntelligenceEngine()
-        
-        self.nli_engine = NLIEngine(
-            model_name=self.config.default_nli_model,
-            use_hf=self.config.use_huggingface
-        )
-        self.calibrator = DynamicConfidenceCalibrator(config=self.config)
-        self.decision_engine = DecisionIntelligenceEngine(config=self.config)
-
-        # Circuit breaker state
         self._consecutive_errors = 0
         self._circuit_open = False
-
-        logger.info("HalluciGuard Enterprise Judge Agent initialized and ready.")
+        logger.info("HalluciGuard Canonical Judge Agent initialized.")
 
     def evaluate(
         self,
-        detector_output: Dict[str, Any],
-        verifier_output: Dict[str, Any],
+        verifier_result: Union[VerifierResult, Dict[str, Any]],
+        detector_result: Optional[Union[DetectorResult, Dict[str, Any]]] = None,
         user_query: str = "",
+        original_response: str = "",
         draft_response: str = "",
-        memory_context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        domain: str = "",
+        reverification_result: Optional[Union[ReverificationResult, Dict[str, Any]]] = None,
+        retry_count: int = 0
+    ) -> JudgeResult:
         """
-        Executes complete Enterprise Decision Intelligence Pipeline:
-        1. Circuit Breaker & Input Normalization
-        2. Domain Policy Lookup (Healthcare, Cybersecurity, Finance, etc.)
-        3. Evidence Intelligence (Source Authority, Freshness Decay, Diversity Index, Graph Clustering)
-        4. NLI Inference (Entailment / Contradiction scoring)
-        5. Source Consensus Matrix Calculation
-        6. Contradiction Taxonomy & Claim Criticality Assessment
-        7. Memory Signals Integration
-        8. Dynamic 11-Signal Bayesian Calibration
-        9. Decision Arbitration & Multi-Agent Negotiation Protocol
-        10. Reproducible Audit Trail & Observability Signal Emission
+        Main decision arbitration entry point.
         """
-        start_time = time.time()
+        response_text = original_response or draft_response or ""
 
-        # Check Circuit Breaker
-        if self._circuit_open:
-            logger.warning("Circuit Breaker is OPEN due to past errors. Returning graceful fallback decision.")
-            return self._graceful_fallback(user_query, draft_response, "CIRCUIT_BREAKER_ACTIVE")
+        # -------------------------------------------------------------------
+        # 1. Post-Correction Re-verification Evaluation (Phase J5 Loop)
+        # -------------------------------------------------------------------
+        if reverification_result is not None:
+            return self._evaluate_reverification(reverification_result, user_query, response_text)
 
-        try:
-            # 1. Normalize Inputs
-            detector_prob = detector_output.get("hallucination_probability", 0.3)
-            detector_conf = detector_output.get("confidence_score", 0.8)
-            domain_name = verifier_output.get("domain", "General Knowledge")
+        # -------------------------------------------------------------------
+        # 2. Input Normalization & Controlled Failure Handling
+        # -------------------------------------------------------------------
+        normalized_verifier = self._normalize_verifier_result(verifier_result, domain)
+        if normalized_verifier is None:
+            logger.warning("Judge received empty or unparseable VerifierResult. Returning ABSTAIN.")
+            return JudgeResult(
+                decision=JudgeDecision.ABSTAIN,
+                severity=SeverityLevel.HIGH,
+                reason="Invalid or missing VerifierResult payload.",
+                explanation="Grounding evidence was absent or failed schema validation. Unsafe to proceed.",
+                confidence=0.0,
+                correction_request=None,
+                status=ExecutionStatus.FAILED
+            )
 
-            # 2. Domain Policy Lookup
-            domain_policy = self.domain_registry.get_policy(domain_name)
+        normalized_detector = self._normalize_detector_result(detector_result)
+        domain_name = normalized_verifier.domain or domain or "General Knowledge"
+        policy = self.domain_registry.get_policy(domain_name)
 
-            # 3. Extract Claim-Evidence Pairs
-            raw_pairs = verifier_output.get("claim_evidence_pairs", [])
-            if not raw_pairs and "claims" in verifier_output and "evidence" in verifier_output:
-                claims = verifier_output.get("claims", [])
-                evidence = verifier_output.get("evidence", [])
-                raw_pairs = [
-                    {"claim": c, "evidence": e if i < len(evidence) else "", "evidence_confidence": 0.85, "rank": i+1}
-                    for i, c in enumerate(claims)
-                ]
+        # -------------------------------------------------------------------
+        # 3. Claim-Level Decision Processing (No NLI re-verification)
+        # -------------------------------------------------------------------
+        claim_reports = normalized_verifier.claim_reports
 
-            # 4. NLI Inference
-            evaluated_pairs = self.nli_engine.batch_predict(raw_pairs)
+        claims_to_correct: List[ClaimReport] = []
+        claims_to_preserve: List[ClaimReport] = []
+        trusted_evidence: List[Evidence] = []
+        contradictory_evidence: List[Evidence] = []
+        unverified_claims: List[ClaimReport] = []
+        conflicted_claims: List[ClaimReport] = []
 
-            # 5. Evidence Intelligence (Authority, Freshness, Diversity, Graph)
-            evidence_intel = self.evidence_intel_engine.analyze_evidence_set(evaluated_pairs, domain_name)
+        for claim in claim_reports:
+            verdict_str = str(claim.verdict).lower()
+            if verdict_str == VerdictLabel.CONTRADICTED.value:
+                claims_to_correct.append(claim)
+                for ev in claim.evidence:
+                    contradictory_evidence.append(ev)
+            elif verdict_str == VerdictLabel.VERIFIED.value:
+                claims_to_preserve.append(claim)
+                for ev in claim.evidence:
+                    trusted_evidence.append(ev)
+            elif verdict_str == VerdictLabel.CONFLICTED.value:
+                conflicted_claims.append(claim)
+            elif verdict_str == VerdictLabel.UNVERIFIED.value:
+                unverified_claims.append(claim)
+            else:
+                if claim.contradiction_score >= 0.5:
+                    claims_to_correct.append(claim)
+                    for ev in claim.evidence:
+                        contradictory_evidence.append(ev)
+                elif claim.support_score >= 0.5:
+                    claims_to_preserve.append(claim)
+                    for ev in claim.evidence:
+                        trusted_evidence.append(ev)
+                else:
+                    unverified_claims.append(claim)
 
-            # 6. Source Consensus Engine
-            consensus_data = self.consensus_engine.evaluate_consensus(evaluated_pairs)
+        for ev in normalized_verifier.evidence:
+            if ev not in trusted_evidence and ev not in contradictory_evidence:
+                trusted_evidence.append(ev)
 
-            # 7. Contradiction Taxonomy & Primary Contradiction
-            contradiction_data = {"has_contradiction": False, "risk_weight": 0.0}
-            for p in evaluated_pairs:
-                ct = self.contradiction_analyzer.classify_contradiction(
-                    p.get("claim", ""), p.get("evidence", ""), p.get("nli_scores", {})
+        # -------------------------------------------------------------------
+        # 4. Apply Policy Decision Governance Tree
+        # -------------------------------------------------------------------
+        det_prob = normalized_detector.hallucination_probability if normalized_detector else 0.0
+
+        has_contradictions = len(claims_to_correct) > 0
+        has_preservations = len(claims_to_preserve) > 0
+        has_unverified = len(unverified_claims) > 0
+        has_conflicted = len(conflicted_claims) > 0
+        total_claims = len(claim_reports)
+
+        decision: JudgeDecision = JudgeDecision.ABSTAIN
+        severity: SeverityLevel = SeverityLevel.LOW
+        reason: str = ""
+        explanation: str = ""
+        correction_req: Optional[CorrectionRequest] = None
+
+        # Rule A: Critical / Direct Safety Contradictions -> REJECT (or CORRECT if non-critical)
+        if has_contradictions:
+            is_critical_domain = policy.strictness_level in ["VERY_STRICT", "STRICT"]
+            is_high_contradiction = any(c.contradiction_score >= policy.reject_contradiction_threshold for c in claims_to_correct)
+
+            if is_critical_domain and is_high_contradiction:
+                decision = JudgeDecision.REJECT
+                severity = SeverityLevel.CRITICAL
+                reason = f"Critical factual contradiction detected in {policy.domain_name} domain."
+                explanation = f"Claim(s) strongly refuting ground-truth. Rejected to prevent safety/compliance risk."
+            else:
+                decision = JudgeDecision.CORRECT
+                severity = SeverityLevel.MEDIUM
+                reason = f"Identified {len(claims_to_correct)} contradicted claim(s) requiring evidence-grounded repair."
+                explanation = f"Response contains fixable factual errors. Directing Corrector to repair flagged claims while preserving verified claims."
+
+                instructions = (
+                    f"Modify only the {len(claims_to_correct)} claim(s) flagged in claims_to_correct using "
+                    f"contradictory_evidence and trusted_evidence. "
+                    f"Preserve all {len(claims_to_preserve)} claim(s) in claims_to_preserve without altering facts."
                 )
-                if ct["has_contradiction"] and ct["risk_weight"] > contradiction_data["risk_weight"]:
-                    contradiction_data = ct
 
-            # 8. Claim Criticality Assessment
-            criticality_data = self.criticality_assessor.evaluate_criticality(draft_response, domain_name)
+                correction_req = CorrectionRequest(
+                    execution_id=f"exec-{int(time.time())}",
+                    user_query=user_query,
+                    original_response=response_text,
+                    claims_to_correct=claims_to_correct,
+                    claims_to_preserve=claims_to_preserve,
+                    trusted_evidence=trusted_evidence,
+                    contradictory_evidence=contradictory_evidence,
+                    correction_instructions=instructions
+                )
 
-            # 9. Memory Signals Integration
-            sources = [p.get("source", "Unknown") for p in evaluated_pairs]
-            memory_data = self.memory_engine.evaluate_memory_signals(draft_response, sources, memory_context)
+        # Rule B: Absent evidence (0 claims evaluated)
+        elif total_claims == 0:
+            if det_prob >= 0.70:
+                decision = JudgeDecision.REJECT
+                severity = SeverityLevel.HIGH
+                reason = f"High hallucination risk ({det_prob:.2f}) with zero supporting evidence."
+                explanation = "Response flagged as high risk by Detector without grounding evidence."
+            elif retry_count < self.config.max_verification_retries:
+                decision = JudgeDecision.VERIFY_AGAIN
+                severity = SeverityLevel.MEDIUM
+                reason = "No verification claims/evidence provided. Requesting retrieval pass."
+                explanation = "Verifier produced empty evidence set. Retrying verification."
+            else:
+                decision = JudgeDecision.ABSTAIN
+                severity = SeverityLevel.HIGH
+                reason = f"Insufficient grounding evidence in {policy.domain_name} domain."
+                explanation = "Grounding evidence was absent and retries exhausted."
 
-            # 10. Dynamic 11-Signal Calibration
-            calibration_results = self.calibrator.calibrate_11_signal(
-                detector_prob=detector_prob,
-                detector_confidence=detector_conf,
-                evidence_intel=evidence_intel,
-                consensus_data=consensus_data,
-                memory_data=memory_data,
-                contradiction_data=contradiction_data,
-                criticality_data=criticality_data,
-                domain_policy=domain_policy
-            )
+        # Rule C: All evaluated claims verified -> ACCEPT
+        elif not has_contradictions and has_preservations:
+            decision = JudgeDecision.ACCEPT
+            severity = SeverityLevel.LOW
+            reason = "All claims verified against authoritative ground-truth evidence."
+            explanation = f"Response is fully grounded in {policy.domain_name} sources with overall confidence {normalized_verifier.overall_confidence:.2f}."
 
-            # 11. Decision Intelligence Engine
-            decision_results = self.decision_engine.evaluate_decision(
-                calibration_results=calibration_results,
-                evidence_intel=evidence_intel,
-                consensus_data=consensus_data,
-                memory_data=memory_data,
-                criticality_data=criticality_data,
-                domain_policy=domain_policy,
-                user_query=user_query,
-                draft_response=draft_response
-            )
+        # Rule D: Unverified or Conflicted claims (UNVERIFIED != CONTRADICTED)
+        elif has_unverified or has_conflicted:
+            if retry_count < self.config.max_verification_retries:
+                decision = JudgeDecision.VERIFY_AGAIN
+                severity = SeverityLevel.MEDIUM
+                reason = f"Unverified or conflicted claims present. Triggering verification retry pass {retry_count + 1}."
+                explanation = f"Evidence was insufficient or conflicted for {len(unverified_claims) + len(conflicted_claims)} claim(s). Requesting expanded retrieval."
+            elif policy.strictness_level in ["VERY_STRICT", "STRICT"]:
+                decision = JudgeDecision.ABSTAIN
+                severity = SeverityLevel.HIGH
+                reason = f"Insufficient grounding evidence under strict {policy.domain_name} policy."
+                explanation = "Verification retries exhausted without sufficient authoritative grounding."
+            else:
+                decision = JudgeDecision.ACCEPT
+                severity = SeverityLevel.LOW
+                reason = f"Unverified claim accepted under relaxed {policy.domain_name} policy baseline."
+                explanation = "Low-risk conversational domain allows release of unverified non-safety claim."
 
-            execution_latency_ms = round((time.time() - start_time) * 1000, 2)
-            self._consecutive_errors = 0 # Reset error count
+        confidence = round(min(1.0, max(0.0, normalized_verifier.overall_confidence * (1.0 - 0.2 * det_prob))), 4)
 
-            # Standardized Enterprise Response Payload
-            full_judge_output = {
-                "agent": "JUDGE_AGENT",
-                "status": "SUCCESS",
-                "decision": decision_results["judge_decision"],
-                "severity": decision_results["severity"],
-                "reason": decision_results["reason"],
-                "explanation": decision_results["explanation"],
-                "next_action": decision_results["next_action"],
-                "domain_policy_enforced": domain_policy.domain_name,
-                "metrics": {
-                    "calibrated_confidence": calibration_results["calibrated_confidence"],
-                    "risk_score": calibration_results["risk_score"],
-                    "overall_entailment": calibration_results["overall_entailment"],
-                    "overall_contradiction": calibration_results["overall_contradiction"],
-                    "source_authority": evidence_intel["overall_authority"],
-                    "evidence_freshness": evidence_intel["overall_freshness"],
-                    "diversity_index": evidence_intel["diversity_index"],
-                    "consensus_score": consensus_data["consensus_score"],
-                    "conflict_index": consensus_data["conflict_index"],
-                    "latency_ms": execution_latency_ms
-                },
-                "evidence_intelligence": evidence_intel,
-                "source_consensus": consensus_data,
-                "contradiction_taxonomy": decision_results["contradiction_taxonomy"],
-                "claim_criticality": criticality_data,
-                "corrector_payload": decision_results["corrector_payload"],
-                "negotiation_protocol": decision_results["negotiation_protocol"],
-                "audit_record": decision_results["audit_record"],
-                "observability_bus_signal": {
-                    "event": "ENTERPRISE_JUDGE_DECISION_EMITTED",
-                    "decision": decision_results["judge_decision"],
-                    "severity": decision_results["severity"],
-                    "domain": domain_policy.domain_name,
-                    "calibrated_conf": calibration_results["calibrated_confidence"],
-                    "timestamp_ms": time.time()
-                }
-            }
-
-            return full_judge_output
-
-        except Exception as e:
-            logger.error(f"Error during Judge Agent evaluation: {e}", exc_info=True)
-            self._consecutive_errors += 1
-            if self._consecutive_errors >= self.config.circuit_breaker_error_threshold:
-                self._circuit_open = True
-                logger.error("Circuit breaker triggered! Opening circuit.")
-            return self._graceful_fallback(user_query, draft_response, str(e))
-
-    def _graceful_fallback(self, user_query: str, draft_response: str, error_reason: str) -> Dict[str, Any]:
-        """
-        Provides safe fallback response during system failure or circuit breaker events.
-        """
-        return {
-            "agent": "JUDGE_AGENT",
-            "status": "FALLBACK_MODE",
-            "decision": "ABSTAIN",
-            "severity": "HIGH",
-            "reason": f"System in fallback state ({error_reason}).",
-            "explanation": "Runtime exception occurred; returning safe fallback abstain decision.",
-            "next_action": "Retry verification via fallback agent",
-            "metrics": {"calibrated_confidence": 0.0, "latency_ms": 0.0},
-            "corrector_payload": {
-                "judge_decision": "ABSTAIN",
-                "severity": "HIGH",
-                "reason": "System fallback mode",
-                "hallucinated_claims": [],
-                "trusted_evidence": [],
-                "user_query": user_query,
-                "original_draft_response": draft_response
-            }
-        }
-
-    async def evaluate_async(
-        self,
-        detector_output: Dict[str, Any],
-        verifier_output: Dict[str, Any],
-        user_query: str = "",
-        draft_response: str = ""
-    ) -> Dict[str, Any]:
-        """
-        Async thread-safe execution interface.
-        """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self.evaluate, detector_output, verifier_output, user_query, draft_response
+        return JudgeResult(
+            decision=decision,
+            severity=severity,
+            reason=reason,
+            explanation=explanation,
+            confidence=confidence,
+            correction_request=correction_req,
+            status=ExecutionStatus.COMPLETED
         )
+
+    def _evaluate_reverification(
+        self,
+        reverification_result: Union[ReverificationResult, Dict[str, Any]],
+        user_query: str,
+        response_text: str
+    ) -> JudgeResult:
+        """
+        Phase J5 — Evaluates post-correction ReverificationResult.
+        """
+        if isinstance(reverification_result, dict):
+            try:
+                rev_res = ReverificationResult.model_validate(reverification_result)
+            except Exception:
+                passed = reverification_result.get("passed", False)
+                rem_cnt = reverification_result.get("remaining_contradictions", 0)
+                if passed and rem_cnt == 0:
+                    return JudgeResult(
+                        decision=JudgeDecision.ACCEPT,
+                        severity=SeverityLevel.LOW,
+                        reason="Post-correction re-verification passed. Safe to release.",
+                        explanation="Corrected text verified with 0 remaining contradictions.",
+                        confidence=0.90,
+                        correction_request=None,
+                        status=ExecutionStatus.COMPLETED
+                    )
+                else:
+                    return JudgeResult(
+                        decision=JudgeDecision.REJECT,
+                        severity=SeverityLevel.HIGH,
+                        reason="Post-correction re-verification failed with remaining contradictions.",
+                        explanation="Correction introduced or retained factual contradictions. Rolling back.",
+                        confidence=0.30,
+                        correction_request=None,
+                        status=ExecutionStatus.COMPLETED
+                    )
+        else:
+            rev_res = reverification_result
+
+        if rev_res.passed and rev_res.remaining_contradictions == 0:
+            return JudgeResult(
+                decision=JudgeDecision.ACCEPT,
+                severity=SeverityLevel.LOW,
+                reason="Post-correction re-verification passed successfully. Safe to commit.",
+                explanation="Refined text verified by Verifier with zero remaining contradictions.",
+                confidence=0.92,
+                correction_request=None,
+                status=ExecutionStatus.COMPLETED
+            )
+        else:
+            return JudgeResult(
+                decision=JudgeDecision.REJECT,
+                severity=SeverityLevel.HIGH,
+                reason=f"Post-correction re-verification failed with {rev_res.remaining_contradictions} remaining contradiction(s).",
+                explanation="Correction failed re-verification gate. Rolling back to safe response.",
+                confidence=0.20,
+                correction_request=None,
+                status=ExecutionStatus.COMPLETED
+            )
+
+    def _normalize_verifier_result(
+        self,
+        verifier_result: Union[VerifierResult, Dict[str, Any]],
+        fallback_domain: str
+    ) -> Optional[VerifierResult]:
+        """Normalizes dict or VerifierResult into canonical VerifierResult Pydantic model."""
+        if verifier_result is None:
+            return None
+        if isinstance(verifier_result, VerifierResult):
+            return verifier_result
+
+        if isinstance(verifier_result, dict):
+            try:
+                return VerifierResult.model_validate(verifier_result)
+            except Exception as e:
+                logger.debug(f"Direct Pydantic parsing failed ({e}), normalizing dictionary schema...")
+
+            query_id = verifier_result.get("query_id", "Q-001")
+            domain = verifier_result.get("domain", fallback_domain or "General Knowledge")
+            overall_conf = verifier_result.get("overall_confidence", verifier_result.get("confidence_score", 0.8))
+
+            claim_reports: List[ClaimReport] = []
+
+            if "claim_reports" in verifier_result:
+                for c in verifier_result["claim_reports"]:
+                    if isinstance(c, ClaimReport):
+                        claim_reports.append(c)
+                    elif isinstance(c, dict):
+                        try:
+                            claim_reports.append(ClaimReport.model_validate(c))
+                        except Exception:
+                            pass
+
+            elif "claims" in verifier_result:
+                raw_claims = verifier_result["claims"]
+                for i, c in enumerate(raw_claims):
+                    if isinstance(c, dict):
+                        c_id = c.get("claim_id", f"C{i+1}")
+                        c_text = c.get("claim_text", c.get("claim", ""))
+                        v_str = str(c.get("verdict", "unverified")).lower()
+                        if "verified" in v_str:
+                            verdict = VerdictLabel.VERIFIED
+                        elif "contradict" in v_str:
+                            verdict = VerdictLabel.CONTRADICTED
+                        elif "conflict" in v_str:
+                            verdict = VerdictLabel.CONFLICTED
+                        else:
+                            verdict = VerdictLabel.UNVERIFIED
+
+                        ev_list: List[Evidence] = []
+                        for j, ev_data in enumerate(c.get("evidence", [])):
+                            if isinstance(ev_data, dict):
+                                ev_list.append(Evidence(
+                                    evidence_id=ev_data.get("evidence_id", f"E{j+1}"),
+                                    title=ev_data.get("title", ""),
+                                    source=ev_data.get("source", "Unknown"),
+                                    url=ev_data.get("url"),
+                                    snippet=ev_data.get("snippet", ev_data.get("evidence_snippet", "")),
+                                    entailment_label=EntailmentLabel.CONTRADICTION if verdict == VerdictLabel.CONTRADICTED else EntailmentLabel.ENTAILMENT,
+                                    entailment_score=ev_data.get("entailment_score", 0.8),
+                                    credibility_score=ev_data.get("credibility_score", 0.8)
+                                ))
+
+                        claim_reports.append(ClaimReport(
+                            claim_id=c_id,
+                            claim_text=c_text,
+                            verdict=verdict,
+                            support_score=0.9 if verdict == VerdictLabel.VERIFIED else 0.1,
+                            contradiction_score=0.9 if verdict == VerdictLabel.CONTRADICTED else 0.1,
+                            confidence_score=c.get("confidence_score", 0.8),
+                            evidence=ev_list
+                        ))
+                    elif isinstance(c, str):
+                        claim_reports.append(ClaimReport(
+                            claim_id=f"C{i+1}",
+                            claim_text=c,
+                            verdict=VerdictLabel.UNVERIFIED,
+                            support_score=0.5,
+                            contradiction_score=0.0,
+                            confidence_score=0.5,
+                            evidence=[]
+                        ))
+
+            elif "claim_evidence_pairs" in verifier_result:
+                pairs = verifier_result["claim_evidence_pairs"]
+                for i, pair in enumerate(pairs):
+                    c_text = pair.get("claim", "")
+                    ev_text = pair.get("evidence", pair.get("evidence_snippet", ""))
+                    src = pair.get("source", "Unknown")
+                    rel = pair.get("nli_relation", pair.get("top_relation", "")).lower()
+                    ev_lower = ev_text.lower()
+                    c_lower = c_text.lower()
+                    
+                    refutation_keywords = [
+                        "contraindicated", "refutes", "mismatch", "false", "incorrect",
+                        "prohibited", "fatal", "is not", "does not", "not directly",
+                        "interpreted", "refuted", "denied", "contrary"
+                    ]
+                    is_refutation = any(k in ev_lower for k in refutation_keywords)
+
+                    # Simple regex numeric mismatch check
+                    import re
+                    c_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', c_lower))
+                    ev_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', ev_lower))
+                    is_num_mismatch = bool(c_nums and ev_nums and not c_nums.intersection(ev_nums))
+
+                    if "contra" in rel or pair.get("contradiction_score", 0) > 0.4 or is_refutation or is_num_mismatch:
+                        verdict = VerdictLabel.CONTRADICTED
+                    elif "entail" in rel or pair.get("entailment_score", 0) > 0.5 or (ev_text and not rel):
+                        verdict = VerdictLabel.VERIFIED
+                    else:
+                        verdict = VerdictLabel.UNVERIFIED
+
+                    ev = Evidence(
+                        evidence_id=f"E{i+1}",
+                        title=src,
+                        source=src,
+                        snippet=ev_text,
+                        entailment_label=EntailmentLabel.CONTRADICTION if verdict == VerdictLabel.CONTRADICTED else EntailmentLabel.ENTAILMENT,
+                        entailment_score=0.85,
+                        credibility_score=0.80
+                    )
+
+                    claim_reports.append(ClaimReport(
+                        claim_id=f"C{i+1}",
+                        claim_text=c_text,
+                        verdict=verdict,
+                        support_score=0.85 if verdict == VerdictLabel.VERIFIED else 0.1,
+                        contradiction_score=0.85 if verdict == VerdictLabel.CONTRADICTED else 0.1,
+                        confidence_score=0.85,
+                        evidence=[ev] if ev_text else []
+                    ))
+
+            return VerifierResult(
+                query_id=query_id,
+                domain=domain,
+                claim_reports=claim_reports,
+                evidence=[],
+                overall_confidence=overall_conf,
+                status=ExecutionStatus.COMPLETED
+            )
+
+        return None
+
+    def _normalize_detector_result(
+        self,
+        detector_result: Optional[Union[DetectorResult, Dict[str, Any]]]
+    ) -> Optional[DetectorResult]:
+        """Normalizes dict or DetectorResult into canonical DetectorResult model."""
+        if detector_result is None:
+            return None
+        if isinstance(detector_result, DetectorResult):
+            return detector_result
+        if isinstance(detector_result, dict):
+            try:
+                return DetectorResult.model_validate(detector_result)
+            except Exception:
+                prob = float(detector_result.get("hallucination_probability", 0.0))
+                conf = float(detector_result.get("confidence_score", 0.8))
+                from orchestration.schemas import RiskLevel, NextAction
+                risk = RiskLevel.HIGH if prob >= 0.7 else (RiskLevel.MEDIUM if prob >= 0.4 else RiskLevel.LOW)
+                return DetectorResult(
+                    hallucination_probability=prob,
+                    confidence_score=conf,
+                    risk_level=risk,
+                    next_action=NextAction.VERIFY if prob >= 0.3 else NextAction.ACCEPT,
+                    status=ExecutionStatus.COMPLETED
+                )
+        return None
