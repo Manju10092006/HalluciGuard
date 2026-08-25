@@ -47,7 +47,7 @@ def test_detector_failure_routes_to_human_escalation():
 
 
 def test_verifier_route_success():
-    assert _verifier_route({"verification_status": "verified"}) == "memory"
+    assert _verifier_route({"verification_status": "verified"}) == "judge"
 
 
 def test_verifier_route_error():
@@ -56,3 +56,23 @@ def test_verifier_route_error():
 
 def test_verifier_route_agent_failed():
     assert _verifier_route({"verification_status": "agent_failed"}) == "human_escalation"
+
+
+def test_judge_route_accept():
+    from orchestration.graph import _judge_route
+    assert _judge_route({"judge_decision": "ACCEPT"}) == "memory"
+
+
+def test_judge_route_correct():
+    from orchestration.graph import _judge_route
+    assert _judge_route({"judge_decision": "CORRECT", "active_agents": ["corrector"]}) == "corrector"
+
+
+def test_judge_route_verify_again():
+    from orchestration.graph import _judge_route
+    assert _judge_route({"judge_decision": "VERIFY_AGAIN"}) == "verifier"
+
+
+def test_judge_route_reject():
+    from orchestration.graph import _judge_route
+    assert _judge_route({"judge_decision": "REJECT"}) == "reject"
