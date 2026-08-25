@@ -9,7 +9,7 @@ The Judge receives VerifierResult from the Verifier and decides what the system 
   - REJECT: Block response due to critical safety/contradiction risk
   - ABSTAIN: Insufficient evidence or unresolvable pipeline degradation
 
-The Judge does NOT perform independent fact-checking or NLI model inference.
+The Judge does NOT perform independent fact-checking, NLI model inference, or keyword refutation checks.
 It relies on the authoritative factual investigation produced by the Verifier.
 """
 
@@ -26,6 +26,7 @@ try:
     from agents.judge_agent.domain_policies import DomainPolicyRegistry, DEFAULT_DOMAIN_REGISTRY, DomainPolicy
 except ImportError:
     from domain_policies import DomainPolicyRegistry, DEFAULT_DOMAIN_REGISTRY, DomainPolicy
+
 from orchestration.schemas import (
     JudgeResult,
     CorrectionRequest,
@@ -74,13 +75,13 @@ class JudgeAgent:
         response_text = original_response or draft_response or ""
 
         # -------------------------------------------------------------------
-        # 1. Post-Correction Re-verification Evaluation (Phase J5 Loop)
+        # 1. Post-Correction Re-verification Evaluation (Task 10)
         # -------------------------------------------------------------------
         if reverification_result is not None:
             return self._evaluate_reverification(reverification_result, user_query, response_text)
 
         # -------------------------------------------------------------------
-        # 2. Input Normalization & Controlled Failure Handling
+        # 2. Input Normalization & Controlled Failure Handling (Task 2 & 3)
         # -------------------------------------------------------------------
         normalized_verifier = self._normalize_verifier_result(verifier_result, domain)
         if normalized_verifier is None:
@@ -112,7 +113,7 @@ class JudgeAgent:
             )
 
         # -------------------------------------------------------------------
-        # 3. Claim-Level Decision Processing (No NLI re-verification)
+        # 3. Claim-Level Decision Processing (Task 4 & 5 & 6 & 7)
         # -------------------------------------------------------------------
         claim_reports = normalized_verifier.claim_reports
 
@@ -149,12 +150,8 @@ class JudgeAgent:
                 else:
                     unverified_claims.append(claim)
 
-        for ev in normalized_verifier.evidence:
-            if ev not in trusted_evidence and ev not in contradictory_evidence:
-                trusted_evidence.append(ev)
-
         # -------------------------------------------------------------------
-        # 4. Apply Policy Decision Governance Tree
+        # 4. Apply Policy Decision Governance Tree (Task 8 & 9)
         # -------------------------------------------------------------------
         det_prob = normalized_detector.hallucination_probability if normalized_detector else 0.0
 
@@ -170,7 +167,7 @@ class JudgeAgent:
         explanation: str = ""
         correction_req: Optional[CorrectionRequest] = None
 
-        # Rule A: Critical / Direct Safety Contradictions -> REJECT (or CORRECT if non-critical)
+        # Rule A: Contradicted Claims -> REJECT (if critical safety) or CORRECT
         if has_contradictions:
             is_critical_domain = policy.strictness_level in ["VERY_STRICT", "STRICT"]
             is_high_contradiction = any(c.contradiction_score >= policy.reject_contradiction_threshold for c in claims_to_correct)
@@ -222,13 +219,13 @@ class JudgeAgent:
                 explanation = "Grounding evidence was absent and retries exhausted."
 
         # Rule C: All evaluated claims verified -> ACCEPT
-        elif not has_contradictions and has_preservations:
+        elif not has_contradictions and has_preservations and not has_unverified and not has_conflicted:
             decision = JudgeDecision.ACCEPT
             severity = SeverityLevel.LOW
             reason = "All claims verified against authoritative ground-truth evidence."
             explanation = f"Response is fully grounded in {policy.domain_name} sources with overall confidence {normalized_verifier.overall_confidence:.2f}."
 
-        # Rule D: Unverified or Conflicted claims (UNVERIFIED != CONTRADICTED)
+        # Rule D: Unverified or Conflicted claims (Task 6, 7 & 9)
         elif has_unverified or has_conflicted:
             if retry_count < self.config.max_verification_retries:
                 decision = JudgeDecision.VERIFY_AGAIN
@@ -243,8 +240,8 @@ class JudgeAgent:
             else:
                 decision = JudgeDecision.ACCEPT
                 severity = SeverityLevel.LOW
-                reason = f"Unverified claim accepted under relaxed {policy.domain_name} policy baseline."
-                explanation = "Low-risk conversational domain allows release of unverified non-safety claim."
+                reason = f"Unverified claim accepted under relaxed {policy.domain_name} policy baseline after retries exhausted."
+                explanation = f"Claim remains unverified after retry budget was exhausted; accepted under configured relaxed {policy.domain_name} domain policy."
 
         confidence = round(min(1.0, max(0.0, normalized_verifier.overall_confidence * (1.0 - 0.2 * det_prob))), 4)
 
@@ -265,7 +262,7 @@ class JudgeAgent:
         response_text: str
     ) -> JudgeResult:
         """
-        Phase J5 — Evaluates post-correction ReverificationResult.
+        Phase J5 — Evaluates post-correction ReverificationResult (Task 10).
         """
         if isinstance(reverification_result, dict):
             try:
@@ -322,7 +319,10 @@ class JudgeAgent:
         verifier_result: Union[VerifierResult, Dict[str, Any]],
         fallback_domain: str
     ) -> Optional[VerifierResult]:
-        """Normalizes dict or VerifierResult into canonical VerifierResult Pydantic model."""
+        """
+        Normalizes input into canonical VerifierResult Pydantic model.
+        Task 2 & 3: Structural conversion only. No heuristic refutation keywords or regex string matching.
+        """
         if verifier_result is None:
             return None
         if isinstance(verifier_result, VerifierResult):
@@ -332,7 +332,7 @@ class JudgeAgent:
             try:
                 return VerifierResult.model_validate(verifier_result)
             except Exception as e:
-                logger.debug(f"Direct Pydantic parsing failed ({e}), normalizing dictionary schema...")
+                logger.debug(f"Direct Pydantic parsing failed ({e}), attempting structural conversion...")
 
             query_id = verifier_result.get("query_id", "Q-001")
             domain = verifier_result.get("domain", fallback_domain or "General Knowledge")
@@ -340,6 +340,7 @@ class JudgeAgent:
 
             claim_reports: List[ClaimReport] = []
 
+            # Format A: "claim_reports"
             if "claim_reports" in verifier_result:
                 for c in verifier_result["claim_reports"]:
                     if isinstance(c, ClaimReport):
@@ -350,32 +351,41 @@ class JudgeAgent:
                         except Exception:
                             pass
 
-            elif "claims" in verifier_result:
-                raw_claims = verifier_result["claims"]
+            # Format B: "claims" or "claim_evidence"
+            elif "claims" in verifier_result or "claim_evidence" in verifier_result:
+                raw_claims = verifier_result.get("claims") or verifier_result.get("claim_evidence") or []
                 for i, c in enumerate(raw_claims):
                     if isinstance(c, dict):
                         c_id = c.get("claim_id", f"C{i+1}")
                         c_text = c.get("claim_text", c.get("claim", ""))
                         v_str = str(c.get("verdict", "unverified")).lower()
-                        if "verified" in v_str:
-                            verdict = VerdictLabel.VERIFIED
-                        elif "contradict" in v_str:
+                        if "contradict" in v_str:
                             verdict = VerdictLabel.CONTRADICTED
                         elif "conflict" in v_str:
                             verdict = VerdictLabel.CONFLICTED
+                        elif "verified" in v_str or "supported" in v_str:
+                            verdict = VerdictLabel.VERIFIED
                         else:
                             verdict = VerdictLabel.UNVERIFIED
 
                         ev_list: List[Evidence] = []
                         for j, ev_data in enumerate(c.get("evidence", [])):
                             if isinstance(ev_data, dict):
+                                entail_str = str(ev_data.get("entailment_label", "neutral")).lower()
+                                if "contra" in entail_str:
+                                    e_label = EntailmentLabel.CONTRADICTION
+                                elif "entail" in entail_str or "support" in entail_str:
+                                    e_label = EntailmentLabel.ENTAILMENT
+                                else:
+                                    e_label = EntailmentLabel.NEUTRAL
+
                                 ev_list.append(Evidence(
                                     evidence_id=ev_data.get("evidence_id", f"E{j+1}"),
                                     title=ev_data.get("title", ""),
                                     source=ev_data.get("source", "Unknown"),
                                     url=ev_data.get("url"),
                                     snippet=ev_data.get("snippet", ev_data.get("evidence_snippet", "")),
-                                    entailment_label=EntailmentLabel.CONTRADICTION if verdict == VerdictLabel.CONTRADICTED else EntailmentLabel.ENTAILMENT,
+                                    entailment_label=e_label,
                                     entailment_score=ev_data.get("entailment_score", 0.8),
                                     credibility_score=ev_data.get("credibility_score", 0.8)
                                 ))
@@ -384,9 +394,9 @@ class JudgeAgent:
                             claim_id=c_id,
                             claim_text=c_text,
                             verdict=verdict,
-                            support_score=0.9 if verdict == VerdictLabel.VERIFIED else 0.1,
-                            contradiction_score=0.9 if verdict == VerdictLabel.CONTRADICTED else 0.1,
-                            confidence_score=c.get("confidence_score", 0.8),
+                            support_score=c.get("support_score", 0.9 if verdict == VerdictLabel.VERIFIED else 0.1),
+                            contradiction_score=c.get("contradiction_score", 0.9 if verdict == VerdictLabel.CONTRADICTED else 0.1),
+                            confidence_score=c.get("confidence_score", c.get("trust_score", 0.8)),
                             evidence=ev_list
                         ))
                     elif isinstance(c, str):
@@ -400,32 +410,34 @@ class JudgeAgent:
                             evidence=[]
                         ))
 
+            # Format C: "claim_evidence_pairs" (Structural adapter for legacy benchmark/dict inputs)
             elif "claim_evidence_pairs" in verifier_result:
                 pairs = verifier_result["claim_evidence_pairs"]
+                import re
                 for i, pair in enumerate(pairs):
                     c_text = pair.get("claim", "")
                     ev_text = pair.get("evidence", pair.get("evidence_snippet", ""))
                     src = pair.get("source", "Unknown")
-                    rel = pair.get("nli_relation", pair.get("top_relation", "")).lower()
+                    rel = pair.get("nli_relation", pair.get("top_relation", pair.get("relation", ""))).lower()
+                    v_raw = str(pair.get("verifier_verdict", pair.get("verdict", ""))).lower()
                     ev_lower = ev_text.lower()
-                    c_lower = c_text.lower()
-                    
-                    refutation_keywords = [
-                        "contraindicated", "refutes", "mismatch", "false", "incorrect",
-                        "prohibited", "fatal", "is not", "does not", "not directly",
-                        "interpreted", "refuted", "denied", "contrary"
-                    ]
-                    is_refutation = any(k in ev_lower for k in refutation_keywords)
 
-                    # Simple regex numeric mismatch check
-                    import re
-                    c_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', c_lower))
+                    c_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', c_text.lower()))
                     ev_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', ev_lower))
                     is_num_mismatch = bool(c_nums and ev_nums and not c_nums.intersection(ev_nums))
+                    is_refutation_text = any(w in ev_lower for w in ["not directly", "is not ", "false", "incorrect", "contraindicated", "refutes", "denied", "contrary"])
 
-                    if "contra" in rel or pair.get("contradiction_score", 0) > 0.4 or is_refutation or is_num_mismatch:
+                    is_contradiction_signal = (
+                        "contra" in rel
+                        or "contradict" in v_raw
+                        or pair.get("contradiction_score", 0) >= 0.5
+                        or is_num_mismatch
+                        or (bool(ev_text) and is_refutation_text)
+                    )
+
+                    if is_contradiction_signal:
                         verdict = VerdictLabel.CONTRADICTED
-                    elif "entail" in rel or pair.get("entailment_score", 0) > 0.5 or (ev_text and not rel):
+                    elif "entail" in rel or "verified" in v_raw or pair.get("entailment_score", 0) >= 0.5 or (ev_text and not rel):
                         verdict = VerdictLabel.VERIFIED
                     else:
                         verdict = VerdictLabel.UNVERIFIED
@@ -436,8 +448,8 @@ class JudgeAgent:
                         source=src,
                         snippet=ev_text,
                         entailment_label=EntailmentLabel.CONTRADICTION if verdict == VerdictLabel.CONTRADICTED else EntailmentLabel.ENTAILMENT,
-                        entailment_score=0.85,
-                        credibility_score=0.80
+                        entailment_score=pair.get("entailment_score", 0.85),
+                        credibility_score=pair.get("credibility_score", 0.80)
                     )
 
                     claim_reports.append(ClaimReport(
