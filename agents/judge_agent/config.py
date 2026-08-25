@@ -1,12 +1,26 @@
 """
 HalluciGuard Judge Agent - Central Configuration & Type System
-Defines all enums, dataclasses, and configuration for the AI Decision Intelligence Platform.
-No hardcoded thresholds. Policy-driven behavioral governance.
+Defines configuration and re-exports canonical Phase-1 contracts.
 """
 
 import enum
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
+
+from orchestration.schemas import (
+    JudgeResult,
+    CorrectionRequest,
+    ReverificationResult,
+    VerifierResult,
+    ClaimReport,
+    Evidence,
+    DetectorResult,
+    JudgeDecision,
+    SeverityLevel,
+    VerdictLabel,
+    EntailmentLabel,
+    ExecutionStatus,
+)
 
 
 class Decision(enum.Enum):
@@ -76,26 +90,6 @@ class ConflictType(enum.Enum):
 
 
 @dataclass
-class CorrectionRequest:
-    execution_id: str
-    user_query: str
-    original_response: str
-    claims_to_correct: List[Dict[str, Any]] = field(default_factory=list)
-    claims_to_preserve: List[Dict[str, Any]] = field(default_factory=list)
-    trusted_evidence: List[Dict[str, Any]] = field(default_factory=list)
-    contradictory_evidence: List[Dict[str, Any]] = field(default_factory=list)
-    correction_instructions: str = ""
-
-
-@dataclass
-class ReverificationResult:
-    passed: bool
-    reverified_claims: List[Dict[str, Any]] = field(default_factory=list)
-    new_conflicts_detected: bool = False
-    reason: str = ""
-
-
-@dataclass
 class JudgeConfig:
     supported_domains: List[str] = field(default_factory=lambda: [
         "Healthcare", "Cybersecurity", "Finance", "Law",
@@ -107,6 +101,11 @@ class JudgeConfig:
     log_level: str = "INFO"
     nli_model: str = "cross-encoder/nli-deberta-v3-base"
     use_huggingface: bool = True
+    circuit_breaker_error_threshold: int = 3
+
+    @property
+    def default_nli_model(self) -> str:
+        return self.nli_model
 
 
 DEFAULT_CONFIG = JudgeConfig()
