@@ -1,95 +1,249 @@
-"""Test script for the Decision Intelligence Engine — Verifier Contract Alignment."""
-import sys, os, json, io
+"""
+Comprehensive Unit Test Suite for Canonical JudgeAgent & Phase-1 Contracts.
+Tests all Section 15 requirements.
+"""
+
+import sys
+import os
+import json
+import io
+
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
-from decision_intelligence import DecisionIntelligenceEngine
+agent_dir = os.path.dirname(os.path.abspath(__file__))
+if agent_dir not in sys.path:
+    sys.path.insert(0, agent_dir)
 
-engine = DecisionIntelligenceEngine()
-
-# Test 1: Verifier Contract with Claims Schema (CONTRADICTED -> CORRECT)
-print("=" * 70)
-print("TEST 1: Verifier Claim Schema — Contradicted Python Claim")
-print("=" * 70)
-v1 = engine.evaluate(
-    user_query="Who created Python and when?",
-    draft_response="Python was created by Elon Musk in 1999.",
-    detector_output={"hallucination_probability": 0.45, "confidence_score": 0.88},
-    verifier_output={
-        "claims": [
-            {
-                "claim_id": "C1",
-                "claim_text": "Python was created by Elon Musk in 1999.",
-                "verdict": "CONTRADICTED",
-                "confidence_score": 0.97,
-                "trust_score": 0.94,
-                "explanation": "Authoritative evidence identifies Guido van Rossum as the creator of Python.",
-                "evidence": [
-                    {
-                        "evidence_id": "E1",
-                        "title": "Python History",
-                        "source": "Wikipedia",
-                        "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
-                        "snippet": "Python was created by Guido van Rossum in 1991.",
-                        "entailment_label": "contradiction",
-                        "entailment_score": 0.98,
-                        "credibility_score": 0.80
-                    }
-                ]
-            }
-        ]
-    },
-    domain="General Knowledge"
+from judge_agent import JudgeAgent
+from orchestration.schemas import (
+    JudgeResult,
+    CorrectionRequest,
+    ReverificationResult,
+    VerifierResult,
+    ClaimReport,
+    Evidence,
+    DetectorResult,
+    JudgeDecision,
+    SeverityLevel,
+    VerdictLabel,
+    EntailmentLabel,
+    ExecutionStatus,
 )
 
-print(f"Overall Decision: {v1.overall_decision}")
-print(f"Correction Required: {v1.correction_required}")
-print(f"Re-verification Required: {v1.re_verification_required}")
-for cd in v1.claim_decisions:
-    print(f"  Claim [{cd['claim_id']}]: Status={cd['status']} | Action={cd['action']} | EvidenceIDs={cd['evidence_ids']}")
-    print(f"    Reason: {cd['reason']}")
-print()
+judge = JudgeAgent()
 
-# Test 2: Cybersecurity — CVE claim
-print("=" * 70)
-print("TEST 2: Cybersecurity — Verified CVE Claim")
-print("=" * 70)
-v2 = engine.evaluate(
-    user_query="Is CVE-2024-1234 a critical vulnerability?",
-    draft_response="CVE-2024-1234 is a critical RCE vulnerability in Apache Log4j allowing remote code execution.",
-    detector_output={"hallucination_probability": 0.20, "confidence_score": 0.90},
-    verifier_output={"claim_evidence_pairs": [
-        {"claim": "CVE-2024-1234 is a critical RCE vulnerability in Apache Log4j",
-         "evidence": "CVE-2024-1234: Critical remote code execution vulnerability in Apache Log4j 2.x. CVSS: 9.8.",
-         "source": "NVD - National Vulnerability Database"}
-    ]},
-    domain="Cybersecurity"
+print("=" * 80)
+print("  HALLUCIGUARD CANONICAL JUDGE AGENT — UNIT TEST SUITE")
+print("=" * 80)
+
+# Helper to get string value of enum or str
+def str_val(v):
+    return v.value if hasattr(v, "value") else str(v)
+
+# TEST 1: Verified Claim -> ACCEPT
+print("\n[TEST 1] Single Verified Claim -> EXPECT ACCEPT")
+vr1 = VerifierResult(
+    query_id="Q-101",
+    domain="General Knowledge",
+    claim_reports=[
+        ClaimReport(
+            claim_id="C1",
+            claim_text="Guido van Rossum created Python.",
+            verdict=VerdictLabel.VERIFIED,
+            support_score=0.95,
+            contradiction_score=0.05,
+            confidence_score=0.95,
+            evidence=[
+                Evidence(
+                    evidence_id="E1",
+                    title="Python History",
+                    source="Wikipedia",
+                    snippet="Python was created by Guido van Rossum in 1991.",
+                    entailment_label=EntailmentLabel.ENTAILMENT,
+                    entailment_score=0.98,
+                    credibility_score=0.90
+                )
+            ]
+        )
+    ],
+    overall_confidence=0.95
 )
-print(f"Overall Decision: {v2.overall_decision}")
-for cd in v2.claim_decisions:
-    print(f"  Claim [{cd['claim_id']}]: Status={cd['status']} | Action={cd['action']}")
-print()
 
-# Test 3: Finance with numeric mismatch
-print("=" * 70)
-print("TEST 3: Finance — Numeric Revenue Mismatch")
-print("=" * 70)
-v3 = engine.evaluate(
-    user_query="What was Apple's 2023 revenue?",
-    draft_response="Apple reported revenue of $450 billion in FY2023.",
-    detector_output={"hallucination_probability": 0.35, "confidence_score": 0.88},
-    verifier_output={"claim_evidence_pairs": [
-        {"claim": "Apple reported revenue of $450 billion in FY2023",
-         "evidence": "Apple Inc. reported total net revenue of $383.3 billion for fiscal year 2023.",
-         "source": "SEC EDGAR 10-K Filing"}
-    ]},
-    domain="Finance"
+r1 = judge.evaluate(verifier_result=vr1, user_query="Who created Python?", original_response="Guido van Rossum created Python.")
+assert str_val(r1.decision) == "ACCEPT", f"Expected ACCEPT, got {r1.decision}"
+assert r1.correction_request is None
+print(f"✅ PASSED — Decision: {str_val(r1.decision)} | Reason: {r1.reason}")
+
+# TEST 2: Contradicted Claim -> CORRECT
+print("\n[TEST 2] Single Contradicted Claim -> EXPECT CORRECT")
+vr2 = VerifierResult(
+    query_id="Q-102",
+    domain="General Knowledge",
+    claim_reports=[
+        ClaimReport(
+            claim_id="C1",
+            claim_text="Elon Musk created Python in 1999.",
+            verdict=VerdictLabel.CONTRADICTED,
+            support_score=0.05,
+            contradiction_score=0.95,
+            confidence_score=0.95,
+            evidence=[
+                Evidence(
+                    evidence_id="E1",
+                    title="Python History",
+                    source="Wikipedia",
+                    snippet="Python was created by Guido van Rossum in 1991.",
+                    entailment_label=EntailmentLabel.CONTRADICTION,
+                    entailment_score=0.98,
+                    credibility_score=0.90
+                )
+            ]
+        )
+    ],
+    overall_confidence=0.95
 )
-print(f"Overall Decision: {v3.overall_decision}")
-for cd in v3.claim_decisions:
-    print(f"  Claim [{cd['claim_id']}]: Status={cd['status']} | Action={cd['action']}")
-print()
 
-print("=" * 70)
-print("ALL UNIT TESTS COMPLETE")
-print("=" * 70)
+r2 = judge.evaluate(verifier_result=vr2, user_query="Who created Python?", original_response="Elon Musk created Python in 1999.")
+assert str_val(r2.decision) == "CORRECT", f"Expected CORRECT, got {r2.decision}"
+assert r2.correction_request is not None, "CorrectionRequest must be present when decision == CORRECT"
+assert len(r2.correction_request.claims_to_correct) == 1
+assert r2.correction_request.claims_to_correct[0].claim_id == "C1"
+print(f"✅ PASSED — Decision: {str_val(r2.decision)} | Claims to correct: {len(r2.correction_request.claims_to_correct)}")
+
+# TEST 3: Unverified Claim -> Must NOT automatically become CORRECT
+print("\n[TEST 3] Unverified Claim -> Must NOT become CORRECT automatically (UNVERIFIED != FALSE)")
+vr3 = VerifierResult(
+    query_id="Q-103",
+    domain="General Knowledge",
+    claim_reports=[
+        ClaimReport(
+            claim_id="C1",
+            claim_text="An obscure startup was founded on a Tuesday.",
+            verdict=VerdictLabel.UNVERIFIED,
+            support_score=0.1,
+            contradiction_score=0.0,
+            confidence_score=0.4,
+            evidence=[]
+        )
+    ],
+    overall_confidence=0.4
+)
+
+r3 = judge.evaluate(verifier_result=vr3, retry_count=0)
+assert str_val(r3.decision) != "CORRECT", f"UNVERIFIED must NOT result in CORRECT automatically, got {r3.decision}"
+assert str_val(r3.decision) in ["VERIFY_AGAIN", "ACCEPT", "ABSTAIN"]
+print(f"✅ PASSED — Decision for UNVERIFIED claim: {str_val(r3.decision)} (Correctly preserved invariant UNVERIFIED != FALSE)")
+
+# TEST 4: Conflicted Claim -> Safe Decision (VERIFY_AGAIN or ABSTAIN)
+print("\n[TEST 4] Conflicted Claim -> Safe Decision")
+vr4 = VerifierResult(
+    query_id="Q-104",
+    domain="General Knowledge",
+    claim_reports=[
+        ClaimReport(
+            claim_id="C1",
+            claim_text="Event X happened in 2010 vs 2012.",
+            verdict=VerdictLabel.CONFLICTED,
+            support_score=0.5,
+            contradiction_score=0.5,
+            confidence_score=0.5,
+            evidence=[]
+        )
+    ],
+    overall_confidence=0.5
+)
+
+r4 = judge.evaluate(verifier_result=vr4, retry_count=0)
+assert str_val(r4.decision) in ["VERIFY_AGAIN", "ABSTAIN", "REJECT"]
+print(f"✅ PASSED — Decision for CONFLICTED claim: {str_val(r4.decision)}")
+
+# TEST 5: Multiple Claims (Claim 1 Verified, Claim 2 Contradicted, Claim 3 Verified)
+print("\n[TEST 5] Multiple Claims -> Only Claim 2 corrected, Claims 1 and 3 preserved")
+vr5 = VerifierResult(
+    query_id="Q-105",
+    domain="General Knowledge",
+    claim_reports=[
+        ClaimReport(
+            claim_id="C1",
+            claim_text="Python is a high-level programming language.",
+            verdict=VerdictLabel.VERIFIED,
+            support_score=0.95,
+            contradiction_score=0.05,
+            confidence_score=0.95,
+            evidence=[Evidence(evidence_id="E1", title="Python", source="Docs", snippet="Python is high-level.", entailment_label=EntailmentLabel.ENTAILMENT)]
+        ),
+        ClaimReport(
+            claim_id="C2",
+            claim_text="Python was created by Steve Jobs.",
+            verdict=VerdictLabel.CONTRADICTED,
+            support_score=0.05,
+            contradiction_score=0.95,
+            confidence_score=0.95,
+            evidence=[Evidence(evidence_id="E2", title="Python Creator", source="Wikipedia", snippet="Created by Guido van Rossum.", entailment_label=EntailmentLabel.CONTRADICTION)]
+        ),
+        ClaimReport(
+            claim_id="C3",
+            claim_text="Python supports dynamic typing.",
+            verdict=VerdictLabel.VERIFIED,
+            support_score=0.95,
+            contradiction_score=0.05,
+            confidence_score=0.95,
+            evidence=[Evidence(evidence_id="E3", title="Python Types", source="Docs", snippet="Python is dynamically typed.", entailment_label=EntailmentLabel.ENTAILMENT)]
+        )
+    ],
+    overall_confidence=0.95
+)
+
+r5 = judge.evaluate(
+    verifier_result=vr5,
+    user_query="Tell me about Python.",
+    original_response="Python is a high-level programming language. Python was created by Steve Jobs. Python supports dynamic typing."
+)
+
+assert str_val(r5.decision) == "CORRECT"
+cr5 = r5.correction_request
+assert cr5 is not None
+assert len(cr5.claims_to_correct) == 1 and cr5.claims_to_correct[0].claim_id == "C2"
+assert len(cr5.claims_to_preserve) == 2 and set(c.claim_id for c in cr5.claims_to_preserve) == {"C1", "C3"}
+print(f"✅ PASSED — Corrected: {[c.claim_id for c in cr5.claims_to_correct]} | Preserved: {[c.claim_id for c in cr5.claims_to_preserve]}")
+
+# TEST 6: CorrectionRequest Validation
+print("\n[TEST 6] CorrectionRequest Payload Validation")
+assert isinstance(cr5, CorrectionRequest)
+assert cr5.user_query == "Tell me about Python."
+assert cr5.original_response.startswith("Python is a high-level")
+assert len(cr5.trusted_evidence) >= 2
+assert len(cr5.contradictory_evidence) >= 1
+assert "Modify only the 1 claim(s)" in cr5.correction_instructions
+print("✅ PASSED — CorrectionRequest payload conforms strictly to Pydantic schema.")
+
+# TEST 7: Reverification Gate Evaluation
+print("\n[TEST 7] Reverification Gate Evaluation (passed=True vs passed=False)")
+rev_pass = ReverificationResult(passed=True, verifier_result=vr1, remaining_contradictions=0)
+r_pass = judge.evaluate(verifier_result=vr1, reverification_result=rev_pass)
+assert str_val(r_pass.decision) == "ACCEPT", f"Expected ACCEPT for passed reverification, got {r_pass.decision}"
+
+rev_fail = ReverificationResult(passed=False, verifier_result=vr2, remaining_contradictions=1)
+r_fail = judge.evaluate(verifier_result=vr2, reverification_result=rev_fail)
+assert str_val(r_fail.decision) == "REJECT", f"Expected REJECT for failed reverification, got {r_fail.decision}"
+print(f"✅ PASSED — Reverification Pass: {str_val(r_pass.decision)} | Fail: {str_val(r_fail.decision)}")
+
+# TEST 8: Invalid Input / Safe Failure Handling
+print("\n[TEST 8] Safe Failure Handling on Invalid / Null VerifierResult")
+r_null = judge.evaluate(verifier_result=None)
+assert str_val(r_null.decision) == "ABSTAIN"
+assert str_val(r_null.status) == "failed"
+print(f"✅ PASSED — Safe Failure Decision: {str_val(r_null.decision)} | Status: {str_val(r_null.status)}")
+
+# TEST 9: Pydantic Contract Validation
+print("\n[TEST 9] Shared Schema Validation (JudgeResult.model_validate)")
+validated = JudgeResult.model_validate(r5.model_dump())
+assert str_val(validated.decision) == "CORRECT"
+print("✅ PASSED — JudgeResult successfully validated against orchestration.schemas Pydantic contract.")
+
+print("\n" + "=" * 80)
+print("  ALL 9 CANONICAL UNIT TESTS PASSED SUCCESSFULLY (100%)")
+print("=" * 80)
