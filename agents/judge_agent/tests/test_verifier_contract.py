@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 import sys
+import os
 import types
+
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
+agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if agent_dir not in sys.path:
+    sys.path.insert(0, agent_dir)
 
 decision_engine_stub = types.ModuleType("decision_engine")
 decision_engine_stub.DecisionIntelligenceEngine = object
