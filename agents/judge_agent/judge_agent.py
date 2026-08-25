@@ -99,6 +99,18 @@ class JudgeAgent:
         domain_name = normalized_verifier.domain or domain or "General Knowledge"
         policy = self.domain_registry.get_policy(domain_name)
 
+        if str(normalized_verifier.status).lower() in ("failed", "executionstatus.failed"):
+            logger.warning("VerifierResult status indicates failure. Returning ABSTAIN.")
+            return JudgeResult(
+                decision=JudgeDecision.ABSTAIN,
+                severity=SeverityLevel.HIGH,
+                reason="VerifierResult status indicates failure.",
+                explanation="Grounding investigation failed to execute. Unsafe to proceed.",
+                confidence=0.0,
+                correction_request=None,
+                status=ExecutionStatus.FAILED
+            )
+
         # -------------------------------------------------------------------
         # 3. Claim-Level Decision Processing (No NLI re-verification)
         # -------------------------------------------------------------------
