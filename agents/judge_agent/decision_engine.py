@@ -1,6 +1,8 @@
 """
-HalluciGuard - Legacy Decision Engine Compatibility Layer
-Delegates directly to the canonical JudgeAgent implementation in judge_agent.py.
+[DEPRECATED] HalluciGuard — Legacy Decision Engine Compatibility Layer
+This module is DEPRECATED and disconnected from production.
+The single canonical Judge execution path is JudgeAgent in agents/judge_agent/judge_agent.py.
+Delegates directly to JudgeAgent for backward-compatibility only.
 """
 
 from typing import Dict, Any, Optional

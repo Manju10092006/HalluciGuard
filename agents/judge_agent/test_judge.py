@@ -1,6 +1,6 @@
 """
 Comprehensive Unit Test Suite for Canonical JudgeAgent & Phase-1 Contracts.
-Tests all Section 15 requirements.
+Tests all Task 12 requirements (Tests A through H).
 """
 
 import sys
@@ -43,7 +43,7 @@ print("=" * 80)
 def str_val(v):
     return v.value if hasattr(v, "value") else str(v)
 
-# TEST 1: Verified Claim -> ACCEPT
+# TEST 1 (Test A): Verified Claim -> ACCEPT
 print("\n[TEST 1] Single Verified Claim -> EXPECT ACCEPT")
 vr1 = VerifierResult(
     query_id="Q-101",
@@ -77,7 +77,7 @@ assert str_val(r1.decision) == "ACCEPT", f"Expected ACCEPT, got {r1.decision}"
 assert r1.correction_request is None
 print(f"✅ PASSED — Decision: {str_val(r1.decision)} | Reason: {r1.reason}")
 
-# TEST 2: Contradicted Claim -> CORRECT
+# TEST 2 (Test C): Contradicted Claim -> CORRECT
 print("\n[TEST 2] Single Contradicted Claim -> EXPECT CORRECT")
 vr2 = VerifierResult(
     query_id="Q-102",
@@ -113,7 +113,7 @@ assert len(r2.correction_request.claims_to_correct) == 1
 assert r2.correction_request.claims_to_correct[0].claim_id == "C1"
 print(f"✅ PASSED — Decision: {str_val(r2.decision)} | Claims to correct: {len(r2.correction_request.claims_to_correct)}")
 
-# TEST 3: Unverified Claim -> Must NOT automatically become CORRECT
+# TEST 3 (Test D): Unverified Claim -> Must NOT automatically become CORRECT
 print("\n[TEST 3] Unverified Claim -> Must NOT become CORRECT automatically (UNVERIFIED != FALSE)")
 vr3 = VerifierResult(
     query_id="Q-103",
@@ -137,7 +137,7 @@ assert str_val(r3.decision) != "CORRECT", f"UNVERIFIED must NOT result in CORREC
 assert str_val(r3.decision) in ["VERIFY_AGAIN", "ACCEPT", "ABSTAIN"]
 print(f"✅ PASSED — Decision for UNVERIFIED claim: {str_val(r3.decision)} (Correctly preserved invariant UNVERIFIED != FALSE)")
 
-# TEST 4: Conflicted Claim -> Safe Decision (VERIFY_AGAIN or ABSTAIN)
+# TEST 4 (Test E): Conflicted Claim -> Safe Decision (VERIFY_AGAIN or ABSTAIN)
 print("\n[TEST 4] Conflicted Claim -> Safe Decision")
 vr4 = VerifierResult(
     query_id="Q-104",
@@ -160,7 +160,7 @@ r4 = judge.evaluate(verifier_result=vr4, retry_count=0)
 assert str_val(r4.decision) in ["VERIFY_AGAIN", "ABSTAIN", "REJECT"]
 print(f"✅ PASSED — Decision for CONFLICTED claim: {str_val(r4.decision)}")
 
-# TEST 5: Multiple Claims (Claim 1 Verified, Claim 2 Contradicted, Claim 3 Verified)
+# TEST 5 (Test G): Multiple Claims (Claim 1 Verified, Claim 2 Contradicted, Claim 3 Verified)
 print("\n[TEST 5] Multiple Claims -> Only Claim 2 corrected, Claims 1 and 3 preserved")
 vr5 = VerifierResult(
     query_id="Q-105",
@@ -215,12 +215,12 @@ print("\n[TEST 6] CorrectionRequest Payload Validation")
 assert isinstance(cr5, CorrectionRequest)
 assert cr5.user_query == "Tell me about Python."
 assert cr5.original_response.startswith("Python is a high-level")
-assert len(cr5.trusted_evidence) >= 2
-assert len(cr5.contradictory_evidence) >= 1
+assert len(cr5.trusted_evidence) == 2
+assert len(cr5.contradictory_evidence) == 1
 assert "Modify only the 1 claim(s)" in cr5.correction_instructions
 print("✅ PASSED — CorrectionRequest payload conforms strictly to Pydantic schema.")
 
-# TEST 7: Reverification Gate Evaluation
+# TEST 7 (Test H): Reverification Gate Evaluation
 print("\n[TEST 7] Reverification Gate Evaluation (passed=True vs passed=False)")
 rev_pass = ReverificationResult(passed=True, verifier_result=vr1, remaining_contradictions=0)
 r_pass = judge.evaluate(verifier_result=vr1, reverification_result=rev_pass)
@@ -244,6 +244,21 @@ validated = JudgeResult.model_validate(r5.model_dump())
 assert str_val(validated.decision) == "CORRECT"
 print("✅ PASSED — JudgeResult successfully validated against orchestration.schemas Pydantic contract.")
 
+# TEST 10 (Test B): No Independent Verification Invoked
+print("\n[TEST 10] Task 12 Test B — No Independent Verification Invoked")
+assert not hasattr(judge, "nli_engine")
+assert not hasattr(judge, "retriever")
+print("✅ PASSED — Judge performs decision logic without running NLI or web retrieval.")
+
+# TEST 11 (Test F): Evidence Separation Validation
+print("\n[TEST 11] Task 12 Test F — Evidence Separation Validation")
+trusted_ids = [e.evidence_id for e in cr5.trusted_evidence]
+contradictory_ids = [e.evidence_id for e in cr5.contradictory_evidence]
+assert "E2" not in trusted_ids
+assert "E2" in contradictory_ids
+assert set(trusted_ids) == {"E1", "E3"}
+print("✅ PASSED — trusted_evidence contains only preserved claim evidence (E1, E3); contradictory_evidence contains only E2.")
+
 print("\n" + "=" * 80)
-print("  ALL 9 CANONICAL UNIT TESTS PASSED SUCCESSFULLY (100%)")
+print("  ALL 11 CANONICAL UNIT TESTS PASSED SUCCESSFULLY (100%)")
 print("=" * 80)
