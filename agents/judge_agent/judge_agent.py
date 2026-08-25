@@ -17,8 +17,15 @@ import time
 import logging
 from typing import Dict, List, Any, Optional, Union
 
-from config import JudgeConfig, DEFAULT_CONFIG
-from domain_policies import DomainPolicyRegistry, DEFAULT_DOMAIN_REGISTRY, DomainPolicy
+try:
+    from agents.judge_agent.config import JudgeConfig, DEFAULT_CONFIG
+except ImportError:
+    from config import JudgeConfig, DEFAULT_CONFIG
+
+try:
+    from agents.judge_agent.domain_policies import DomainPolicyRegistry, DEFAULT_DOMAIN_REGISTRY, DomainPolicy
+except ImportError:
+    from domain_policies import DomainPolicyRegistry, DEFAULT_DOMAIN_REGISTRY, DomainPolicy
 from orchestration.schemas import (
     JudgeResult,
     CorrectionRequest,

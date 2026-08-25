@@ -4,7 +4,10 @@ Delegates directly to the canonical JudgeAgent implementation in judge_agent.py.
 """
 
 from typing import Dict, Any, Optional, Union
-from judge_agent import JudgeAgent
+try:
+    from agents.judge_agent.judge_agent import JudgeAgent
+except ImportError:
+    from judge_agent import JudgeAgent
 from orchestration.schemas import JudgeResult, CorrectionRequest, ReverificationResult
 
 
