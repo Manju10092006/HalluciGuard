@@ -442,6 +442,49 @@ class JudgeAgent:
 
         return None
 
+    @staticmethod
+    def _normalize_verifier_output(verifier_output: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Legacy static normalization helper for claim_evidence or claim_evidence_pairs.
+        """
+        if not verifier_output or not isinstance(verifier_output, dict):
+            return []
+
+        if "claim_evidence_pairs" in verifier_output:
+            return verifier_output["claim_evidence_pairs"]
+
+        if "claim_evidence" in verifier_output:
+            pairs = []
+            for item in verifier_output["claim_evidence"]:
+                claim_text = item.get("claim_text", item.get("claim", ""))
+                verdict = item.get("verdict", "")
+                trust_score = item.get("trust_score", 0.0)
+                evidence_list = item.get("evidence", [])
+
+                if not evidence_list:
+                    continue
+
+                for ev in evidence_list:
+                    if isinstance(ev, dict):
+                        snippet = ev.get("snippet", ev.get("evidence_snippet", ""))
+                        source = ev.get("source", "unknown")
+                        pub_date = ev.get("publication_date")
+                        entail_score = ev.get("entailment_score", 0.8)
+                        cred_score = ev.get("credibility_score", 0.8)
+
+                        pairs.append({
+                            "claim": claim_text,
+                            "evidence": snippet,
+                            "source": source,
+                            "publication_date": pub_date,
+                            "verifier_verdict": verdict,
+                            "verifier_trust_score": trust_score,
+                            "evidence_confidence": float(entail_score * cred_score)
+                        })
+            return pairs
+
+        return []
+
     def _normalize_detector_result(
         self,
         detector_result: Optional[Union[DetectorResult, Dict[str, Any]]]

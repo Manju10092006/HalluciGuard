@@ -3,9 +3,13 @@ HalluciGuard Judge Agent - Enterprise Decision Intelligence Dashboard
 Real-time interactive web dashboard for the AI Operating System.
 """
 
-import json
 import sys
 import os
+import json
+
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, render_template_string, request, jsonify
@@ -537,36 +541,47 @@ def index():
 @app.route("/evaluate", methods=["POST"])
 def evaluate():
     data = request.get_json()
-    verdict = engine.evaluate(
+    res = engine.evaluate(
         user_query=data.get("user_query", ""),
         draft_response=data.get("draft_response", ""),
         detector_output=data.get("detector_output", {}),
         verifier_output=data.get("verifier_output", {}),
         domain=data.get("domain", ""),
-        memory_context=data.get("memory_context"),
         retry_count=data.get("retry_count", 0)
     )
-    return jsonify({
-        "decision": verdict.decision.value,
-        "overall_decision": verdict.overall_decision,
-        "severity": verdict.severity.value,
-        "reasoning_chain": verdict.reasoning_chain,
-        "workflow_action": verdict.workflow_action,
-        "risk_assessment": verdict.risk_assessment,
-        "evidence_governance": verdict.evidence_governance,
-        "coverage": verdict.coverage,
-        "conflicts": verdict.conflicts,
-        "consensus": verdict.consensus,
-        "runtime_health": verdict.runtime_health,
-        "memory_insight": verdict.memory_insight,
-        "audit_record": verdict.audit_record,
-        "claim_verdicts": verdict.claim_verdicts,
-        "claim_decisions": verdict.claim_decisions,
-        "correction_required": verdict.correction_required,
-        "re_verification_required": verdict.re_verification_required,
-        "detector_signal": verdict.detector_signal,
-        "alternatives_rejected": verdict.alternatives_rejected
-    })
+    
+    if hasattr(res, "model_dump"):
+        dump = res.model_dump()
+        decision_val = dump.get("decision", "ABSTAIN")
+        severity_val = dump.get("severity", "LOW")
+        corr_req = dump.get("correction_request")
+        
+        return jsonify({
+            "decision": decision_val,
+            "overall_decision": decision_val,
+            "severity": severity_val,
+            "reasoning_chain": [res.reason, res.explanation],
+            "workflow_action": {
+                "type": "REQUEST_CORRECTION" if decision_val == "CORRECT" else "ACCEPT_RELEASE",
+                "target": "CORRECTOR" if decision_val == "CORRECT" else "USER",
+                "instructions": corr_req.get("correction_instructions", "") if corr_req else ""
+            },
+            "risk_assessment": {"level": severity_val, "safe_to_release": decision_val == "ACCEPT"},
+            "evidence_governance": {"quality": "AUTHORITATIVE", "sufficient": True, "reasoning": res.explanation, "concerns": []},
+            "coverage": {},
+            "conflicts": [],
+            "consensus": {},
+            "runtime_health": {"status": res.status},
+            "memory_insight": {},
+            "audit_record": {"decision": decision_val, "reason": res.reason},
+            "claim_verdicts": [],
+            "claim_decisions": corr_req.get("claims_to_correct", []) if corr_req else [],
+            "correction_required": decision_val == "CORRECT",
+            "re_verification_required": decision_val == "VERIFY_AGAIN",
+            "detector_signal": data.get("detector_output", {}),
+            "alternatives_rejected": {}
+        })
+    return jsonify(res)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
