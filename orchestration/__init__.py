@@ -23,6 +23,18 @@ from .state import HalluciGuardState
 
 
 def __getattr__(name: str):
+    """
+    Lazy-load graph functions to avoid circular imports and improve startup time.
+
+    Args:
+        name: The attribute name being accessed.
+
+    Returns:
+        The requested graph function if it exists in the lazy-loading set.
+
+    Raises:
+        AttributeError: If the requested attribute is not available in this module.
+    """
     if name in {"build_verification_graph", "get_verification_graph", "run_verification"}:
         from .graph import (
             build_verification_graph,

@@ -22,6 +22,15 @@ from .state import (
 
 
 def _dump(value: Any) -> Any:
+    """
+    Recursively serialize Pydantic models and dataclasses to plain dictionaries.
+
+    Args:
+        value: The value to serialize (Pydantic model, dataclass, dict, list, or primitive).
+
+    Returns:
+        A serialized dictionary, list, or primitive value suitable for JSON encoding.
+    """
     if hasattr(value, "model_dump"):
         return value.model_dump()
     if is_dataclass(value):
@@ -36,6 +45,18 @@ def _dump(value: Any) -> Any:
 def _failure_update(
     state: HalluciGuardState, node: str, exc: BaseException, *, retryable: bool = False
 ) -> dict[str, Any]:
+    """
+    Generate a standardized state update dictionary for agent node failures.
+
+    Args:
+        state: The current pipeline state.
+        node: The name of the agent node that failed.
+        exc: The exception that caused the failure.
+        retryable: Whether the failure is retryable (True) or terminal (False).
+
+    Returns:
+        A dictionary with error tracking, bus messages, and routing information for the failed node.
+    """
     bus = add_bus_message(
         state,
         source_agent=node,
@@ -151,6 +172,15 @@ async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 def _generate_route(state: HalluciGuardState) -> str:
+    """
+    Determine the next node after generation based on state conditions.
+
+    Args:
+        state: The current pipeline state.
+
+    Returns:
+        The name of the next node: "human_escalation" if generation failed or "detector" otherwise.
+    """
     if state.get("route") == "error" or not state.get("llm_response"):
         return "human_escalation"
     return "detector"
@@ -238,12 +268,28 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 def _detector_route(state: HalluciGuardState) -> str:
+    """
+    Determine the next node after detection based on risk assessment.
+
+    Args:
+        state: The current pipeline state.
+
+    Returns:
+        The name of the next node: "human_escalation" on error, "verifier" if verification is needed,
+        or "accept" if the response is low-risk.
+    """
     if state.get("route") == "error":
         return "human_escalation"
     return "verifier" if state.get("route") == "verify" else "accept"
 
 
 def _verifier_imports():
+    """
+    Dynamically import verifier agent classes by injecting the verifier directory into sys.path.
+
+    Returns:
+        A tuple of (VerificationPipeline, SuspiciousClaim, VerifierInputV2) classes from the verifier agent.
+    """
     verifier_dir = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
     )
@@ -258,6 +304,17 @@ def _verifier_imports():
 def _build_canonical_verifier_result(
     verifier: dict[str, Any], query_id: str, domain: str
 ):
+    """
+    Transform raw verifier output into the canonical VerifierResult contract schema.
+
+    Args:
+        verifier: Raw dictionary output from the verifier agent pipeline.
+        query_id: The unique query identifier for this verification request.
+        domain: The verification domain (e.g., general, biomedical, finance).
+
+    Returns:
+        A canonical VerifierResult instance with normalized claim reports and evidence.
+    """
     from orchestration.schemas import (
         VerifierResult as CanonicalVerifierResult,
         ClaimReport as CanonicalClaimReport,
@@ -471,6 +528,15 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 def _verifier_route(state: HalluciGuardState) -> str:
+    """
+    Determine the next node after verification based on execution status.
+
+    Args:
+        state: The current pipeline state.
+
+    Returns:
+        The name of the next node: "human_escalation" if verification failed, or "judge" otherwise.
+    """
     if state.get("route") == "error" or state.get("verification_status") == "agent_failed":
         return "human_escalation"
     return "judge"
@@ -776,6 +842,21 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 def _judge_route(state: HalluciGuardState) -> str:
+    """
+    Determine the next node after judge arbitration based on the judge's decision.
+
+    Args:
+        state: The current pipeline state containing the judge decision.
+
+    Returns:
+        The name of the next node based on the judge decision:
+        - ACCEPT: "memory"
+        - CORRECT: "corrector" (if retries remain and corrector is active) or "reject"/"memory"
+        - VERIFY_AGAIN: "verifier" (if retries remain) or "human_escalation"
+        - REJECT: "reject"
+        - ABSTAIN: "human_escalation"
+        - error: "human_escalation"
+    """
     if state.get("route") == "error":
         return "human_escalation"
     decision = str(state.get("judge_decision", "ACCEPT")).upper()
@@ -945,6 +1026,15 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 def _accept_node(state: HalluciGuardState) -> dict[str, Any]:
+    """
+    Terminal node that accepts the response without further verification or correction.
+
+    Args:
+        state: The current pipeline state.
+
+    Returns:
+        A state update dictionary marking the response as accepted.
+    """
     return {
         "final_response": state.get("llm_response", ""),
         "terminal_status": "accepted",
@@ -957,6 +1047,15 @@ def _accept_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 def _reject_node(state: HalluciGuardState) -> dict[str, Any]:
+    """
+    Terminal node that rejects the response due to unresolvable contradictions or failures.
+
+    Args:
+        state: The current pipeline state.
+
+    Returns:
+        A state update dictionary marking the response as rejected with a fallback message.
+    """
     msg = "The draft response could not be safely verified and has been rejected."
     return {
         "final_response": msg,
@@ -970,6 +1069,15 @@ def _reject_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 def _human_escalation_node(state: HalluciGuardState) -> dict[str, Any]:
+    """
+    Terminal node that escalates the response to human review due to errors or judge abstention.
+
+    Args:
+        state: The current pipeline state.
+
+    Returns:
+        A state update dictionary marking the response for human review with a fallback message.
+    """
     msg = "This response requires human review before it can be delivered."
     return {
         "final_response": msg,

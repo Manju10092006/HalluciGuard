@@ -14,6 +14,15 @@ from orchestration.runtime_validation import validate_orchestration_startup
 
 
 async def main() -> None:
+    """
+    Run end-to-end verification tests for the orchestration pipeline.
+
+    Tests two scenarios:
+    1. A hallucinated response (Tokyo as capital of France)
+    2. A correct response (Paris as capital of France)
+
+    Outputs runtime validation, trace execution path, and agent results for each test case.
+    """
     validation = validate_orchestration_startup()
     print("RUNTIME VALIDATION:", json.dumps(validation, indent=2, default=str))
     cases = [
