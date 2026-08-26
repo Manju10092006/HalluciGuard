@@ -67,7 +67,8 @@ class JudgeAgent:
         draft_response: str = "",
         domain: str = "",
         reverification_result: Optional[Union[ReverificationResult, Dict[str, Any]]] = None,
-        retry_count: int = 0
+        retry_count: int = 0,
+        correction_attempt_count: int = 0
     ) -> JudgeResult:
         """
         Main decision arbitration entry point.
@@ -78,7 +79,10 @@ class JudgeAgent:
         # 1. Post-Correction Re-verification Evaluation (Task 10)
         # -------------------------------------------------------------------
         if reverification_result is not None:
-            return self._evaluate_reverification(reverification_result, user_query, response_text)
+            effective_corr_retries = correction_attempt_count if correction_attempt_count > 0 else retry_count
+            return self._evaluate_reverification(
+                reverification_result, user_query, response_text, retry_count=effective_corr_retries
+            )
 
         # -------------------------------------------------------------------
         # 2. Input Normalization & Controlled Failure Handling (Task 2 & 3)
@@ -259,11 +263,13 @@ class JudgeAgent:
         self,
         reverification_result: Union[ReverificationResult, Dict[str, Any]],
         user_query: str,
-        response_text: str
+        response_text: str,
+        retry_count: int = 0,
     ) -> JudgeResult:
         """
-        Phase J5 — Evaluates post-correction ReverificationResult (Task 10).
+        Phase J5 — Evaluates post-correction ReverificationResult (Task 10 & Step 9 bounded loop).
         """
+        rev_res: Optional[ReverificationResult] = None
         if isinstance(reverification_result, dict):
             try:
                 rev_res = ReverificationResult.model_validate(reverification_result)
@@ -280,20 +286,30 @@ class JudgeAgent:
                         correction_request=None,
                         status=ExecutionStatus.COMPLETED
                     )
+                elif retry_count < self.config.max_verification_retries:
+                    return JudgeResult(
+                        decision=JudgeDecision.CORRECT,
+                        severity=SeverityLevel.HIGH,
+                        reason=f"Post-correction re-verification failed with {rem_cnt} remaining contradiction(s). Triggering correction retry pass {retry_count + 1}.",
+                        explanation=f"Re-verification retained factual contradiction(s). Retrying bounded correction (attempt {retry_count + 1}).",
+                        confidence=0.40,
+                        correction_request=None,
+                        status=ExecutionStatus.COMPLETED
+                    )
                 else:
                     return JudgeResult(
                         decision=JudgeDecision.REJECT,
                         severity=SeverityLevel.HIGH,
-                        reason="Post-correction re-verification failed with remaining contradictions.",
-                        explanation="Correction introduced or retained factual contradictions. Rolling back.",
-                        confidence=0.30,
+                        reason=f"Post-correction re-verification failed with {rem_cnt} remaining contradiction(s) and retries exhausted.",
+                        explanation="Correction retained factual contradictions and retry budget exhausted. Rolling back.",
+                        confidence=0.20,
                         correction_request=None,
                         status=ExecutionStatus.COMPLETED
                     )
-        else:
+        elif isinstance(reverification_result, ReverificationResult):
             rev_res = reverification_result
 
-        if rev_res.passed and rev_res.remaining_contradictions == 0:
+        if rev_res is not None and rev_res.passed and rev_res.remaining_contradictions == 0:
             return JudgeResult(
                 decision=JudgeDecision.ACCEPT,
                 severity=SeverityLevel.LOW,
@@ -303,12 +319,51 @@ class JudgeAgent:
                 correction_request=None,
                 status=ExecutionStatus.COMPLETED
             )
+
+        rem_count = rev_res.remaining_contradictions if rev_res else 1
+
+        if retry_count < self.config.max_verification_retries:
+            corr_req = None
+            if rev_res and hasattr(rev_res, "verifier_result") and rev_res.verifier_result:
+                v_res = rev_res.verifier_result
+                claims_to_correct = []
+                claims_to_preserve = []
+                trusted_ev = []
+                contra_ev = []
+                for cr in getattr(v_res, "claim_reports", []):
+                    verdict_str = str(getattr(cr, "verdict", "")).lower()
+                    if "contradict" in verdict_str:
+                        claims_to_correct.append(cr)
+                        contra_ev.extend(getattr(cr, "evidence", []))
+                    elif "verif" in verdict_str and "unverif" not in verdict_str:
+                        claims_to_preserve.append(cr)
+                        trusted_ev.extend(getattr(cr, "evidence", []))
+                if claims_to_correct:
+                    corr_req = CorrectionRequest(
+                        execution_id=f"exec-retry-{retry_count + 1}",
+                        user_query=user_query,
+                        original_response=response_text,
+                        claims_to_correct=claims_to_correct,
+                        claims_to_preserve=claims_to_preserve,
+                        trusted_evidence=trusted_ev,
+                        contradictory_evidence=contra_ev,
+                        correction_instructions=f"Re-verification attempt {retry_count + 1}: repair remaining contradicted claim(s).",
+                    )
+            return JudgeResult(
+                decision=JudgeDecision.CORRECT if corr_req else JudgeDecision.REJECT,
+                severity=SeverityLevel.HIGH,
+                reason=f"Post-correction re-verification failed with {rem_count} remaining contradiction(s). Triggering correction retry pass {retry_count + 1}.",
+                explanation=f"Re-verification retained factual contradiction(s). Retrying bounded correction (attempt {retry_count + 1}/{self.config.max_verification_retries}).",
+                confidence=0.40,
+                correction_request=corr_req,
+                status=ExecutionStatus.COMPLETED
+            )
         else:
             return JudgeResult(
                 decision=JudgeDecision.REJECT,
                 severity=SeverityLevel.HIGH,
-                reason=f"Post-correction re-verification failed with {rev_res.remaining_contradictions} remaining contradiction(s).",
-                explanation="Correction failed re-verification gate. Rolling back to safe response.",
+                reason=f"Post-correction re-verification failed with {rem_count} remaining contradiction(s) and retry budget exhausted.",
+                explanation="Correction failed re-verification gate and retries exhausted. Rolling back to safe response.",
                 confidence=0.20,
                 correction_request=None,
                 status=ExecutionStatus.COMPLETED
