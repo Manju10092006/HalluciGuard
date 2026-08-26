@@ -394,6 +394,7 @@ def build_target_prompt(
     kept_evidence = supporting
 
     def render(active_evidence: Sequence[BoundEvidence]) -> Tuple[str, str, str]:
+        """Render the prompt sections with the given active evidence and return prompt text, evidence IDs used, and excluded IDs."""
         payloads = [
             target.original_text,
             _claims_block(grounded),

@@ -24,6 +24,7 @@ from orchestration.schemas import (
 
 
 class Decision(enum.Enum):
+    """Judge decision outcomes for a verification result."""
     ACCEPT = "ACCEPT"
     CORRECT = "CORRECT"
     VERIFY_AGAIN = "VERIFY_AGAIN"
@@ -33,6 +34,7 @@ class Decision(enum.Enum):
 
 
 class ClaimStatus(enum.Enum):
+    """Status classification for individual claims."""
     VERIFIED = "VERIFIED"
     CONTRADICTED = "CONTRADICTED"
     UNVERIFIED = "UNVERIFIED"
@@ -40,6 +42,7 @@ class ClaimStatus(enum.Enum):
 
 
 class ClaimAction(enum.Enum):
+    """Actions that can be taken on a claim."""
     ACCEPT = "ACCEPT"
     CORRECT = "CORRECT"
     RE_VERIFY = "RE_VERIFY"
@@ -47,6 +50,7 @@ class ClaimAction(enum.Enum):
 
 
 class Severity(enum.Enum):
+    """Severity levels for risk assessment."""
     CRITICAL = "CRITICAL"
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
@@ -55,6 +59,7 @@ class Severity(enum.Enum):
 
 
 class EvidenceQuality(enum.Enum):
+    """Quality assessment levels for evidence."""
     AUTHORITATIVE = "AUTHORITATIVE"
     STRONG = "STRONG"
     MODERATE = "MODERATE"
@@ -64,6 +69,7 @@ class EvidenceQuality(enum.Enum):
 
 
 class SystemHealth(enum.Enum):
+    """Overall system health status."""
     HEALTHY = "HEALTHY"
     DEGRADED = "DEGRADED"
     PARTIAL_FAILURE = "PARTIAL_FAILURE"
@@ -71,6 +77,7 @@ class SystemHealth(enum.Enum):
 
 
 class SourceTier(enum.Enum):
+    """Reliability tier classification for information sources."""
     OFFICIAL_STANDARD = "OFFICIAL_STANDARD"
     PEER_REVIEWED = "PEER_REVIEWED"
     ENTERPRISE_VENDOR = "ENTERPRISE_VENDOR"
@@ -80,6 +87,7 @@ class SourceTier(enum.Enum):
 
 
 class ConflictType(enum.Enum):
+    """Types of conflicts that can be detected in evidence."""
     DIRECT_REFUTATION = "DIRECT_REFUTATION"
     NUMERIC_MISMATCH = "NUMERIC_MISMATCH"
     TEMPORAL_MISMATCH = "TEMPORAL_MISMATCH"
@@ -91,6 +99,7 @@ class ConflictType(enum.Enum):
 
 @dataclass
 class JudgeConfig:
+    """Configuration settings for the Judge Agent."""
     supported_domains: List[str] = field(default_factory=lambda: [
         "Healthcare", "Cybersecurity", "Finance", "Law",
         "Scientific Research", "General Knowledge", "Entertainment"
@@ -105,6 +114,7 @@ class JudgeConfig:
 
     @property
     def default_nli_model(self) -> str:
+        """Return the configured NLI model name."""
         return self.nli_model
 
 
