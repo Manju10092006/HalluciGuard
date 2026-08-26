@@ -12,6 +12,7 @@ logger = logging.getLogger("HalluciGuard.NLIEngine")
 
 
 class NLIEngine:
+    """Natural Language Inference engine for scoring entailment between evidence and claims."""
     def __init__(self, model_name: str = "cross-encoder/nli-deberta-v3-base", use_hf: bool = True):
         self.model_name = model_name
         self.pipeline = None
@@ -30,6 +31,7 @@ class NLIEngine:
             self.is_loaded = False
 
     def predict(self, evidence: str, claim: str) -> Dict[str, float]:
+        """Predict entailment scores between evidence and claim using the loaded NLI model."""
         if not evidence or not claim:
             return {"entailment": 0.0, "neutral": 1.0, "contradiction": 0.0}
         if self.is_loaded and self.pipeline:
@@ -48,6 +50,7 @@ class NLIEngine:
         return self._heuristic_nli(evidence, claim)
 
     def batch_predict(self, pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Predict entailment scores for a batch of evidence-claim pairs."""
         results = []
         for p in pairs:
             nli = self.predict(p.get("evidence", ""), p.get("claim", ""))

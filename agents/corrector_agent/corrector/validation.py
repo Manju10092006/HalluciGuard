@@ -149,6 +149,7 @@ class EntailmentScorer(Protocol):
     """
 
     def score(self, premise: str, hypothesis: str) -> Optional[EntailmentJudgement]:
+        """Score entailment between premise and hypothesis, returning None if unavailable."""
         ...
 
 
@@ -162,6 +163,7 @@ class NullEntailmentScorer:
     """
 
     def score(self, premise: str, hypothesis: str) -> Optional[EntailmentJudgement]:
+        """Always return None to indicate entailment scoring is unavailable."""
         return None
 
 

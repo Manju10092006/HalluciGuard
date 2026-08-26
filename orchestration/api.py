@@ -28,6 +28,7 @@ from .runtime_validation import validate_orchestration_startup
 
 
 class VerificationRequest(BaseModel):
+    """Request model for the verification endpoint."""
     user_query: str = Field(min_length=1, description="The user's prompt or question to verify.")
     generation_mode: Literal["normal", "stress_test"] = Field(default="normal", description="'normal' or 'stress_test'.")
     llm_response: Optional[str] = Field(default=None, description="Optional pre-supplied draft response.")
@@ -37,21 +38,25 @@ class VerificationRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
+    """Request model for user registration."""
     email: str = Field(min_length=3, description="User email address")
     password: str = Field(min_length=6, description="User password (min 6 characters)")
     name: Optional[str] = Field(default=None, description="User display name")
 
 
 class LoginRequest(BaseModel):
+    """Request model for user login."""
     email: str = Field(min_length=3, description="User email address")
     password: str = Field(min_length=1, description="User password")
 
 
 class GoogleAuthRequest(BaseModel):
+    """Request model for Google OAuth authentication."""
     credential: str = Field(min_length=10, description="Google OAuth ID Token JWT")
 
 
 class SaveHistoryRequest(BaseModel):
+    """Request model for saving verification history."""
     query: str = Field(min_length=1, description="User query text")
     result: Dict[str, Any] = Field(description="Verification result JSON payload")
 
@@ -100,6 +105,7 @@ def _require_auth_user(authorization: Optional[str] = Header(None)) -> Dict[str,
 
 @app.post("/auth/register")
 async def auth_register(req: RegisterRequest) -> Dict[str, Any]:
+    """Register a new user account and return an access token."""
     try:
         user_dict, token = register_user(
             email=req.email,
@@ -120,6 +126,7 @@ async def auth_register(req: RegisterRequest) -> Dict[str, Any]:
 
 @app.post("/auth/login")
 async def auth_login(req: LoginRequest) -> Dict[str, Any]:
+    """Authenticate a user with email and password and return an access token."""
     try:
         user_dict, token = authenticate_user(
             email=req.email,
@@ -140,6 +147,7 @@ async def auth_login(req: LoginRequest) -> Dict[str, Any]:
 @app.post("/auth/google")
 @app.post("/api/v1/auth/google")
 async def auth_google(req: GoogleAuthRequest) -> Dict[str, Any]:
+    """Authenticate a user via Google OAuth and return an access token."""
     try:
         user_dict, token = authenticate_google_user(req.credential)
         return {
@@ -156,6 +164,7 @@ async def auth_google(req: GoogleAuthRequest) -> Dict[str, Any]:
 
 @app.get("/auth/me")
 async def auth_me(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    """Get the currently authenticated user's information."""
     user = _require_auth_user(authorization)
     return {
         "status": "success",
@@ -165,6 +174,7 @@ async def auth_me(authorization: Optional[str] = Header(None)) -> Dict[str, Any]
 
 @app.post("/auth/logout")
 async def auth_logout() -> Dict[str, Any]:
+    """Log out the current user (client-side token removal)."""
     return {"status": "success", "message": "Successfully signed out"}
 
 
@@ -175,6 +185,7 @@ async def get_history(
     limit: int = 50,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """Get the authenticated user's verification history."""
     user = _require_auth_user(authorization)
     items = get_user_history(user["id"], limit=limit)
     return {"status": "success", "history": items}
@@ -185,6 +196,7 @@ async def save_history(
     req: SaveHistoryRequest,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """Save a verification result to the authenticated user's history."""
     user = _require_auth_user(authorization)
     saved = save_user_history(user["id"], req.query, req.result)
     return {"status": "success", "record": saved}
@@ -195,6 +207,7 @@ async def delete_history(
     history_id: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """Delete verification history for the authenticated user."""
     user = _require_auth_user(authorization)
     clear_user_history(user["id"], history_id=history_id)
     return {"status": "success", "message": "History cleared"}
@@ -204,6 +217,7 @@ async def delete_history(
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
+    """Root endpoint providing API information and available endpoints."""
     return {
         "service": "HalluciGuard Verification Engine API",
         "status": "online",
@@ -223,6 +237,7 @@ async def root() -> Dict[str, Any]:
 
 @app.get("/health")
 async def health(deep: bool = False) -> Dict[str, Any]:
+    """Health check endpoint with optional deep component validation."""
     if not deep:
         return {
             "status": "healthy",
@@ -335,6 +350,7 @@ async def verify(
     request: VerificationRequest,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """Main verification endpoint that orchestrates the full pipeline."""
     return await _execute_verification(request, authorization=authorization)
 
 
@@ -343,4 +359,5 @@ async def verify_v1(
     request: VerificationRequest,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """API v1 verification endpoint (alias for /verify)."""
     return await _execute_verification(request, authorization=authorization)

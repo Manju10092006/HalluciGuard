@@ -23,6 +23,7 @@ TerminalStatus = Literal[
 
 
 class AgentError(TypedDict, total=False):
+    """Typed dictionary representing an agent execution error."""
     node: str
     type: str
     message: str
@@ -31,6 +32,7 @@ class AgentError(TypedDict, total=False):
 
 
 class ExecutionEvent(TypedDict, total=False):
+    """Typed dictionary representing a single execution event in the trace."""
     execution_id: str
     node: str
     status: AgentStatus
@@ -41,6 +43,7 @@ class ExecutionEvent(TypedDict, total=False):
 
 
 class HalluciGuardState(TypedDict, total=False):
+    """Main state dictionary for the HalluciGuard verification pipeline."""
     # Request / Base LLM draft
     execution_id: str
     request_id: str
@@ -106,14 +109,17 @@ class HalluciGuardState(TypedDict, total=False):
 
 
 def utc_now() -> str:
+    """Return the current UTC timestamp as an ISO format string."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def start_timer() -> float:
+    """Start a performance timer and return the start time."""
     return time.perf_counter()
 
 
 def elapsed_ms(start: float) -> int:
+    """Calculate elapsed time in milliseconds from a start time."""
     return int((time.perf_counter() - start) * 1000)
 
 
@@ -125,6 +131,7 @@ def add_trace(
     latency_ms: int | None = None,
     **details: Any,
 ) -> list[ExecutionEvent]:
+    """Add an execution event to the state's trace and return the updated trace list."""
     trace = list(state.get("trace", []))
     event: ExecutionEvent = {
         "execution_id": state.get("execution_id", state.get("request_id", "")),
@@ -143,6 +150,7 @@ def add_trace(
 def add_error(
     state: HalluciGuardState, node: str, exc: BaseException, *, retryable: bool = False
 ) -> list[AgentError]:
+    """Add an error event to the state's error list and return the updated list."""
     errors = list(state.get("errors", []))
     errors.append(
         {
@@ -164,6 +172,7 @@ def add_bus_message(
     payload: dict[str, Any],
     status: str = "processed",
 ) -> list[dict[str, Any]]:
+    """Add an inter-agent bus message to the state and return the updated bus message list."""
     bus_messages = list(state.get("inter_agent_bus", []))
     bus_messages.append(
         {

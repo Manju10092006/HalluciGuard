@@ -710,6 +710,7 @@ def _human_escalation_node(state: HalluciGuardState) -> dict[str, Any]:
 def build_verification_graph(
     node_overrides: dict[str, Callable[..., Any]] | None = None,
 ):
+    """Build and compile the LangGraph verification pipeline with all nodes and edges."""
     nodes = {
         "generate": _generate_node,
         "detector": _detector_node,
@@ -765,6 +766,7 @@ _GRAPH = None
 
 
 def get_verification_graph():
+    """Get the singleton verification graph instance, building it if necessary."""
     global _GRAPH
     if _GRAPH is None:
         _GRAPH = build_verification_graph()
@@ -779,6 +781,7 @@ async def run_verification(
     generation_mode: str = "normal",
     conversation_history: list[dict[str, str]] | None = None,
 ) -> HalluciGuardState:
+    """Run the complete verification pipeline and return the final state."""
     execution_id = str(uuid.uuid4())
     now = utc_now()
     active_agents = ["base_llm", "detector", "verifier", "judge", "memory"]
