@@ -42,12 +42,20 @@ async def test_safe_response_reaches_accept_directly_without_verifier_memory_or_
 
 
 @pytest.mark.asyncio
-async def test_high_risk_routes_verifier_then_memory_without_judge_or_corrector():
+async def test_high_risk_routes_verifier_then_judge_then_memory():
     async def verifier(s):
         return {
             "verifier": {"claim_evidence": []},
             "judge_pairs": [],
+            "route": "judge",
             "trace": add_trace(s, "verifier", "completed"),
+        }
+
+    async def judge(s):
+        return {
+            "judge_decision": "ACCEPT",
+            "route": "memory",
+            "trace": add_trace(s, "judge", "completed"),
         }
 
     async def memory(s):
@@ -60,6 +68,7 @@ async def test_high_risk_routes_verifier_then_memory_without_judge_or_corrector(
                 "trace": add_trace(s, "detector", "completed"),
             },
             "verifier": verifier,
+            "judge": judge,
             "memory": memory,
         }
     )
@@ -67,8 +76,8 @@ async def test_high_risk_routes_verifier_then_memory_without_judge_or_corrector(
     nodes = [e["node"] for e in result["trace"]]
     assert "detector" in nodes
     assert "verifier" in nodes
+    assert "judge" in nodes
     assert "memory" in nodes
-    assert "judge" not in nodes
     assert "corrector" not in nodes
 
 

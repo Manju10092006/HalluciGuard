@@ -13,6 +13,7 @@ from decision_policies import DomainPolicy
 
 @dataclass
 class ConflictReport:
+    """Report of detected conflicts between claims and evidence."""
     has_conflict: bool
     conflict_type: ConflictType
     affected_claim: str
@@ -23,11 +24,13 @@ class ConflictReport:
 
 
 class ConflictResolver:
+    """Analyzes and resolves conflicts between claims and evidence."""
     def analyze_conflicts(
         self,
         evaluated_pairs: List[Dict[str, Any]],
         domain_policy: DomainPolicy
     ) -> List[ConflictReport]:
+        """Analyze evidence-claim pairs for conflicts and return conflict reports."""
         reports = []
         for pair in evaluated_pairs:
             claim = pair.get("claim", "")

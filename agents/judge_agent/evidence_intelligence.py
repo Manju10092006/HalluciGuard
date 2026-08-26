@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Tuple
 from config import JudgeConfig, DEFAULT_CONFIG
 
 class EvidenceIntelligenceEngine:
+    """Intelligence engine for evidence analysis and scoring."""
     def __init__(self, config: JudgeConfig = DEFAULT_CONFIG):
         self.config = config
 

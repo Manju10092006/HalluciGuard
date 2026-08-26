@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 
 @dataclass
 class MemoryInsight:
+    """Insight retrieved from the memory agent."""
     has_historical_context: bool
     known_hallucination_pattern: bool
     source_historically_reliable: bool
@@ -19,12 +20,14 @@ class MemoryInsight:
 
 
 class MemoryIntelligenceLayer:
+    """Intelligence layer for querying the memory agent."""
     def query_memory(
         self,
         claim: str,
         sources: List[str],
         memory_context: Optional[Dict[str, Any]] = None
     ) -> MemoryInsight:
+        """Query the memory agent for relevant insights."""
         if not memory_context:
             return MemoryInsight(
                 has_historical_context=False, known_hallucination_pattern=False,

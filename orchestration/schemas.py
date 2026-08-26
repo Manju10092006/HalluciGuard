@@ -23,23 +23,27 @@ from pydantic import BaseModel, ConfigDict, Field
 # ---------------------------------------------------------------------------
 
 class RiskLevel(str, Enum):
+    """Risk level classification for detector output."""
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
 
 
 class NextAction(str, Enum):
+    """Next action recommendation from detector."""
     ACCEPT = "Accept"
     VERIFY = "Verify"
 
 
 class EntailmentLabel(str, Enum):
+    """Entailment classification labels for NLI scoring."""
     ENTAILMENT = "entailment"
     CONTRADICTION = "contradiction"
     NEUTRAL = "neutral"
 
 
 class VerdictLabel(str, Enum):
+    """Verdict labels for claim verification status."""
     VERIFIED = "verified"
     CONTRADICTED = "contradicted"
     UNVERIFIED = "unverified"
@@ -47,6 +51,7 @@ class VerdictLabel(str, Enum):
 
 
 class JudgeDecision(str, Enum):
+    """Judge decision outcomes."""
     ACCEPT = "ACCEPT"
     CORRECT = "CORRECT"
     REJECT = "REJECT"
@@ -55,6 +60,7 @@ class JudgeDecision(str, Enum):
 
 
 class SeverityLevel(str, Enum):
+    """Severity levels for issues and risks."""
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -62,6 +68,7 @@ class SeverityLevel(str, Enum):
 
 
 class ExecutionStatus(str, Enum):
+    """Execution status for agent operations."""
     COMPLETED = "completed"
     SUCCESS = "success"
     FAILED = "failed"
@@ -72,6 +79,7 @@ class ExecutionStatus(str, Enum):
 
 
 class MemoryStatus(str, Enum):
+    """Status for memory storage operations."""
     STORED = "stored"
     SKIPPED = "skipped"
     FAILED = "failed"
@@ -79,6 +87,7 @@ class MemoryStatus(str, Enum):
 
 
 class ValidationStatus(str, Enum):
+    """Validation status for corrector output."""
     VALID = "valid"
     INVALID = "invalid"
     UNVALIDATED = "unvalidated"

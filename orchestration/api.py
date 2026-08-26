@@ -28,6 +28,7 @@ from .runtime_validation import validate_orchestration_startup
 
 
 class VerificationRequest(BaseModel):
+    """Request model for the verification endpoint."""
     user_query: str = Field(min_length=1, description="The user's prompt or question to verify.")
     generation_mode: Literal["normal", "stress_test"] = Field(default="normal", description="'normal' or 'stress_test'.")
     llm_response: Optional[str] = Field(default=None, description="Optional pre-supplied draft response.")
@@ -37,21 +38,25 @@ class VerificationRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
+    """Request model for user registration."""
     email: str = Field(min_length=3, description="User email address")
     password: str = Field(min_length=6, description="User password (min 6 characters)")
     name: Optional[str] = Field(default=None, description="User display name")
 
 
 class LoginRequest(BaseModel):
+    """Request model for user login."""
     email: str = Field(min_length=3, description="User email address")
     password: str = Field(min_length=1, description="User password")
 
 
 class GoogleAuthRequest(BaseModel):
+    """Request model for Google OAuth authentication."""
     credential: str = Field(min_length=10, description="Google OAuth ID Token JWT")
 
 
 class SaveHistoryRequest(BaseModel):
+    """Request model for saving verification history."""
     query: str = Field(min_length=1, description="User query text")
     result: Dict[str, Any] = Field(description="Verification result JSON payload")
 
@@ -74,6 +79,16 @@ app.add_middleware(
 
 
 def _get_auth_user(authorization: Optional[str] = Header(None)) -> Optional[Dict[str, Any]]:
+    """
+    Extract and validate the authenticated user from the Authorization header.
+
+    Args:
+        authorization: The Authorization header value (expected format: "Bearer <token>").
+
+    Returns:
+        A dictionary containing user information if authentication succeeds, or None if the
+        token is missing, malformed, or invalid.
+    """
     if not authorization or not authorization.startswith("Bearer "):
         return None
     token = authorization.split("Bearer ", 1)[1].strip()
@@ -100,6 +115,7 @@ def _require_auth_user(authorization: Optional[str] = Header(None)) -> Dict[str,
 
 @app.post("/auth/register")
 async def auth_register(req: RegisterRequest) -> Dict[str, Any]:
+    """Register a new user account and return an access token."""
     try:
         user_dict, token = register_user(
             email=req.email,
@@ -120,6 +136,7 @@ async def auth_register(req: RegisterRequest) -> Dict[str, Any]:
 
 @app.post("/auth/login")
 async def auth_login(req: LoginRequest) -> Dict[str, Any]:
+    """Authenticate a user with email and password and return an access token."""
     try:
         user_dict, token = authenticate_user(
             email=req.email,
@@ -140,6 +157,7 @@ async def auth_login(req: LoginRequest) -> Dict[str, Any]:
 @app.post("/auth/google")
 @app.post("/api/v1/auth/google")
 async def auth_google(req: GoogleAuthRequest) -> Dict[str, Any]:
+    """Authenticate a user via Google OAuth and return an access token."""
     try:
         user_dict, token = authenticate_google_user(req.credential)
         return {
@@ -156,6 +174,7 @@ async def auth_google(req: GoogleAuthRequest) -> Dict[str, Any]:
 
 @app.get("/auth/me")
 async def auth_me(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    """Get the currently authenticated user's information."""
     user = _require_auth_user(authorization)
     return {
         "status": "success",
@@ -165,6 +184,7 @@ async def auth_me(authorization: Optional[str] = Header(None)) -> Dict[str, Any]
 
 @app.post("/auth/logout")
 async def auth_logout() -> Dict[str, Any]:
+    """Log out the current user (client-side token removal)."""
     return {"status": "success", "message": "Successfully signed out"}
 
 
@@ -175,6 +195,7 @@ async def get_history(
     limit: int = 50,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """Get the authenticated user's verification history."""
     user = _require_auth_user(authorization)
     items = get_user_history(user["id"], limit=limit)
     return {"status": "success", "history": items}
@@ -185,6 +206,7 @@ async def save_history(
     req: SaveHistoryRequest,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """Save a verification result to the authenticated user's history."""
     user = _require_auth_user(authorization)
     saved = save_user_history(user["id"], req.query, req.result)
     return {"status": "success", "record": saved}
@@ -195,6 +217,7 @@ async def delete_history(
     history_id: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """Delete verification history for the authenticated user."""
     user = _require_auth_user(authorization)
     clear_user_history(user["id"], history_id=history_id)
     return {"status": "success", "message": "History cleared"}
@@ -204,6 +227,7 @@ async def delete_history(
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
+    """Root endpoint providing API information and available endpoints."""
     return {
         "service": "HalluciGuard Verification Engine API",
         "status": "online",
@@ -223,17 +247,23 @@ async def root() -> Dict[str, Any]:
 
 @app.get("/health")
 async def health(deep: bool = False) -> Dict[str, Any]:
+    """Health check endpoint with optional deep component validation."""
     if not deep:
         return {
             "status": "healthy",
             "backend_status": "healthy",
             "environment": os.environ.get("HALLUCIGUARD_ENV", "production"),
             "engine": "langgraph_production_supervisor",
-            "active_agents": ["base_llm", "detector", "verifier", "memory"],
-            "disabled_agents": {
-                "judge": {"enabled": False, "status": "not_executed"},
-                "corrector": {"enabled": False, "status": "not_executed"},
-            },
+            "active_agents": [
+                "base_llm",
+                "detector",
+                "verifier",
+                "judge",
+                "corrector",
+                "reverifier",
+                "memory",
+            ],
+            "disabled_agents": {},
         }
 
     validation = validate_orchestration_startup()
@@ -247,11 +277,16 @@ async def health(deep: bool = False) -> Dict[str, Any]:
         "backend_status": "healthy" if validation.get("ok") and base_llm.get("available") else "degraded",
         "environment": os.environ.get("HALLUCIGUARD_ENV", "production"),
         "engine": "langgraph_production_supervisor",
-        "active_agents": ["base_llm", "detector", "verifier", "memory"],
-        "disabled_agents": {
-            "judge": {"enabled": False, "status": "not_executed"},
-            "corrector": {"enabled": False, "status": "not_executed"},
-        },
+        "active_agents": [
+            "base_llm",
+            "detector",
+            "verifier",
+            "judge",
+            "corrector",
+            "reverifier",
+            "memory",
+        ],
+        "disabled_agents": {},
         "base_llm": base_llm,
         "detector": validation.get("detector", {}),
         "verifier": validation.get("verifier", {}),
@@ -261,6 +296,15 @@ async def health(deep: bool = False) -> Dict[str, Any]:
 
 
 def _total_latency_ms(result: Dict[str, Any]) -> int:
+    """
+    Calculate the total pipeline latency by summing all trace event latencies.
+
+    Args:
+        result: The verification result dictionary containing trace events.
+
+    Returns:
+        The total latency in milliseconds across all traced agent nodes.
+    """
     return sum(
         int(event.get("latency_ms", 0) or 0) for event in result.get("trace", [])
     )
@@ -269,6 +313,20 @@ def _total_latency_ms(result: Dict[str, Any]) -> int:
 async def _execute_verification(
     request: VerificationRequest, authorization: Optional[str] = None
 ) -> Dict[str, Any]:
+    """
+    Execute the full verification pipeline and return a structured response.
+
+    Args:
+        request: The verification request containing user query, generation mode, and optional LLM response.
+        authorization: Optional Authorization header for authenticated users (enables auto-save to history).
+
+    Returns:
+        A dictionary containing the verification result with execution metadata, agent outputs,
+        trace events, and final response.
+
+    Raises:
+        HTTPException: If the verification pipeline encounters an unrecoverable error.
+    """
     try:
         result = await run_verification(
             user_query=request.user_query,
@@ -299,14 +357,26 @@ async def _execute_verification(
             "detector": result.get("detector"),
             "verifier": result.get("verifier"),
             "memory": result.get("memory"),
-            "active_agents": ["base_llm", "detector", "verifier", "memory"],
-            "disabled_agents": {
-                "judge": {"enabled": False, "status": "not_executed"},
-                "corrector": {"enabled": False, "status": "not_executed"},
-            },
-            "judge": {"enabled": False, "status": "not_executed"},
-            "corrector": {"enabled": False, "status": "not_executed"},
+            "active_agents": result.get("active_agents") or [
+                "base_llm",
+                "detector",
+                "verifier",
+                "judge",
+                "corrector",
+                "reverifier",
+                "memory",
+            ],
+            "disabled_agents": result.get("disabled_agents") or {},
+            "judge": result.get("judge") or result.get("judge_result"),
+            "corrector": result.get("corrector") or result.get("correction_result"),
+            "reverification": result.get("reverification_result"),
+            "judge_result": result.get("judge_result"),
+            "correction_result": result.get("correction_result"),
+            "reverification_result": result.get("reverification_result"),
+            "memory_result": result.get("memory_result"),
             "retry_count": result.get("retry_count", 0),
+            "correction_attempt_count": result.get("correction_attempt_count", 0),
+            "reverification_attempt_count": result.get("reverification_attempt_count", 0),
             "errors": result.get("errors", []),
             "inter_agent_bus": result.get("inter_agent_bus", []),
             "trace": result.get("trace", []),
@@ -335,6 +405,7 @@ async def verify(
     request: VerificationRequest,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """Main verification endpoint that orchestrates the full pipeline."""
     return await _execute_verification(request, authorization=authorization)
 
 
@@ -343,4 +414,5 @@ async def verify_v1(
     request: VerificationRequest,
     authorization: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
+    """API v1 verification endpoint (alias for /verify)."""
     return await _execute_verification(request, authorization=authorization)

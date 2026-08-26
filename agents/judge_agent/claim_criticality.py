@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any
 
 class ClaimCriticalityAssessor:
+    """Assesses the criticality level of claims."""
     def __init__(self):
         pass
 
