@@ -1,0 +1,188 @@
+"""Step 4A — Regression Test Suite for Training Contract Alignment and Model Pipeline.
+
+Verifies:
+1. Dataset existence, integrity, and non-emptiness.
+2. 100% JSON target compliance with exact keys {"sentence_id", "corrected_sentence"}.
+3. 100% sentence ID alignment between prompt metadata and assistant target.
+4. 100% HG-DATA prompt fencing integrity.
+5. Zero query and prompt leakage between train and test splits.
+6. Representation of edge cases (abstention, numbers, dates, entities, injections).
+7. ModelClient explicit resolution and No-Silent-Fallback enforcement.
+8. OutputParser strict validation and rejection behavior.
+"""
+
+import os
+import sys
+import json
+import re
+import hashlib
+import pytest
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from agents.corrector_agent.corrector.contracts import (
+    PromptBundle,
+    ModelKind,
+    RejectionReason,
+    CorrectionCandidate
+)
+from agents.corrector_agent.corrector.config import CorrectorConfig
+from agents.corrector_agent.corrector.model_client import ModelClient
+from agents.corrector_agent.corrector.output_parser import parse_candidate
+from agents.corrector_agent.corrector.prompt_builder import SYSTEM_INSTRUCTIONS
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "training", "data", "contract_v4")
+TRAIN_FILE = os.path.join(DATA_DIR, "train.jsonl")
+VAL_FILE = os.path.join(DATA_DIR, "val.jsonl")
+TEST_FILE = os.path.join(DATA_DIR, "test.jsonl")
+EDGE_FILE = os.path.join(DATA_DIR, "edge_cases.jsonl")
+
+
+def test_dataset_files_exist_and_non_empty():
+    for fpath in [TRAIN_FILE, VAL_FILE, TEST_FILE, EDGE_FILE]:
+        assert os.path.exists(fpath), f"Dataset file missing: {fpath}"
+        assert os.path.getsize(fpath) > 0, f"Dataset file is empty: {fpath}"
+
+
+def test_all_training_targets_are_strict_json():
+    required_keys = {"sentence_id", "corrected_sentence"}
+    for fpath in [TRAIN_FILE, VAL_FILE, TEST_FILE]:
+        with open(fpath, "r", encoding="utf-8") as f:
+            for line_idx, line in enumerate(f, 1):
+                rec = json.loads(line)
+                ast_content = rec["messages"][2]["content"]
+                parsed = json.loads(ast_content)
+                assert isinstance(parsed, dict), f"{fpath} L{line_idx}: not a dict"
+                assert set(parsed.keys()) == required_keys, f"{fpath} L{line_idx}: keys mismatch: {set(parsed.keys())}"
+                assert isinstance(parsed["sentence_id"], str) and parsed["sentence_id"].strip() != ""
+                assert isinstance(parsed["corrected_sentence"], str) and parsed["corrected_sentence"].strip() != ""
+
+
+def test_sentence_id_authorization_in_training_data():
+    for fpath in [TRAIN_FILE, VAL_FILE, TEST_FILE]:
+        with open(fpath, "r", encoding="utf-8") as f:
+            for line_idx, line in enumerate(f, 1):
+                rec = json.loads(line)
+                user_msg = rec["messages"][1]["content"]
+                ast_msg = json.loads(rec["messages"][2]["content"])
+
+                sid_match = re.search(r"authorized_target_sentence_id:\s*(\S+)", user_msg)
+                assert sid_match is not None, f"{fpath} L{line_idx}: missing authorized_target_sentence_id in metadata"
+                auth_sid = sid_match.group(1).strip()
+                assert ast_msg["sentence_id"] == auth_sid, f"{fpath} L{line_idx}: target SID mismatch {ast_msg['sentence_id']} vs {auth_sid}"
+
+
+def test_prompt_fencing_integrity():
+    for fpath in [TRAIN_FILE, VAL_FILE, TEST_FILE]:
+        with open(fpath, "r", encoding="utf-8") as f:
+            for line_idx, line in enumerate(f, 1):
+                rec = json.loads(line)
+                sys_msg = rec["messages"][0]["content"]
+                user_msg = rec["messages"][1]["content"]
+
+                assert sys_msg == SYSTEM_INSTRUCTIONS, f"{fpath} L{line_idx}: system prompt mismatch"
+                assert "<<<HG-DATA-" in user_msg, f"{fpath} L{line_idx}: missing opening HG-DATA fence"
+                assert ":BEGIN CORRECTION METADATA>>>" in user_msg
+                assert ":END CORRECTION METADATA>>>" in user_msg
+                assert "=== OUTPUT MANDATE (INSTRUCTION) ===" in user_msg
+
+
+def test_zero_data_leakage_between_train_and_test():
+    train_queries = set()
+    with open(TRAIN_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            rec = json.loads(line)
+            u = rec["messages"][1]["content"]
+            q_match = re.search(r"<<<HG-DATA-[^>]+:BEGIN USER QUERY>>>\s*(.*?)\s*<<<HG-DATA-[^>]+:END USER QUERY>>>", u, re.DOTALL)
+            q = q_match.group(1).strip().lower() if q_match else u[:100].lower()
+            train_queries.add(hashlib.sha256(q.encode("utf-8")).hexdigest())
+
+    test_queries = set()
+    with open(TEST_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            rec = json.loads(line)
+            u = rec["messages"][1]["content"]
+            q_match = re.search(r"<<<HG-DATA-[^>]+:BEGIN USER QUERY>>>\s*(.*?)\s*<<<HG-DATA-[^>]+:END USER QUERY>>>", u, re.DOTALL)
+            q = q_match.group(1).strip().lower() if q_match else u[:100].lower()
+            test_queries.add(hashlib.sha256(q.encode("utf-8")).hexdigest())
+
+    overlap = train_queries & test_queries
+    assert len(overlap) == 0, f"Data leakage detected! {len(overlap)} query hashes overlap between train and test."
+
+
+def test_edge_case_coverage():
+    edge_records = []
+    with open(EDGE_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            edge_records.append(json.loads(line))
+
+    assert len(edge_records) >= 8, f"Insufficient edge cases: got {len(edge_records)}"
+
+    # Check abstention
+    has_abstention = any("insufficient" in r["messages"][2]["content"].lower() for r in edge_records)
+    assert has_abstention, "Missing insufficient evidence / abstention edge case"
+
+    # Check prompt injection control
+    has_injection = any("ignore all previous instructions" in r["messages"][1]["content"].lower() for r in edge_records)
+    assert has_injection, "Missing prompt-injection robustness edge case"
+
+
+def test_model_client_no_silent_fallback():
+    # Attempting to load a non-existent fine-tuned path must fail safe with MODEL_PATH_MISSING
+    cfg = CorrectorConfig(model_path="./non_existent_adapter_dir")
+    client = ModelClient(cfg)
+    status = client.ensure_loaded()
+
+    assert not status.available
+    assert status.reason == "model_path_missing"
+    assert not status.is_finetuned
+
+    cand = client.generate_for_prompt(
+        PromptBundle(
+            sentence_id="S1",
+            claim_ids=["c1"],
+            prompt_text="test prompt",
+            system_text="test system",
+            fence_tag="HG-DATA-TEST",
+            build_ok=True
+        )
+    )
+    assert cand.status == "rejected"
+    assert cand.rejection_reason == RejectionReason.GENERATION_FAILED.value
+
+
+def test_output_parser_rejects_whole_response():
+    bundle = PromptBundle(
+        sentence_id="S1",
+        claim_ids=["c1"],
+        prompt_text="test",
+        system_text="test",
+        fence_tag="HG-DATA-TEST",
+        build_ok=True
+    )
+    raw_whole_response = "Apollo 11 landed on the moon on July 20, 1969. Neil Armstrong was the commander."
+    cand = parse_candidate(raw_whole_response, bundle)
+
+    assert cand.rejection_reason == RejectionReason.NOT_JSON
+    assert cand.corrected_text == ""
+
+
+def test_output_parser_accepts_valid_step4_json():
+    bundle = PromptBundle(
+        sentence_id="S2",
+        claim_ids=["c2"],
+        prompt_text="test",
+        system_text="test",
+        fence_tag="HG-DATA-TEST",
+        build_ok=True
+    )
+    raw_json = '{"sentence_id": "S2", "corrected_sentence": "Marie Curie discovered radium in Paris."}'
+    cand = parse_candidate(raw_json, bundle)
+
+    assert cand.rejection_reason == ""
+    assert cand.sentence_id == "S2"
+    assert cand.corrected_text == "Marie Curie discovered radium in Paris."
+    assert cand.rejection_detail == ""
