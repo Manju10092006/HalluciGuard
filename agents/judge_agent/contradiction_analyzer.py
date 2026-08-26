@@ -8,6 +8,7 @@ import re
 from typing import Dict, List, Any
 
 class ContradictionTaxonomyAnalyzer:
+    """Analyzes and categorizes contradictions in evidence."""
     def __init__(self):
         pass
 

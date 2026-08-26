@@ -242,6 +242,7 @@ class RetryPrompt:
 
     @property
     def ok(self) -> bool:
+        """Return True if the retry prompt was successfully built and not refused."""
         return bool(self.prompt_text) and self.refusal == RetryRefusal.NONE.value
 
 
@@ -254,6 +255,7 @@ class CandidateSource(Protocol):
     """
 
     def generate_for_prompt(self, bundle: PromptBundle) -> CorrectionCandidate:
+        """Generate a correction candidate from a prompt bundle."""
         ...
 
 

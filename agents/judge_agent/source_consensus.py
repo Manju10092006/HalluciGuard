@@ -6,6 +6,7 @@ Measures independent source agreement, calculates consensus matrix, and determin
 from typing import Dict, List, Any
 
 class SourceConsensusEngine:
+    """Engine for evaluating consensus across multiple sources."""
     def __init__(self):
         pass
 

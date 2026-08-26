@@ -15,6 +15,7 @@ from risk_intelligence import RiskAssessment
 
 @dataclass
 class WorkflowAction:
+    """Recommended workflow action from the orchestrator."""
     action_type: str
     target_agent: str
     instructions: Dict[str, Any]
@@ -23,6 +24,7 @@ class WorkflowAction:
 
 
 class WorkflowOrchestrator:
+    """Orchestrates workflow decisions based on judge outcomes."""
     # Domain -> required authoritative sources
     _DOMAIN_SOURCES = {
         "Healthcare": ["PubMed", "FDA", "WHO", "NIH", "Cochrane"],
@@ -41,6 +43,7 @@ class WorkflowOrchestrator:
         domain_policy: DomainPolicy,
         retry_count: int = 0
     ) -> WorkflowAction:
+        """Determine the next workflow action based on the current state."""
 
         if decision == Decision.ACCEPT:
             return WorkflowAction(
