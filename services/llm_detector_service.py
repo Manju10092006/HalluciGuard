@@ -20,6 +20,7 @@ class LLMDetectorSliceResult:
     detector: dict[str, Any] | None
 
     def model_dump(self) -> dict[str, Any]:
+        """Convert the slice result to a dictionary."""
         return asdict(self)
 
 
@@ -46,6 +47,19 @@ class BaseLLMDetectorService:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMDetectorSliceResult:
+        """
+        Execute the Base LLM -> Detector vertical slice.
+
+        Args:
+            user_query: The user's question or prompt.
+            conversation_history: Optional conversation context.
+            generation_mode: Either "normal" or "stress_test".
+            temperature: Optional temperature override.
+            max_tokens: Optional token limit.
+
+        Returns:
+            A LLMDetectorSliceResult containing the draft response, generation metadata, and detector decision.
+        """
         # Step 1: Base LLM Generation
         gen_result: GenerationResult = await self.llm_service.generate(
             user_query=user_query,

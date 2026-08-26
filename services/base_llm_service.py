@@ -13,6 +13,7 @@ try:
 except ImportError:
     from enum import Enum
     class StrEnum(str, Enum):
+        """String-based enum for Python versions < 3.11 compatibility."""
         pass
 
 from typing import Any, Literal
@@ -24,6 +25,7 @@ GenerationStatus = Literal["success", "failed"]
 
 
 class GenerationErrorCode(StrEnum):
+    """Error codes for LLM generation failures, categorizing different failure modes."""
     MISSING_API_KEY = "MISSING_API_KEY"
     TIMEOUT = "TIMEOUT"
     CONNECTION_ERROR = "CONNECTION_ERROR"
@@ -49,10 +51,30 @@ class GenerationErrorCode(StrEnum):
 
 
 def _env_str(name: str, default: str | None = None) -> str | None:
+    """
+    Retrieve a string environment variable with an optional default value.
+
+    Args:
+        name: The environment variable name.
+        default: The default value if the environment variable is not set.
+
+    Returns:
+        The environment variable value or the default value.
+    """
     return os.getenv(name, default)
 
 
 def _env_float(name: str, default: str) -> float:
+    """
+    Retrieve a float environment variable with a default value.
+
+    Args:
+        name: The environment variable name.
+        default: The default value as a string to parse as float.
+
+    Returns:
+        The environment variable value parsed as float, or the default value.
+    """
     val = os.getenv(name)
     if val is not None and val.strip():
         return float(val.strip())
@@ -60,6 +82,16 @@ def _env_float(name: str, default: str) -> float:
 
 
 def _env_int(name: str, default: str) -> int:
+    """
+    Retrieve an integer environment variable with a default value.
+
+    Args:
+        name: The environment variable name.
+        default: The default value as a string to parse as int.
+
+    Returns:
+        The environment variable value parsed as int, or the default value.
+    """
     val = os.getenv(name)
     if val is not None and val.strip():
         return int(val.strip())
@@ -67,12 +99,22 @@ def _env_int(name: str, default: str) -> int:
 
 
 def _env_optional_int(name: str) -> int | None:
+    """
+    Retrieve an optional integer environment variable.
+
+    Args:
+        name: The environment variable name.
+
+    Returns:
+        The environment variable value parsed as int, or None if not set or empty.
+    """
     val = os.getenv(name)
     return int(val.strip()) if val and val.strip() else None
 
 
 @dataclass(frozen=True)
 class BaseLLMConfig:
+    """Configuration settings for the Base LLM service, sourced from environment variables."""
     provider: str = field(
         default_factory=lambda: _env_str("HALLUCIGUARD_LLM_PROVIDER", "openrouter")
         or "openrouter"
@@ -114,6 +156,7 @@ class BaseLLMConfig:
 
 @dataclass(frozen=True)
 class GenerationResult:
+    """Result of an LLM generation request, containing the draft response or error details."""
     user_query: str
     draft_response: str
     model: str
@@ -130,11 +173,13 @@ class GenerationResult:
     usage: dict[str, Any] = field(default_factory=dict)
 
     def model_dump(self) -> dict[str, Any]:
+        """Convert the generation result to a dictionary."""
         return asdict(self)
 
 
 @dataclass(frozen=True)
 class BaseLLMHealth:
+    """Health check result for the Base LLM service, including configuration and endpoint status."""
     provider_configured: bool
     provider: str
     model_configured: bool
@@ -145,6 +190,7 @@ class BaseLLMHealth:
     last_error: str | None = None
 
     def model_dump(self) -> dict[str, Any]:
+        """Convert the health check result to a dictionary."""
         return asdict(self)
 
 
@@ -155,9 +201,24 @@ class BaseLLMService:
     NON_RETRYABLE_HTTP_STATUS = {400, 401, 402, 403, 404}
 
     def __init__(self, config: BaseLLMConfig | None = None) -> None:
+        """
+        Initialize the Base LLM service with optional configuration.
+
+        Args:
+            config: Optional configuration instance. If not provided, uses default environment-based config.
+        """
         self.config = config or BaseLLMConfig()
 
     async def health(self, check_network: bool = True) -> BaseLLMHealth:
+        """
+        Perform a health check on the Base LLM service.
+
+        Args:
+            check_network: Whether to perform a network connectivity check to the OpenRouter endpoint.
+
+        Returns:
+            A BaseLLMHealth instance with configuration and endpoint status information.
+        """
         started = time.perf_counter()
         reachable = False
         last_error = None
@@ -193,6 +254,19 @@ class BaseLLMService:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> GenerationResult:
+        """
+        Generate a draft response for a user query via OpenRouter.
+
+        Args:
+            user_query: The user's question or prompt.
+            conversation_history: Optional list of prior conversation messages.
+            generation_mode: Either "normal" or "stress_test" (affects temperature).
+            temperature: Optional temperature override (0.0 to 1.0).
+            max_tokens: Optional maximum token limit for the response.
+
+        Returns:
+            A GenerationResult containing the draft response or error details.
+        """
         request_id = str(uuid.uuid4())
         started = time.perf_counter()
         mode = (
@@ -285,6 +359,15 @@ class BaseLLMService:
         return self._failed(user_query, request_id, mode, temp, started, last_code, last_error)
 
     async def _post_chat_completions(self, payload: dict[str, Any]) -> httpx.Response:
+        """
+        Send a chat completion request to the OpenRouter API.
+
+        Args:
+            payload: The JSON payload containing model, messages, and generation parameters.
+
+        Returns:
+            The HTTP response from OpenRouter.
+        """
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
             "Content-Type": "application/json",
@@ -309,6 +392,20 @@ class BaseLLMService:
         temperature: float,
         started: float,
     ) -> GenerationResult:
+        """
+        Parse a successful HTTP response from OpenRouter into a GenerationResult.
+
+        Args:
+            user_query: The original user query.
+            response: The HTTP response from OpenRouter.
+            request_id: The unique request identifier.
+            mode: The generation mode ("normal" or "stress_test").
+            temperature: The temperature used for generation.
+            started: The start time of the request (from perf_counter).
+
+        Returns:
+            A GenerationResult with status "success" or "failed" if parsing fails.
+        """
         if not response.content:
             return self._failed(
                 user_query,
@@ -374,6 +471,21 @@ class BaseLLMService:
         error_code: GenerationErrorCode,
         error: str,
     ) -> GenerationResult:
+        """
+        Create a failed GenerationResult with error details.
+
+        Args:
+            user_query: The original user query.
+            request_id: The unique request identifier.
+            mode: The generation mode.
+            temperature: The temperature used (or None).
+            started: The start time of the request.
+            error_code: The error code enum value.
+            error: The error message.
+
+        Returns:
+            A GenerationResult with status "failed" and error information.
+        """
         return GenerationResult(
             user_query=user_query,
             draft_response="",
@@ -391,13 +503,41 @@ class BaseLLMService:
         )
 
     def _retry_delay_seconds(self, attempt: int) -> float:
+        """
+        Calculate exponential backoff delay with jitter for retry attempts.
+
+        Args:
+            attempt: The current retry attempt number (0-indexed).
+
+        Returns:
+            The delay in seconds before the next retry attempt.
+        """
         base = min(2.0, 0.25 * (2**attempt))
         return base + random.uniform(0, 0.1)
 
     def _should_retry_status(self, status_code: int) -> bool:
+        """
+        Determine if an HTTP status code is retryable.
+
+        Args:
+            status_code: The HTTP status code.
+
+        Returns:
+            True if the status code indicates a transient error that should be retried.
+        """
         return status_code in self.RETRYABLE_HTTP_STATUS
 
     def _classify_http_status(self, status_code: int, body: str) -> GenerationErrorCode:
+        """
+        Classify an HTTP error status code into a GenerationErrorCode.
+
+        Args:
+            status_code: The HTTP status code.
+            body: The response body text.
+
+        Returns:
+            The corresponding GenerationErrorCode enum value.
+        """
         text = (body or "").lower()
         if status_code == 404 and "model" in text:
             return GenerationErrorCode.MODEL_UNAVAILABLE
@@ -407,6 +547,15 @@ class BaseLLMService:
             return GenerationErrorCode.UNKNOWN_ERROR
 
     def _classify_exception(self, exc: Exception) -> GenerationErrorCode:
+        """
+        Classify a network or HTTP exception into a GenerationErrorCode.
+
+        Args:
+            exc: The exception that occurred during the request.
+
+        Returns:
+            The corresponding GenerationErrorCode enum value.
+        """
         if isinstance(exc, httpx.TimeoutException):
             return GenerationErrorCode.TIMEOUT
         if isinstance(exc, httpx.ConnectError):
@@ -418,6 +567,16 @@ class BaseLLMService:
         return GenerationErrorCode.UNKNOWN_ERROR
 
     def _safe_http_error(self, status_code: int, body: str) -> str:
+        """
+        Create a safe error message from an HTTP response, redacting sensitive credentials.
+
+        Args:
+            status_code: The HTTP status code.
+            body: The response body text.
+
+        Returns:
+            A formatted error message with API keys redacted and long messages truncated.
+        """
         redacted = (body or "").replace(self.config.api_key or "", "[REDACTED]")
         if len(redacted) > 500:
             redacted = f"{redacted[:500]}..."

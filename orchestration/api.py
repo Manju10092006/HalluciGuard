@@ -79,6 +79,16 @@ app.add_middleware(
 
 
 def _get_auth_user(authorization: Optional[str] = Header(None)) -> Optional[Dict[str, Any]]:
+    """
+    Extract and validate the authenticated user from the Authorization header.
+
+    Args:
+        authorization: The Authorization header value (expected format: "Bearer <token>").
+
+    Returns:
+        A dictionary containing user information if authentication succeeds, or None if the
+        token is missing, malformed, or invalid.
+    """
     if not authorization or not authorization.startswith("Bearer "):
         return None
     token = authorization.split("Bearer ", 1)[1].strip()
@@ -286,6 +296,15 @@ async def health(deep: bool = False) -> Dict[str, Any]:
 
 
 def _total_latency_ms(result: Dict[str, Any]) -> int:
+    """
+    Calculate the total pipeline latency by summing all trace event latencies.
+
+    Args:
+        result: The verification result dictionary containing trace events.
+
+    Returns:
+        The total latency in milliseconds across all traced agent nodes.
+    """
     return sum(
         int(event.get("latency_ms", 0) or 0) for event in result.get("trace", [])
     )
@@ -294,6 +313,20 @@ def _total_latency_ms(result: Dict[str, Any]) -> int:
 async def _execute_verification(
     request: VerificationRequest, authorization: Optional[str] = None
 ) -> Dict[str, Any]:
+    """
+    Execute the full verification pipeline and return a structured response.
+
+    Args:
+        request: The verification request containing user query, generation mode, and optional LLM response.
+        authorization: Optional Authorization header for authenticated users (enables auto-save to history).
+
+    Returns:
+        A dictionary containing the verification result with execution metadata, agent outputs,
+        trace events, and final response.
+
+    Raises:
+        HTTPException: If the verification pipeline encounters an unrecoverable error.
+    """
     try:
         result = await run_verification(
             user_query=request.user_query,
