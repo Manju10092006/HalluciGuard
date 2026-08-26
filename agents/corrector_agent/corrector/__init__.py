@@ -1,0 +1,262 @@
+"""HalluciGuard Corrector Agent — Phase 2 production implementation package.
+
+Public entry points:
+    CorrectorAgent(config).correct(request) -> CorrectionResult
+    run_correction(request, config=None)    -> CorrectionResult
+
+Canonical boundary (from ``orchestration/schemas.py``):
+    CorrectionRequest  ->  Corrector  ->  CorrectionResult
+
+STEP 6 STATUS — Corrector execution integration:
+    ``correct`` now runs the real internal pipeline end to end:
+
+        CorrectionRequest
+          -> to_internal_request        (Step 1 canonical boundary)
+          -> ground_request             (Steps 2-3 targeting + evidence binding)
+          -> generate_corrections       (Step 4 model generation, ONE ModelClient)
+          -> resolve_generation         (Step 5 validation + bounded retry)
+          -> reconstruct                (Step 6 deterministic offset splice)
+          -> existing CorrectionResult builders (adapter.py)
+
+    A SINGLE :class:`ModelClient` instance is shared by generation and retry, so
+    the model is never reloaded for a retry. The no-silent-fallback rule from
+    Step 4 is preserved: an unavailable model yields a degraded/unvalidated result
+    with the original response unchanged — never a fabricated correction and never
+    the base model. Reconstruction is fail-closed: any integrity breach preserves
+    the original verbatim. No corrected text ever reaches the result unless it came
+    from an ACCEPTED Step 5 resolution.
+
+    The internal models below remain internal; ``orchestration/schemas.py`` stays
+    the sole inter-agent contract.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Union
+
+from orchestration.schemas import CorrectionRequest, CorrectionResult
+
+from .adapter import (
+    CorrectionInputError,
+    build_completed_result,
+    build_failed_result,
+    build_model_unavailable_result,
+    build_partial_result,
+    build_reconstruction_fallback_result,
+    build_unresolved_result,
+    to_internal_request,
+)
+from .config import CorrectorConfig
+from .contracts import (
+    ChangedClaim,
+    GroundedPlan,
+    InternalCorrectionRequest,
+    ValidationOutcome,
+)
+from .evidence import ground_request
+from .model_client import Generator, ModelClient, generate_corrections
+from .reconstruction import Reconstruction, reconstruct
+
+# Step 5 entry points, re-exported for discoverability.
+from .validation import (
+    EntailmentScorer,
+    NullEntailmentScorer,
+    validate_candidate,
+)
+from .retry import resolve_generation, resolve_target
+
+__all__ = [
+    "CorrectorAgent",
+    "run_correction",
+    "CorrectorConfig",
+    # Step 4/5/6 seams, re-exported so callers and tests share one source.
+    "Generator",
+    "ModelClient",
+    "generate_corrections",
+    "validate_candidate",
+    "resolve_generation",
+    "resolve_target",
+    "reconstruct",
+    "Reconstruction",
+    "EntailmentScorer",
+    "NullEntailmentScorer",
+]
+
+RequestLike = Union[CorrectionRequest, Dict[str, Any]]
+
+
+def _safe_extract_original(request: RequestLike) -> str:
+    """Best-effort recovery of the original response for fail-safe results."""
+    if isinstance(request, CorrectionRequest):
+        return request.original_response
+    if isinstance(request, dict):
+        value = request.get("original_response", "")
+        return value if isinstance(value, str) else str(value)
+    return ""
+
+
+def _accepted_changed_claims(outcome: ValidationOutcome) -> List[ChangedClaim]:
+    """One ``changed_claims`` entry per authorized claim actually corrected.
+
+    Values are copied verbatim from the ACCEPTED resolution — the corrected text,
+    the evidence ids taken from the render manifest, and the real attempt count.
+    Nothing here is fabricated; a claim appears only if its target was accepted.
+    """
+    changed: List[ChangedClaim] = []
+    for resolution in outcome.accepted:
+        claim_ids = list(resolution.claim_ids) or [""]
+        for claim_id in claim_ids:
+            changed.append(
+                ChangedClaim(
+                    claim_id=claim_id,
+                    action="corrected",
+                    original=resolution.original_text,
+                    corrected=resolution.accepted_text,
+                    evidence_ids_used=list(resolution.evidence_ids_used),
+                    attempts=resolution.attempt_count,
+                    reasons=[],
+                )
+            )
+    return changed
+
+
+def _unresolved_changed_claims(outcome: ValidationOutcome) -> List[ChangedClaim]:
+    """Honest diagnostics for targets that were NOT corrected.
+
+    ``corrected`` is always empty — the original sentence is preserved and no
+    Corrector-authored text exists. ``reasons`` carries the real Step 5 failure
+    codes (or none, for an abstention). This is diagnostic, never a fabricated
+    correction.
+    """
+    diagnostics: List[ChangedClaim] = []
+    for resolution in outcome.unresolved_targets:
+        diagnostics.append(
+            ChangedClaim(
+                claim_id=(resolution.claim_ids[0] if resolution.claim_ids else ""),
+                action="abstained" if resolution.abstained else "unresolved",
+                original=resolution.original_text,
+                corrected="",
+                evidence_ids_used=list(resolution.evidence_ids_used),
+                attempts=resolution.attempt_count,
+                reasons=list(dict.fromkeys(resolution.final_failure_codes)),
+            )
+        )
+    return diagnostics
+
+
+class CorrectorAgent:
+    """Corrector entry point. Accepts a canonical ``CorrectionRequest`` (or a
+    dict that validates against it) and returns a canonical ``CorrectionResult``.
+
+    A ``generator`` and/or ``scorer`` may be injected for testing and integration
+    without loading the fine-tuned model from disk. In production both are None:
+    the agent constructs a real :class:`ModelClient`, which enforces the
+    no-silent-fallback rule.
+    """
+
+    def __init__(
+        self,
+        config: Optional[CorrectorConfig] = None,
+        *,
+        generator: Optional[Generator] = None,
+        scorer: Optional[EntailmentScorer] = None,
+    ) -> None:
+        self.config = config or CorrectorConfig()
+        self._generator = generator
+        self._scorer = scorer
+
+    def correct(self, request: RequestLike) -> CorrectionResult:
+        # 1) Canonical input boundary. Never raise across the boundary.
+        try:
+            internal = to_internal_request(request)
+        except CorrectionInputError as exc:
+            original = _safe_extract_original(request)
+            return build_failed_result(
+                original, f"invalid_correction_request: {exc}"
+            )
+
+        original = internal.original_response
+        try:
+            return self._run_pipeline(internal, original)
+        except Exception as exc:  # noqa: BLE001 - the boundary must never raise
+            # Defense in depth: every component below is designed to fail closed
+            # and not raise, but the canonical contract guarantees no exception
+            # crosses the boundary. Any surprise preserves the original.
+            return build_failed_result(
+                original, f"correction_pipeline_error: {type(exc).__name__}: {exc}"
+            )
+
+    # -- internal pipeline ---------------------------------------------------
+
+    def _run_pipeline(
+        self, internal: InternalCorrectionRequest, original: str
+    ) -> CorrectionResult:
+        # 2) Steps 2-3: locate authorized claims and bind only their supporting
+        #    evidence. No grounded target -> nothing to safely correct.
+        plan: GroundedPlan = ground_request(internal, self.config)
+        if not plan.has_targets:
+            return build_unresolved_result(original)
+
+        # 3) Step 4: build prompts and generate, using ONE ModelClient instance.
+        client = ModelClient(self.config, generator=self._generator)
+        generation = generate_corrections(
+            internal, plan, config=self.config, client=client
+        )
+
+        # 4) Step 5: validate + bounded retry. The SAME client is the retry
+        #    source, so the model is never reloaded. resolve_generation ignores
+        #    the source when the model is unavailable, so passing it is safe.
+        outcome: ValidationOutcome = resolve_generation(
+            plan=plan,
+            outcome=generation,
+            source=client,
+            config=self.config,
+            scorer=self._scorer,
+            query_text=internal.user_query,
+        )
+
+        # 5) No-silent-fallback: an unavailable model is degraded/unvalidated with
+        #    the original preserved — never the base model, never a correction.
+        if not outcome.model_status.available:
+            return build_model_unavailable_result(
+                original, reason=outcome.model_status.reason or "model_unavailable"
+            )
+
+        # 6) Nothing safely accepted (all rejected / unresolved / abstained) ->
+        #    original preserved as terminated_unresolved. Abstention lands here:
+        #    it is never completed or valid.
+        if not outcome.has_accepted:
+            return build_unresolved_result(
+                original,
+                changed_claims=_unresolved_changed_claims(outcome) or None,
+                attempt_count=outcome.attempt_count,
+            )
+
+        # 7) Step 6: deterministic offset splice of ONLY accepted sentences.
+        #    Any integrity breach preserves the original verbatim (fail closed).
+        rebuilt: Reconstruction = reconstruct(original, plan, outcome)
+        if not rebuilt.ok:
+            return build_reconstruction_fallback_result(original)
+
+        # 8) Map to the canonical result. Fully resolved (every grounded target
+        #    accepted and no authorized claim skipped) is completed/valid;
+        #    anything less is degraded/warning with the accepted subset applied.
+        changed = _accepted_changed_claims(outcome)
+        fully_resolved = (
+            len(outcome.accepted) == len(plan.grounded_targets)
+            and not plan.skipped_claims
+        )
+        if fully_resolved:
+            return build_completed_result(
+                original, rebuilt.text, changed, attempt_count=outcome.attempt_count
+            )
+        return build_partial_result(
+            original, rebuilt.text, changed, attempt_count=outcome.attempt_count
+        )
+
+
+def run_correction(
+    request: RequestLike, config: Optional[CorrectorConfig] = None
+) -> CorrectionResult:
+    """Module-level convenience wrapper around ``CorrectorAgent.correct``."""
+    return CorrectorAgent(config).correct(request)
