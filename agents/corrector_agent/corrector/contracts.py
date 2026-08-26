@@ -141,6 +141,7 @@ class ChangedClaim(BaseModel):
     reasons: List[str] = Field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Convert the ChangedClaim to a plain dictionary."""
         return self.model_dump()
 
 
@@ -205,6 +206,7 @@ class SentenceSpan(BaseModel):
 
     @property
     def length(self) -> int:
+        """Return the length of the sentence span in characters."""
         return self.end_offset - self.start_offset
 
 
@@ -260,6 +262,7 @@ class CorrectionPlan(BaseModel):
 
     @property
     def has_targets(self) -> bool:
+        """Return True if there are any correction targets in the plan."""
         return bool(self.targets)
 
 
@@ -307,6 +310,7 @@ class BoundEvidence(BaseModel):
 
     @property
     def evidence_id(self) -> str:
+        """Return the evidence_id from the bound evidence item."""
         return self.evidence.evidence_id
 
 
@@ -322,14 +326,17 @@ class GroundedTarget(BaseModel):
 
     @property
     def sentence_id(self) -> str:
+        """Return the sentence_id from the correction target."""
         return self.target.sentence_id
 
     @property
     def has_usable_support(self) -> bool:
+        """Return True if the target has at least one supporting evidence item."""
         return bool(self.supporting)
 
     @property
     def all_evidence_ids(self) -> List[str]:
+        """Return all evidence IDs across supporting, contradictory, and neutral evidence."""
         return [
             b.evidence_id
             for b in (*self.supporting, *self.contradictory, *self.neutral)
@@ -359,6 +366,7 @@ class GroundedPlan(BaseModel):
 
     @property
     def has_targets(self) -> bool:
+        """Return True if there are any grounded targets in the plan."""
         return bool(self.grounded_targets)
 
 
@@ -510,6 +518,7 @@ class CorrectionCandidate(BaseModel):
 
     @property
     def is_proposed(self) -> bool:
+        """Return True if the candidate status is PROPOSED."""
         return self.status == CandidateStatus.PROPOSED.value
 
 
@@ -530,10 +539,12 @@ class GenerationOutcome(BaseModel):
 
     @property
     def proposed(self) -> List[CorrectionCandidate]:
+        """Return all candidates with PROPOSED status."""
         return [c for c in self.candidates if c.is_proposed]
 
     @property
     def has_proposals(self) -> bool:
+        """Return True if any candidate has PROPOSED status."""
         return any(c.is_proposed for c in self.candidates)
 
 
@@ -608,10 +619,12 @@ class CandidateValidation(BaseModel):
 
     @property
     def failure_codes(self) -> List[str]:
+        """Return a list of all failure codes."""
         return [f.code for f in self.failures]
 
     @property
     def failure_reasons(self) -> List[str]:
+        """Return a list of all failure reasons."""
         return [f.reason for f in self.failures]
 
     @property
@@ -666,6 +679,7 @@ class TargetResolution(BaseModel):
 
     @property
     def is_accepted(self) -> bool:
+        """Return True if the target decision is ACCEPTED."""
         return self.decision == TargetDecision.ACCEPTED.value
 
 
@@ -684,12 +698,15 @@ class ValidationOutcome(BaseModel):
 
     @property
     def accepted(self) -> List[TargetResolution]:
+        """Return all resolutions with ACCEPTED decision."""
         return [r for r in self.resolutions if r.is_accepted]
 
     @property
     def has_accepted(self) -> bool:
+        """Return True if any resolution has ACCEPTED decision."""
         return any(r.is_accepted for r in self.resolutions)
 
     @property
     def unresolved_targets(self) -> List[TargetResolution]:
+        """Return all resolutions that were not accepted."""
         return [r for r in self.resolutions if not r.is_accepted]

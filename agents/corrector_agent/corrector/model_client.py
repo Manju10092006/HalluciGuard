@@ -82,6 +82,7 @@ class Generator:
     kind: str = ModelKind.INJECTED_TEST_GENERATOR.value
 
     def generate(self, system_text: str, prompt_text: str) -> str:  # pragma: no cover
+        """Generate text from system and prompt inputs. Subclasses must implement this."""
         raise NotImplementedError
 
 
@@ -248,6 +249,7 @@ class _TransformersGenerator(Generator):
         self.kind = kind
 
     def generate(self, system_text: str, prompt_text: str) -> str:
+        """Generate a correction candidate using the loaded HuggingFace model."""
         import torch
 
         messages = [
@@ -313,6 +315,7 @@ class ModelClient:
 
     @property
     def status(self) -> ModelStatus:
+        """Return the current model availability status."""
         return self._status or ModelStatus()
 
     def ensure_loaded(self) -> ModelStatus:

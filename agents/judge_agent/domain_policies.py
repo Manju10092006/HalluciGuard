@@ -9,6 +9,7 @@ from typing import Dict, Any
 
 @dataclass
 class DomainPolicy:
+    """Domain-specific policy configuration for the Judge Agent."""
     domain_name: str
     accept_confidence_threshold: float
     correct_contradiction_threshold: float
@@ -19,6 +20,7 @@ class DomainPolicy:
     description: str
 
 class DomainPolicyRegistry:
+    """Registry of domain-specific policies for different knowledge domains."""
     def __init__(self):
         self._policies: Dict[str, DomainPolicy] = {
             "Healthcare": DomainPolicy(

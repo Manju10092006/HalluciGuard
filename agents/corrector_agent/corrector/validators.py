@@ -200,6 +200,7 @@ class EvidenceView:
 
     @property
     def has_supporting(self) -> bool:
+        """Return True if there is supporting evidence with non-empty text."""
         return bool(self.supporting_ids) and bool(self.supporting_text.strip())
 
 

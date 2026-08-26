@@ -7,6 +7,7 @@ and past hallucination patterns to adjust calibration scores.
 from typing import Dict, List, Any, Optional
 
 class MemoryIntelligenceEngine:
+    """Integration engine for memory-based intelligence."""
     def __init__(self):
         # In-memory historical cache for demonstration & production lookup
         self._source_reliability_history: Dict[str, float] = {

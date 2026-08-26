@@ -14,6 +14,7 @@ from risk_intelligence import RiskAssessment
 
 @dataclass
 class NegotiationMessage:
+    """Message exchanged between agents during negotiation."""
     message_id: str
     sender: str
     recipient: str
@@ -26,12 +27,14 @@ class NegotiationMessage:
 
 
 class NegotiationEngine:
+    """Engine for inter-agent negotiation and coordination."""
     def request_reverification(
         self,
         domain_policy: DomainPolicy,
         missing_sources: List[str],
         unverified_claims: List[str]
     ) -> NegotiationMessage:
+        """Request re-verification of a claim from the verifier."""
         return NegotiationMessage(
             message_id=f"NEG_{uuid.uuid4().hex[:10].upper()}",
             sender="JUDGE_AGENT", recipient="VERIFIER_AGENT",
@@ -61,6 +64,7 @@ class NegotiationEngine:
         trusted_evidence: List[str],
         correction_guidance: str = ""
     ) -> NegotiationMessage:
+        """Request correction of hallucinated content."""
         return NegotiationMessage(
             message_id=f"NEG_{uuid.uuid4().hex[:10].upper()}",
             sender="JUDGE_AGENT", recipient="CORRECTOR_AGENT",
@@ -85,6 +89,7 @@ class NegotiationEngine:
         claim: str,
         query_type: str = "hallucination_history"
     ) -> NegotiationMessage:
+        """Request additional context from the memory agent."""
         return NegotiationMessage(
             message_id=f"NEG_{uuid.uuid4().hex[:10].upper()}",
             sender="JUDGE_AGENT", recipient="MEMORY_AGENT",
@@ -102,6 +107,7 @@ class NegotiationEngine:
         risk: RiskAssessment,
         escalation_reason: str
     ) -> NegotiationMessage:
+        """Escalate a decision to human review."""
         return NegotiationMessage(
             message_id=f"NEG_{uuid.uuid4().hex[:10].upper()}",
             sender="JUDGE_AGENT", recipient="HUMAN_REVIEWER",

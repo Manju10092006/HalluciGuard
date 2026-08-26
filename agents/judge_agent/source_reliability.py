@@ -9,6 +9,7 @@ from decision_policies import DomainPolicy
 
 
 class SourceReliabilityAnalyzer:
+    """Analyzes source reliability by classifying sources into tiers based on keywords."""
     _TIER_KEYWORDS = {
         SourceTier.OFFICIAL_STANDARD: [
             "pubmed", "nih", "fda", "who", "cdc", "sec edgar", "mitre", "nvd",
@@ -33,6 +34,7 @@ class SourceReliabilityAnalyzer:
     }
 
     def classify_source(self, source_name: str) -> SourceTier:
+        """Classify a source into a reliability tier based on its name."""
         if not source_name:
             return SourceTier.UNVERIFIED
         src = source_name.lower()
@@ -42,6 +44,7 @@ class SourceReliabilityAnalyzer:
         return SourceTier.UNVERIFIED
 
     def assess_source_independence(self, sources: List[str]) -> Dict:
+        """Assess the diversity and independence of a list of sources."""
         tiers = [self.classify_source(s) for s in sources]
         unique_tiers = set(tiers)
         unique_providers = set(s.strip().lower() for s in sources if s)
@@ -53,6 +56,7 @@ class SourceReliabilityAnalyzer:
         }
 
     def is_source_acceptable(self, source_name: str, policy: DomainPolicy) -> Tuple[bool, str]:
+        """Check if a source is acceptable under the given domain policy."""
         tier = self.classify_source(source_name)
         if tier in policy.required_source_tiers:
             return True, f"Source '{source_name}' classified as {tier.value}, meets {policy.domain_name} policy."
