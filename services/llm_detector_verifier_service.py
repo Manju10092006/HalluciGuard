@@ -54,6 +54,7 @@ class LLMDetectorVerifierSliceResult:
     verifier: dict[str, Any] | None
 
     def model_dump(self) -> dict[str, Any]:
+        """Convert the slice result to a dictionary."""
         return asdict(self)
 
 
@@ -91,6 +92,21 @@ class BaseLLMDetectorVerifierService:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMDetectorVerifierSliceResult:
+        """
+        Execute the Base LLM -> Detector -> conditional Verifier vertical slice.
+
+        Args:
+            user_query: The user's question or prompt.
+            domain: The verification domain (e.g., general, biomedical).
+            force_verifier: If True, skip detector gating and always run the verifier.
+            conversation_history: Optional conversation context.
+            generation_mode: Either "normal" or "stress_test".
+            temperature: Optional temperature override.
+            max_tokens: Optional token limit.
+
+        Returns:
+            A LLMDetectorVerifierSliceResult containing generation, detection, and optional verification outputs.
+        """
         # Step 1: Base LLM Generation
         gen_result: GenerationResult = await self.llm_service.generate(
             user_query=user_query,
