@@ -93,6 +93,9 @@ class HalluciGuardState(TypedDict, total=False):
     terminal_status: TerminalStatus
     retry_count: int
     max_retries: int
+    correction_attempt_count: int
+    reverification_attempt_count: int
+    final_routing_decision: str
     current_node: str
     errors: list[AgentError]
     error: str
