@@ -1,33 +1,33 @@
-# HalluciGuard Backend — Docker image for Hugging Face Spaces
-FROM python:3.11.9-slim
+FROM python:3.11-slim
 
-# System deps some ML wheels need at build/runtime (faiss, torch, lxml)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libxml2-dev \
-    libxslt1-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Prevent Python from writing .pyc files and enable unbuffered logging for Cloud Run
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8080
 
 WORKDIR /app
 
-# Install Python deps first so Docker layer caching skips this on code-only changes
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install curl for container health checks
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy the rest of the application
-COPY . .
+# Install PyTorch CPU directly to avoid heavy CUDA wheels (saves ~3.5 GB image size)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Hugging Face Spaces expects the container to listen on 7860 by default.
-# Also give the process a writable HF cache dir inside the container
-# (Spaces runs containers as a non-root user by default).
-ENV HF_HOME=/app/.cache/huggingface \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
-    PORT=7860
+# Install application dependencies
+COPY staging/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /app/.cache/huggingface && chmod -R 777 /app/.cache
+# Copy backend application source
+COPY staging/ /app/
 
-EXPOSE 7860
+# Expose port (Cloud Run sets PORT automatically at runtime)
+EXPOSE 8080
 
-CMD ["uvicorn", "orchestration.api:app", "--host", "0.0.0.0", "--port", "7860"]
+# Container healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-8080}/health || exit 1
+
+# Start FastAPI application using Uvicorn
+CMD exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080}

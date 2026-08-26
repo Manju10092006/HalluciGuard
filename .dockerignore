@@ -1,29 +1,14 @@
 .git
 .gitignore
-*.md
-docs/
-illustrations/
-frontend/
-agents/*/research/
-agents/corrector_agent/
-*.ipynb
-*.ipynb_checkpoints
-__pycache__/
+__pycache__
 *.pyc
 *.pyo
-.venv/
-venv/
+*.pyd
 .env
-.env.local
-*.jpeg
-*.jpg
-*.png
+.venv
+venv/
 node_modules/
-.pytest_cache/
-tests/
-**/tests/
-# Stray root files found during audit — not needed in the image
-12121.txt
-Stock Market*.txt
-The complete, production-grade Glob.txt
-SDC PART 2 BANGER.txt
+frontend/
+frontend-v2/
+halluciguard-hf-space.zip
+*.log
