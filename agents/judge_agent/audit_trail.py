@@ -10,6 +10,7 @@ import uuid
 from typing import Dict, List, Any
 
 class DecisionAuditEngine:
+    """Engine for creating audit trails of judge decisions."""
     def __init__(self):
         pass
 

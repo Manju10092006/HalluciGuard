@@ -166,6 +166,7 @@ class CorrectorAgent:
         self._scorer = scorer
 
     def correct(self, request: RequestLike) -> CorrectionResult:
+        """Execute the correction pipeline and return a canonical CorrectionResult."""
         # 1) Canonical input boundary. Never raise across the boundary.
         try:
             internal = to_internal_request(request)

@@ -8,12 +8,14 @@ from typing import Any, Dict, List, Optional
 
 @dataclass(frozen=True)
 class ComponentCheckResult:
+    """Result of a runtime component validation check."""
     ok: bool
     component: str
     detail: str
     metadata: Dict[str, Any]
 
     def model_dump(self) -> Dict[str, Any]:
+        """Convert the check result to a dictionary."""
         return {
             "ok": self.ok,
             "component": self.component,
