@@ -10,6 +10,7 @@ from config import JudgeConfig, DEFAULT_CONFIG
 from domain_policies import DomainPolicy
 
 class DynamicConfidenceCalibrator:
+    """Calibrates confidence scores based on evidence quality and consistency."""
     def __init__(self, config: JudgeConfig = DEFAULT_CONFIG):
         self.config = config
 

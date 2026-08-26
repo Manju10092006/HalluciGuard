@@ -74,6 +74,7 @@ class ClaimMatch:
 
     @property
     def matched(self) -> bool:
+        """Return True if a sentence span was matched for this claim."""
         return self.span is not None
 
 
