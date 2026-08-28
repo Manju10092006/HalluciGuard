@@ -167,12 +167,11 @@ export interface AuthApiResponse {
 }
 
 export async function apiGoogleAuth(credential: string): Promise<AuthApiResponse> {
-  const res = await fetch(joinUrl(config.apiBaseUrl, "/auth/google"), {
+  const res = await fetch("/auth/google", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ credential }),
-    credentials: "omit",
-    mode: "cors",
+    credentials: "same-origin",
   });
   if (!res.ok) {
     const detail = await readErrorDetail(res);
@@ -182,12 +181,11 @@ export async function apiGoogleAuth(credential: string): Promise<AuthApiResponse
 }
 
 export async function apiLogin(email: string, password: string): Promise<AuthApiResponse> {
-  const res = await fetch(joinUrl(config.apiBaseUrl, "/auth/login"), {
+  const res = await fetch("/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ email, password }),
-    credentials: "omit",
-    mode: "cors",
+    credentials: "same-origin",
   });
   if (!res.ok) {
     const detail = await readErrorDetail(res);
@@ -197,12 +195,11 @@ export async function apiLogin(email: string, password: string): Promise<AuthApi
 }
 
 export async function apiRegister(email: string, password: string, name?: string): Promise<AuthApiResponse> {
-  const res = await fetch(joinUrl(config.apiBaseUrl, "/auth/register"), {
+  const res = await fetch("/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ email, password, name }),
-    credentials: "omit",
-    mode: "cors",
+    credentials: "same-origin",
   });
   if (!res.ok) {
     const detail = await readErrorDetail(res);
@@ -212,14 +209,13 @@ export async function apiRegister(email: string, password: string, name?: string
 }
 
 export async function apiGetMe(token: string): Promise<AuthApiResponse> {
-  const res = await fetch(joinUrl(config.apiBaseUrl, "/auth/me"), {
+  const res = await fetch("/auth/me", {
     method: "GET",
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${token}`,
     },
-    credentials: "omit",
-    mode: "cors",
+    credentials: "same-origin",
   });
   if (!res.ok) {
     const detail = await readErrorDetail(res);
@@ -230,10 +226,9 @@ export async function apiGetMe(token: string): Promise<AuthApiResponse> {
 
 export async function apiLogout(): Promise<void> {
   try {
-    await fetch(joinUrl(config.apiBaseUrl, "/auth/logout"), {
+    await fetch("/auth/logout", {
       method: "POST",
-      credentials: "omit",
-      mode: "cors",
+      credentials: "same-origin",
     });
   } catch {
     /* ignore */
@@ -242,13 +237,12 @@ export async function apiLogout(): Promise<void> {
 
 export async function apiGetHistory(token: string): Promise<any[]> {
   try {
-    const res = await fetch(joinUrl(config.apiBaseUrl, "/api/history"), {
+    const res = await fetch("/api/history", {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${token}`,
       },
-      credentials: "omit",
-      mode: "cors",
+      credentials: "same-origin",
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -260,7 +254,7 @@ export async function apiGetHistory(token: string): Promise<any[]> {
 
 export async function apiSaveHistory(token: string, query: string, result: any): Promise<void> {
   try {
-    await fetch(joinUrl(config.apiBaseUrl, "/api/history"), {
+    await fetch("/api/history", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -268,8 +262,7 @@ export async function apiSaveHistory(token: string, query: string, result: any):
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ query, result }),
-      credentials: "omit",
-      mode: "cors",
+      credentials: "same-origin",
     });
   } catch {
     /* ignore */
@@ -279,13 +272,12 @@ export async function apiSaveHistory(token: string, query: string, result: any):
 export async function apiDeleteHistory(token: string, historyId?: string): Promise<void> {
   try {
     const url = historyId ? `/api/history?history_id=${encodeURIComponent(historyId)}` : "/api/history";
-    await fetch(joinUrl(config.apiBaseUrl, url), {
+    await fetch(url, {
       method: "DELETE",
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      credentials: "omit",
-      mode: "cors",
+      credentials: "same-origin",
     });
   } catch {
     /* ignore */
