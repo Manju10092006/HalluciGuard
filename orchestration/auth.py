@@ -335,17 +335,24 @@ def get_user_by_token(token: str) -> Dict[str, Any]:
             name = payload.get("name") or email.split("@")[0]
             picture = payload.get("picture")
             now = datetime.datetime.now(timezone.utc).isoformat()
+            # users.password_salt / password_hash are NOT NULL; JWT/Google users have
+            # no usable password, so store a random salt and a hash of a random token
+            # (same approach as authenticate_google_user). Without these the INSERT
+            # fails and the user's history FK breaks silently.
+            salt = secrets.token_hex(16)
+            pwd_hash = _hash_password(secrets.token_urlsafe(32), salt)
             try:
                 cursor.execute(
                     """
-                    INSERT OR REPLACE INTO users (id, email, name, picture, auth_provider, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO users
+                        (id, email, name, password_salt, password_hash, picture, auth_provider, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (user_id, email, name, picture, "jwt", now),
+                    (user_id, email, name, salt, pwd_hash, picture, "jwt", now),
                 )
                 conn.commit()
-            except Exception:
-                pass
+            except Exception as exc:  # pragma: no cover - defensive
+                raise RuntimeError(f"Failed to restore user record for token subject {user_id}") from exc
             return {
                 "id": user_id,
                 "sub": user_id,
