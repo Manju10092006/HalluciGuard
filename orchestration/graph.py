@@ -1,369 +1,214 @@
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+import uuid
+from dataclasses import asdict, is_dataclass
+from typing import Any, Callable
+
+from langgraph.graph import END, START, StateGraph
+
+from .claim_extraction import extract_claims
+from .state import (
+    HalluciGuardState,
+    add_bus_message,
+    add_error,
+    add_trace,
+    elapsed_ms,
+    start_timer,
+    utc_now,
+)
+
+
+def _dump(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, dict):
+        return {key: _dump(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_dump(item) for item in value]
+    return value
+
+
+def _failure_update(
+    state: HalluciGuardState,
+    node: str,
+    exc: BaseException,
+    *,
+    retryable: bool = False,
+) -> dict[str, Any]:
+    return {
+        "errors": add_error(state, node, exc, retryable=retryable),
+        "error": f"{node} failed: {type(exc).__name__}: {exc}",
+        "route": "error",
+        "terminal_status": "human_review" if retryable else "fallback",
+        "verification_status": "agent_failed",
+        "inter_agent_bus": add_bus_message(
+            state,
+            node,
+            "supervisor",
+            "ERROR_EVENT",
+            {"error_type": type(exc).__name__, "message": str(exc)},
+            status="failed",
+        ),
+        "updated_at": utc_now(),
+        "trace": add_trace(state, node, "failed", error_type=type(exc).__name__),
+    }
+
+
+def _generate_route(state: HalluciGuardState) -> str:
+    return "human_escalation" if state.get("route") == "error" or not state.get("llm_response") else "detector"
+
+
+def _detector_route(state: HalluciGuardState) -> str:
+    if state.get("route") == "error":
+        return "human_escalation"
+    return "verifier" if state.get("route") == "verify" else "accept"
+
+
+def _verifier_route(state: HalluciGuardState) -> str:
+    return "human_escalation" if state.get("route") == "error" or state.get("verification_status") == "agent_failed" else "judge"
+
+
+def _corrector_route(state: HalluciGuardState) -> str:
+    return "human_escalation" if state.get("route") == "error" or not state.get("correction_result") else "reverifier"
+
+
+def _reverifier_route(state: HalluciGuardState) -> str:
+    result = state.get("reverification_result") or {}
+    if state.get("route") == "error" or str(result.get("status", "")).lower() not in {"completed", "success"}:
+        return "human_escalation"
+    return "judge"
+
+
+def _judge_route(state: HalluciGuardState) -> str:
+    if state.get("route") == "error":
+        return "human_escalation"
+    decision = str(state.get("judge_decision", "ACCEPT")).upper()
+    if decision == "ACCEPT":
+        return "memory"
+    if decision == "REJECT":
+        return "reject"
+    if decision == "ABSTAIN":
+        return "human_escalation"
+    if decision == "VERIFY_AGAIN":
+        return "human_escalation" if int(state.get("retry_count", 0)) >= int(state.get("max_retries", 2)) else "verifier"
+    if decision == "CORRECT":
+        request = state.get("correction_request")
+        active = state.get("active_agents")
+        if not request or (active is not None and "corrector" not in active):
+            return "human_escalation"
+        return "reject" if int(state.get("correction_attempt_count", 0)) >= int(state.get("max_retries", 2)) else "corrector"
+    return "human_escalation"
+
+
+def _verifier_imports():
+    verifier_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent"))
+    if verifier_dir not in sys.path:
+        sys.path.insert(0, verifier_dir)
+    from api.pipeline import get_pipeline
+    from schemas.models import SuspiciousClaim, VerifierInputV2
+    return get_pipeline, SuspiciousClaim, VerifierInputV2
+
+
+async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
+    response = state.get("llm_response", "")
+    return {"draft_response": response, "final_response": response} if response else _failure_update(state, "base_llm", ValueError("No draft response available"))
+
+
+async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
+    return {"route": "verify", "verification_status": "verification_required"}
+
+
 async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
-    VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
-    node_start = start_timer()
-
+    get_pipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
+    started = start_timer()
     try:
-        # ---------------------------------------------------------
-        # 1. Extract claims from the DRAFT ANSWER
-        # ---------------------------------------------------------
-        # The user query is context only.
-        # The verifier must verify what the model actually claimed.
-        draft_response = (
-            state.get("llm_response")
-            or state.get("draft_response")
-            or ""
-        )
-
-        if not draft_response.strip():
+        draft = state.get("llm_response") or state.get("draft_response") or ""
+        if not draft.strip():
             raise ValueError("No draft response available for verification.")
-
-        draft_claims = extract_claims(draft_response)
-
-        # If claim extraction produces nothing, fail closed.
+        draft_claims = extract_claims(draft)
         if not draft_claims:
-            raise ValueError(
-                "No factual claims could be extracted from the draft response."
-            )
-
-        suspicious_claims = [
-            SuspiciousClaim(
-                claim_id=f"dc-{idx + 1}",
-                text=claim,
-            )
-            for idx, claim in enumerate(draft_claims)
-        ]
-
-        # ---------------------------------------------------------
-        # 2. Build verifier input
-        # ---------------------------------------------------------
+            raise ValueError("No factual claims could be extracted from the draft response.")
         payload = VerifierInputV2(
-            query_id=(
-                state.get("request_id")
-                or state.get("execution_id")
-                or str(uuid.uuid4())
-            ),
+            query_id=state.get("request_id") or state.get("execution_id") or str(uuid.uuid4()),
             domain=state.get("domain", "general"),
-            suspicious_claims=suspicious_claims,
+            suspicious_claims=[SuspiciousClaim(claim_id=f"dc-{i + 1}", text=claim) for i, claim in enumerate(draft_claims)],
         )
-
-        # ---------------------------------------------------------
-        # 3. Run verifier with timeout
-        # ---------------------------------------------------------
-        try:
-            verifier_timeout = float(
-                os.environ.get(
-                    "VERIFIER_TIMEOUT_SECONDS",
-                    "120.0",
-                )
-            )
-
-            verifier_res = await asyncio.wait_for(
-                VerificationPipeline().verify(payload),
-                timeout=verifier_timeout,
-            )
-
-            verifier = _dump(verifier_res)
-
-        except asyncio.TimeoutError as sub_err:
-            raise RuntimeError(
-                f"Verifier failed: Timeout after {verifier_timeout}s"
-            ) from sub_err
-
-        except Exception as sub_err:
-            raise RuntimeError(
-                f"Verifier failed: "
-                f"{type(sub_err).__name__}: {sub_err}"
-            ) from sub_err
-
-        # ---------------------------------------------------------
-        # 4. Process verification results
-        # ---------------------------------------------------------
-        judge_pairs: list[dict[str, Any]] = []
-        evidence_all: list[dict[str, Any]] = []
-        nli_results: list[dict[str, Any]] = []
-        claims: list[dict[str, Any]] = []
-
-        has_contradiction = False
-        has_verified = False
-        has_conflicted = False
-        has_unverified = False
-
-        claim_reports = verifier.get("claim_evidence") or verifier.get(
-            "claim_reports",
-            [],
-        )
-
-        for report in claim_reports:
-            verdict_raw = str(
-                report.get("verdict", "")
-            ).lower().strip()
-
-            clean_verdict = "unverified"
-
-            # ---------------------------------------------
-            # Verdict normalization
-            # ---------------------------------------------
-            if (
-                "contradict" in verdict_raw
-                or "hallucinat" in verdict_raw
-            ):
-                has_contradiction = True
-                clean_verdict = "contradicted"
-
-            elif (
-                verdict_raw
-                in {
-                    "verified",
-                    "supported",
-                    "verdictlabel.verified",
-                }
-                or (
-                    verdict_raw.startswith("verif")
-                    and "unverif" not in verdict_raw
-                )
-            ):
-                has_verified = True
-                clean_verdict = "verified"
-
-            elif "conflict" in verdict_raw:
-                has_conflicted = True
-                clean_verdict = "conflicted"
-
-            else:
-                has_unverified = True
-
-            # ---------------------------------------------
-            # Store normalized claim
-            # ---------------------------------------------
-            claims.append(
-                {
-                    "claim_id": report.get("claim_id"),
-                    "text": report.get("claim_text"),
-                    "verdict": clean_verdict,
-                }
-            )
-
-            # ---------------------------------------------
-            # Process evidence
-            # ---------------------------------------------
-            evidence_items = report.get("evidence", [])
-
-            for evidence in evidence_items:
-                evidence_all.append(evidence)
-
-                entailment_score = float(
-                    evidence.get(
-                        "entailment_score",
-                        evidence.get(
-                            "nli_entailment",
-                            0.0,
-                        ),
-                    )
-                    or 0.0
-                )
-
-                contradiction_score = float(
-                    evidence.get(
-                        "contradiction_score",
-                        evidence.get(
-                            "nli_contradiction",
-                            0.0,
-                        ),
-                    )
-                    or 0.0
-                )
-
-                credibility_score = float(
-                    evidence.get(
-                        "credibility_score",
-                        0.0,
-                    )
-                    or 0.0
-                )
-
-                entailment_label = str(
-                    evidence.get(
-                        "entailment_label",
-                        "neutral",
-                    )
-                )
-
-                # -----------------------------------------
-                # NLI result for observability
-                # -----------------------------------------
-                nli_results.append(
-                    {
-                        "claim": report.get(
-                            "claim_text",
-                            "",
-                        ),
-                        "label": entailment_label,
-                        "score": entailment_score,
-                    }
-                )
-
-                # -----------------------------------------
-                # Judge evidence pair
-                # -----------------------------------------
-                judge_pairs.append(
-                    {
-                        "claim": report.get(
-                            "claim_text",
-                            "",
-                        ),
-                        "evidence": evidence.get(
-                            "snippet",
-                            "",
-                        ),
-                        "source": evidence.get(
-                            "source",
-                            "",
-                        ),
-                        "url": evidence.get(
-                            "url",
-                            "",
-                        ),
-                        "entailment_label": entailment_label,
-                        "entailment_score": entailment_score,
-                        "contradiction_score": contradiction_score,
-                        "credibility_score": credibility_score,
-                        "evidence_class": classify_evidence_class(
-                            entailment_label,
-                            entailment_score,
-                            contradiction_score,
-                            credibility_score,
-                        ).value,
-                    }
-                )
-
-        # ---------------------------------------------------------
-        # 5. Build bus message
-        # ---------------------------------------------------------
-        bus = add_bus_message(
-            state,
-            source_agent="verifier",
-            target_agent="supervisor",
-            message_type="VERIFICATION_RESULT",
-            payload={
-                "claims_count": len(claims),
-                "claims_extracted": len(draft_claims),
-                "evidence_count": len(evidence_all),
-                "has_contradiction": has_contradiction,
-                "has_verified": has_verified,
-            },
-        )
-
-        # ---------------------------------------------------------
-        # 6. Convert raw verifier output into canonical result
-        # ---------------------------------------------------------
-        canonical_verifier_result = _build_canonical_verifier_result(
-            verifier,
-            payload.query_id,
-            payload.domain,
-        )
-
-        # ---------------------------------------------------------
-        # 7. Calculate overall verification status
-        # ---------------------------------------------------------
-        overall_status = (
-            PipelineState.CONTRADICTED.value
-            if has_contradiction
-            else PipelineState.CONFLICTED.value
-            if has_conflicted
-            else PipelineState.VERIFIED.value
-            if has_verified
-            else PipelineState.UNVERIFIED.value
-        )
-
-        # ---------------------------------------------------------
-        # 8. Return state update
-        # ---------------------------------------------------------
+        timeout = float(os.environ.get("VERIFIER_TIMEOUT_SECONDS", "120.0"))
+        result = _dump(await asyncio.wait_for(get_pipeline().verify(payload), timeout=timeout))
+        reports = result.get("claim_evidence") or result.get("claim_reports", [])
+        has_contradiction = any("contradict" in str(item.get("verdict", "")).lower() for item in reports)
+        has_verified = any("verif" in str(item.get("verdict", "")).lower() and "unverif" not in str(item.get("verdict", "")).lower() for item in reports)
+        status = "contradicted" if has_contradiction else "verified" if has_verified else "unverified"
         return {
-            "verifier": verifier,
-
-            "verifier_result": _dump(
-                canonical_verifier_result
-            ),
-
-            "claims": claims,
-
-            # Important:
-            # These are the claims extracted from the draft answer,
-            # not the user's question.
+            "verifier": result,
+            "verifier_result": result,
             "draft_claims": draft_claims,
-
-            "verification_summary": {
-                "claims_extracted": len(draft_claims),
-                "claims_verified": int(has_verified),
-                "claims_contradicted": int(has_contradiction),
-                "claims_conflicted": int(has_conflicted),
-                "claims_unverified": int(has_unverified),
-                "overall_status": overall_status,
-            },
-
-            "judge_pairs": judge_pairs,
-
-            "evidence": evidence_all,
-
-            "retrieved_evidence": evidence_all,
-
-            "ranked_evidence": _dump(
-                canonical_verifier_result.evidence
-            ),
-
-            "nli_results": nli_results,
-
-            "verification_status": overall_status,
-
-            "inter_agent_bus": bus,
-
-            "updated_at": utc_now(),
-
-            "trace": add_trace(
-                state,
-                "verifier",
-                "completed",
-                latency_ms=elapsed_ms(node_start),
-                claim_count=len(claims),
-                evidence_count=len(evidence_all),
-                has_contradiction=has_contradiction,
-            ),
+            "claims": reports,
+            "verification_status": status,
+            "verification_summary": {"claims_extracted": len(draft_claims), "claims_verified": int(has_verified), "claims_contradicted": int(has_contradiction), "overall_status": status},
+            "trace": add_trace(state, "verifier", "completed", latency_ms=elapsed_ms(started), claim_count=len(reports)),
         }
-
-    # -------------------------------------------------------------
-    # 9. Fail closed on verifier errors
-    # -------------------------------------------------------------
     except Exception as exc:
-        from orchestration.schemas import (
-            VerifierResult as CanonicalVerifierResult,
-            ExecutionStatus,
-        )
+        return _failure_update(state, "verifier", exc, retryable=True)
 
-        failed_res = CanonicalVerifierResult(
-            query_id=(
-                payload.query_id
-                if "payload" in locals()
-                else "q-failed"
-            ),
-            domain=state.get(
-                "domain",
-                "general",
-            ),
-            claim_reports=[],
-            evidence=[],
-            overall_confidence=0.0,
-            status=ExecutionStatus.FAILED,
-        )
 
-        update = _failure_update(
-            state,
-            "verifier",
-            exc,
-            retryable=True,
-        )
+async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
+    return {"judge_decision": "ACCEPT", "route": "memory"}
 
-        update["verifier_result"] = _dump(
-            failed_res
-        )
 
-        return update
+async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
+    return _failure_update(state, "corrector", RuntimeError("Correction implementation unavailable"))
+
+
+async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
+    return _failure_update(state, "reverifier", RuntimeError("Reverification implementation unavailable"))
+
+
+def _accept_node(state: HalluciGuardState) -> dict[str, Any]:
+    return {"final_response": state.get("llm_response", ""), "terminal_status": "accepted", "verification_status": "accepted"}
+
+
+def _reject_node(state: HalluciGuardState) -> dict[str, Any]:
+    return {"final_response": "The draft response could not be safely verified and has been rejected.", "terminal_status": "rejected", "verification_status": "rejected"}
+
+
+def _human_escalation_node(state: HalluciGuardState) -> dict[str, Any]:
+    return {"final_response": "This response requires human review before it can be delivered.", "terminal_status": "human_review", "verification_status": "human_review_required"}
+
+
+def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
+    return {"memory": {"stored": [], "count": 0}, "terminal_status": state.get("terminal_status", "accepted")}
+
+
+def build_verification_graph(node_overrides: dict[str, Callable[..., Any]] | None = None):
+    nodes = {"generate": _generate_node, "detector": _detector_node, "verifier": _verifier_node, "judge": _judge_node, "corrector": _corrector_node, "reverifier": _reverifier_node, "accept": _accept_node, "reject": _reject_node, "human_escalation": _human_escalation_node, "memory": _memory_node}
+    nodes.update(node_overrides or {})
+    graph = StateGraph(HalluciGuardState)
+    for name, function in nodes.items():
+        graph.add_node(name, function)
+    graph.add_edge(START, "generate")
+    graph.add_conditional_edges("generate", _generate_route, {"detector": "detector", "human_escalation": "human_escalation"})
+    graph.add_conditional_edges("detector", _detector_route, {"verifier": "verifier", "accept": "accept", "human_escalation": "human_escalation"})
+    graph.add_conditional_edges("verifier", _verifier_route, {"judge": "judge", "human_escalation": "human_escalation"})
+    graph.add_conditional_edges("judge", _judge_route, {"memory": "memory", "corrector": "corrector", "verifier": "verifier", "reject": "reject", "human_escalation": "human_escalation"})
+    graph.add_conditional_edges("corrector", _corrector_route, {"reverifier": "reverifier", "human_escalation": "human_escalation"})
+    graph.add_conditional_edges("reverifier", _reverifier_route, {"judge": "judge", "human_escalation": "human_escalation"})
+    for terminal in ("accept", "reject", "human_escalation"):
+        graph.add_edge(terminal, "memory")
+    graph.add_edge("memory", END)
+    return graph.compile()
+
+
+_GRAPH = None
+
+
+def get_verification_graph():
+    global _GRAPH
+    if _GRAPH is None:
+        _GRAPH = build_verification_graph()
+    return _GRAPH
