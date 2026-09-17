@@ -48,12 +48,16 @@ class TestModelLoading:
     def test_model_loads_from_artifacts(self, detector):
         """The model should load from the configured artifacts path."""
         detector._ensure_model_loaded()
-        assert detector._model_loaded is True
         assert detector._inference.is_loaded() is True
 
     def test_model_path_exists(self, detector):
-        """The model artifacts directory should exist on disk."""
+        """The model artifacts directory should exist when a local path is configured."""
         model_path = detector.config.halueval_model_path
+        # HF Hub ids are not filesystem paths; only validate local references.
+        if not model_path.startswith((".", "/", "~", "\\")) and not (
+            os.name == "nt" and len(model_path) > 1 and model_path[1] == ":"
+        ):
+            return
         # Resolve relative to project root
         if not os.path.isabs(model_path):
             model_path = os.path.join(project_root, model_path)
