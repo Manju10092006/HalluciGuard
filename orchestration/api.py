@@ -337,6 +337,31 @@ def _total_latency_ms(result: Dict[str, Any]) -> int:
     )
 
 
+def _stage_breakdown(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Derive a per-stage latency breakdown from the trace events.
+
+    Each trace event records the node name and its latency_ms, so identical nodes
+    (e.g. judge appearing before and after reverification) are summed into a single
+    stage entry. This answers "where did the 107 seconds go?" at a glance.
+
+    Args:
+        result: The verification result dictionary containing trace events.
+
+    Returns:
+        A list of {"stage": node_name, "latency_ms": total} ordered by trace order.
+    """
+    per_stage: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for event in result.get("trace", []):
+        node = str(event.get("node", "unknown"))
+        if node not in per_stage:
+            per_stage[node] = {"stage": node, "latency_ms": 0}
+            order.append(node)
+        per_stage[node]["latency_ms"] += int(event.get("latency_ms", 0) or 0)
+    return [per_stage[node] for node in order]
+
+
 def _final_verifier_view(result: Dict[str, Any]) -> Dict[str, Any]:
     """Return claim data for the answer that is actually delivered to the user."""
     legacy = dict(result.get("verifier") or {})
@@ -394,7 +419,13 @@ async def _execute_verification(
             "final_response": result.get("final_response") or result.get("draft_response", result.get("llm_response")),
             "terminal_status": result.get("terminal_status") or "human_review",
             "verification_status": derived_status,
+            "answer_status": result.get("answer_status"),
+            "correction_requested": result.get("correction_requested"),
+            "verification_summary": result.get("verification_summary"),
+            "judge_summary": result.get("judge_summary"),
+            "reverification_summary": result.get("reverification_summary"),
             "total_latency_ms": _total_latency_ms(result),
+            "stage_breakdown": _stage_breakdown(result),
             "detector": result.get("detector"),
             "verifier": verifier_view,
             "memory": result.get("memory"),

@@ -237,6 +237,12 @@ class EvidenceScorer:
         supporting_sources: set[str] = set()
         contradicting_sources: set[str] = set()
 
+        # Multi-signal observability floors across classified passages (NLI is
+        # only one input; credibility, recency, and relevance all gate the score).
+        min_credibility = 1.0
+        min_recency = 1.0
+        min_relevance = 1.0
+
         for passage, nli in zip(passages, nli_results):
             rel_result = self.relation_verifier.verify_relation(claim, [passage])
             evidence_class = self.classify_evidence(claim, passage, nli)
@@ -284,6 +290,10 @@ class EvidenceScorer:
             url_key = (getattr(passage, "url", "") or source_id or getattr(passage, "title", "")).strip().lower()
 
             base_weight = credibility * recency * relevance * validity_factor
+
+            min_credibility = min(min_credibility, credibility)
+            min_recency = min(min_recency, recency)
+            min_relevance = min(min_relevance, relevance)
 
             if evidence_class == "SUPPORTING":
                 support_signal = entailment * (1.0 - 0.35 * neutral)
@@ -378,5 +388,20 @@ class EvidenceScorer:
             "trust_score": round(trust_score, 4),
             "confidence_score": confidence_score,
             "evidence_classification_counts": classification_counts,
+            # Explicit multi-signal breakdown: NLI strength plus evidence quality,
+            # source quality, relevance, and source diversity that jointly decided
+            # the verdict — NLI is never the sole truth.
+            "signals": {
+                "nli_support_max": round(support_max, 4),
+                "nli_contradiction_max": round(contradiction_max, 4),
+                "evidence_quality": round(max(support_max, contradiction_max), 4),
+                "source_credibility_floor": round(min_credibility, 4),
+                "recency_floor": round(min_recency, 4),
+                "relevance_floor": round(min_relevance, 4),
+                "diversity_supporting_sources": len(supporting_sources),
+                "diversity_contradicting_sources": len(contradicting_sources),
+                "support_diversity_bonus": round(support_bonus, 4),
+                "contradiction_diversity_bonus": round(contradiction_bonus, 4),
+            },
         }
 

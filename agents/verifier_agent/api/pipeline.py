@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 import time
 import logging
+import threading
 from typing import List, Dict, Any, Tuple
 
 from schemas.models import (
@@ -769,3 +770,27 @@ class VerificationPipeline:
         )
 
         return final_response
+
+
+# ---------------------------------------------------------------------------
+# Process-wide pipeline singleton.
+#
+# The pipeline wraps ML models (reranker, NLI, dense embeddings) plus a disk
+# cache and a metrics collector. Constructing a fresh VerificationPipeline per
+# request re-creates every wrapper, re-opens the cache, and resets metrics.
+# Sharing one instance (the same pattern the standalone API already uses) keeps
+# wrappers and caches warm on the hot path; actual model weights are always
+# load-once via the ModelManager singleton regardless.
+# ---------------------------------------------------------------------------
+_PIPELINE_SINGLETON: Optional["VerificationPipeline"] = None
+_PIPELINE_LOCK = threading.Lock()
+
+
+def get_pipeline() -> "VerificationPipeline":
+    """Return the process-wide VerificationPipeline singleton (load-once)."""
+    global _PIPELINE_SINGLETON
+    if _PIPELINE_SINGLETON is None:
+        with _PIPELINE_LOCK:
+            if _PIPELINE_SINGLETON is None:
+                _PIPELINE_SINGLETON = VerificationPipeline()
+    return _PIPELINE_SINGLETON
