@@ -400,8 +400,15 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
     VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
     node_start = start_timer()
     try:
-        # Verifier evaluates the core factual claim
-        claim_text = state.get("user_query") or state.get("llm_response") or state.get("draft_response") or ""
+        # Verifier evaluates the core factual claim: the model's generated answer.
+        # Prefer the LLM response over the raw user query (the model output is what
+        # must be grounded); fall back to the query only when no draft exists.
+        claim_text = (
+            state.get("llm_response")
+            or state.get("draft_response")
+            or state.get("user_query")
+            or ""
+        )
         payload = VerifierInputV2(
             query_id=state.get("request_id")
             or state.get("execution_id")
