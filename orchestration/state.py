@@ -67,6 +67,14 @@ class HalluciGuardState(TypedDict, total=False):
     reverification_result: ReverificationResult | dict[str, Any]
     memory_result: MemoryResult | dict[str, Any]
 
+    # Structured summaries (information-flow correctness)
+    draft_claims: list[str]
+    verification_summary: dict[str, Any]
+    judge_summary: dict[str, Any]
+    reverification_summary: dict[str, Any]
+    answer_status: str
+    correction_requested: bool
+
     # Shared inter-agent contract (Legacy / Backward-compatibility)
     detector: dict[str, Any]
     route: str

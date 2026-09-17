@@ -56,8 +56,8 @@ class TestDuplicateDetection:
         first = StoreFactRequest(
             claim_text="The moon is made of cheese",
             domain="science",
-            verdict="likely_hallucinated",
-            confidence=0.05,
+            verdict="verified",
+            confidence=0.9,
         )
         resp1 = await agent.store_fact(first)
         assert resp1.stored is True
@@ -65,8 +65,8 @@ class TestDuplicateDetection:
         second = StoreFactRequest(
             claim_text="The moon is made of cheese",
             domain="science",
-            verdict="likely_hallucinated",
-            confidence=0.05,
+            verdict="verified",
+            confidence=0.9,
         )
         resp2 = await agent.store_fact(second)
         assert resp2.stored is False
@@ -161,7 +161,8 @@ class TestBatchStore:
         ]
         resp = await agent.store_facts_batch(requests)
         assert resp.total == 3
-        assert resp.stored == 3
+        assert resp.stored == 2
+        assert resp.skipped == 1
         assert resp.failed == 0
         assert len(resp.results) == 3
 
@@ -311,20 +312,20 @@ class TestFactUpdate:
         req = StoreFactRequest(
             claim_text="Fact to be updated",
             domain="test",
-            verdict="likely_hallucinated",
-            confidence=0.1,
+            verdict="verified",
+            confidence=0.9,
         )
         resp = await agent.store_fact(req)
 
         update = UpdateFactRequest(
             fact_id=resp.fact_id,
-            new_verdict="verified",
-            new_confidence=0.95,
+            new_verdict="likely_hallucinated",
+            new_confidence=0.05,
         )
         update_resp = await agent.update_fact(update)
-        assert update_resp.old_verdict == "likely_hallucinated"
-        assert update_resp.new_verdict == "verified"
-        assert update_resp.new_confidence == 0.95
+        assert update_resp.old_verdict == "verified"
+        assert update_resp.new_verdict == "likely_hallucinated"
+        assert update_resp.new_confidence == 0.05
         assert "knowledge_graph" in update_resp.updated_in
         assert "vector_store" in update_resp.updated_in
 

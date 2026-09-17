@@ -9,7 +9,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
 
+from orchestration.schemas import EvidenceClass, PipelineState
 from services.base_llm_service import BaseLLMService
+from .claim_extraction import extract_claims
 from .state import (
     HalluciGuardState,
     add_bus_message,
@@ -42,6 +44,35 @@ def _dump(value: Any) -> Any:
     return value
 
 
+def _is_verified_report(report: Any) -> bool:
+    """True only when a claim report carries a positively VERIFIED verdict.
+
+    Memory persistence must never treat UNVERIFIED, CONFLICTED, or CONTRADICTED
+    verdicts as facts — only exact VERIFIED verdicts may persist.
+    """
+    if isinstance(report, dict):
+        verdict = str(report.get("verdict", "")).strip().lower()
+    else:
+        verdict = str(getattr(report, "verdict", "")).strip().lower()
+    return verdict in {"verified", "supported", "verdictlabel.verified"}
+
+
+def classify_evidence_class(
+    entail_raw: str, entail_score: float, contra_score: float, credibility: float
+) -> EvidenceClass:
+    """Rank evidence (spec §11) into PRIMARY_CONTRADICTION, PRIMARY_SUPPORT,
+    SECONDARY_SUPPORT, or LOW_QUALITY.
+    """
+    entail_raw = (entail_raw or "").lower()
+    if "contra" in entail_raw or contra_score >= 0.60:
+        return EvidenceClass.PRIMARY_CONTRADICTION
+    if entail_score >= 0.60 and credibility >= 0.50:
+        return EvidenceClass.PRIMARY_SUPPORT
+    if entail_score >= 0.35 and credibility >= 0.35:
+        return EvidenceClass.SECONDARY_SUPPORT
+    return EvidenceClass.LOW_QUALITY
+
+
 def _failure_update(
     state: HalluciGuardState, node: str, exc: BaseException, *, retryable: bool = False
 ) -> dict[str, Any]:
@@ -70,7 +101,7 @@ def _failure_update(
         "error": f"{node} failed: {type(exc).__name__}: {exc}",
         "route": "error",
         "terminal_status": "human_review" if retryable else "fallback",
-        "verification_status": "agent_failed",
+        "verification_status": PipelineState.AGENT_FAILED.value,
         "inter_agent_bus": bus,
         "updated_at": utc_now(),
         "trace": add_trace(
@@ -252,9 +283,9 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             ),
             "confidence": float(detector.get("confidence_score", 0.0)),
             "verification_status": (
-                "detector_safe_fast_path"
+                PipelineState.DETECTOR_SAFE_FAST_PATH.value
                 if route == "accept"
-                else "verification_required"
+                else PipelineState.VERIFICATION_REQUIRED.value
             ),
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
@@ -299,7 +330,8 @@ def _verifier_imports():
     )
     if verifier_dir not in sys.path:
         sys.path.insert(0, verifier_dir)
-    from api.pipeline import VerificationPipeline
+    # Use the process-wide pipeline singleton so models/caches load exactly once.
+    from api.pipeline import get_pipeline as VerificationPipeline
     from schemas.models import SuspiciousClaim, VerifierInputV2
 
     return VerificationPipeline, SuspiciousClaim, VerifierInputV2
@@ -325,6 +357,7 @@ def _build_canonical_verifier_result(
         Evidence as CanonicalEvidence,
         VerdictLabel as CanonicalVerdictLabel,
         EntailmentLabel as CanonicalEntailmentLabel,
+        EvidenceClass as CanonicalEvidenceClass,
         ExecutionStatus,
     )
 
@@ -353,6 +386,14 @@ def _build_canonical_verifier_result(
                 canonical_ev_list.append(ev)
                 continue
             entail_raw = str(ev.get("entailment_label", "neutral")).lower()
+            entail_score = float(
+                ev.get("entailment_score", ev.get("nli_entailment", 0.0)) or 0.0
+            )
+            contra_score = float(
+                ev.get("contradiction_score", ev.get("nli_contradiction", 0.0)) or 0.0
+            )
+            credibility = float(ev.get("credibility_score", 0.0) or 0.0)
+
             if "contra" in entail_raw:
                 entail_lbl = CanonicalEntailmentLabel.CONTRADICTION
             elif "entail" in entail_raw or "support" in entail_raw:
@@ -368,10 +409,32 @@ def _build_canonical_verifier_result(
                     url=ev.get("url"),
                     snippet=ev.get("snippet", ""),
                     entailment_label=entail_lbl,
-                    entailment_score=float(ev.get("entailment_score", 0.8)),
-                    credibility_score=float(ev.get("credibility_score", 0.8)),
+                    entailment_score=entail_score,
+                    contradiction_score=contra_score,
+                    credibility_score=credibility,
+                    evidence_class=classify_evidence_class(
+                        entail_raw, entail_score, contra_score, credibility
+                    ),
                 )
             )
+
+        # Rank within the claim: decisive evidence (primary contradiction/support)
+        # first, then secondary corroboration, then low-quality context.
+        canonical_ev_list.sort(
+            key=lambda e: (
+                3
+                if e.evidence_class == CanonicalEvidenceClass.PRIMARY_CONTRADICTION
+                else 2
+                if e.evidence_class == CanonicalEvidenceClass.PRIMARY_SUPPORT
+                else 1
+                if e.evidence_class == CanonicalEvidenceClass.SECONDARY_SUPPORT
+                else 0,
+                max(e.entailment_score, e.contradiction_score),
+            ),
+            reverse=True,
+        )
+        for rank, ev in enumerate(canonical_ev_list, start=1):
+            ev.rank = rank
 
         canonical_reports.append(
             CanonicalClaimReport(
@@ -400,16 +463,20 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
     VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
     node_start = start_timer()
     try:
-        # Verifier evaluates the core factual claim
-        claim_text = state.get("user_query") or state.get("llm_response") or state.get("draft_response") or ""
+        # Verifier evaluates the claims the DRAFT ANSWER actually makes.
+        # The user query is context only — it must never be the verified claim.
+        draft_response = state.get("llm_response") or state.get("draft_response") or ""
+        draft_claims = extract_claims(draft_response)
+        suspicious_claims = [
+            SuspiciousClaim(claim_id=f"dc-{idx + 1}", text=claim)
+            for idx, claim in enumerate(draft_claims)
+        ]
         payload = VerifierInputV2(
             query_id=state.get("request_id")
             or state.get("execution_id")
             or str(uuid.uuid4()),
             domain=state.get("domain", "general"),
-            suspicious_claims=[
-                SuspiciousClaim(claim_id="c1", text=claim_text)
-            ],
+            suspicious_claims=suspicious_claims,
         )
         try:
             verifier_timeout = float(os.environ.get("VERIFIER_TIMEOUT_SECONDS", "120.0"))
@@ -427,6 +494,7 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         has_contradiction = False
         has_verified = False
         has_conflicted = False
+        has_unverified = False
 
         for report in verifier.get("claim_evidence", []):
             verdict_raw = str(report.get("verdict", "")).lower()
@@ -440,6 +508,8 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             elif "conflict" in verdict_raw:
                 has_conflicted = True
                 clean_verdict = "conflicted"
+            else:
+                has_unverified = True
 
             claims.append(
                 {
@@ -466,7 +536,27 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
                         "url": evidence.get("url", ""),
                         "entailment_label": evidence.get("entailment_label", "neutral"),
                         "entailment_score": evidence.get("entailment_score", 0.0),
+                        "contradiction_score": evidence.get(
+                            "contradiction_score", evidence.get("nli_contradiction", 0.0)
+                        ),
                         "credibility_score": evidence.get("credibility_score", 0.0),
+                        "evidence_class": classify_evidence_class(
+                            str(evidence.get("entailment_label", "neutral")),
+                            float(
+                                evidence.get(
+                                    "entailment_score", evidence.get("nli_entailment", 0.0)
+                                )
+                                or 0.0
+                            ),
+                            float(
+                                evidence.get(
+                                    "contradiction_score",
+                                    evidence.get("nli_contradiction", 0.0),
+                                )
+                                or 0.0
+                            ),
+                            float(evidence.get("credibility_score", 0.0) or 0.0),
+                        ).value,
                     }
                 )
 
@@ -477,6 +567,7 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             message_type="VERIFICATION_RESULT",
             payload={
                 "claims_count": len(claims),
+                "claims_extracted": len(draft_claims),
                 "evidence_count": len(evidence_all),
                 "has_contradiction": has_contradiction,
                 "has_verified": has_verified,
@@ -488,20 +579,29 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         )
 
         overall_status = (
-            "contradicted" if has_contradiction
-            else "conflicted" if has_conflicted
-            else "verified" if has_verified
-            else "unverified"
+            PipelineState.CONTRADICTED.value if has_contradiction
+            else PipelineState.CONFLICTED.value if has_conflicted
+            else PipelineState.VERIFIED.value if has_verified
+            else PipelineState.UNVERIFIED.value
         )
 
         return {
             "verifier": verifier,
             "verifier_result": _dump(canonical_verifier_result),
             "claims": claims,
+            "draft_claims": draft_claims,
+            "verification_summary": {
+                "claims_extracted": len(draft_claims),
+                "claims_verified": int(has_verified),
+                "claims_contradicted": int(has_contradiction),
+                "claims_conflicted": int(has_conflicted),
+                "claims_unverified": int(has_unverified),
+                "overall_status": overall_status,
+            },
             "judge_pairs": judge_pairs,
             "evidence": evidence_all,
             "retrieved_evidence": evidence_all,
-            "ranked_evidence": evidence_all,
+            "ranked_evidence": _dump(canonical_verifier_result.evidence),
             "nli_results": nli_results,
             "verification_status": overall_status,
             "inter_agent_bus": bus,
@@ -541,7 +641,7 @@ def _verifier_route(state: HalluciGuardState) -> str:
     Returns:
         The name of the next node: "human_escalation" if verification failed, or "judge" otherwise.
     """
-    if state.get("route") == "error" or state.get("verification_status") == "agent_failed":
+    if state.get("route") == "error" or state.get("verification_status") == PipelineState.AGENT_FAILED.value:
         return "human_escalation"
     return "judge"
 
@@ -585,23 +685,25 @@ async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
 
         if decision_val == "ACCEPT":
             route = "memory"
-            verification_status = "verified_and_accepted"
+            verification_status = PipelineState.VERIFIED_AND_ACCEPTED.value
         elif decision_val == "CORRECT":
             active = state.get("active_agents")
-            if active is not None and "corrector" not in active:
+            # Fail closed: a CORRECT decision without a correction payload is a
+            # contract violation — never route to the Corrector without work to do.
+            if not corr_req or (active is not None and "corrector" not in active):
                 route = "human_escalation"
             else:
                 route = "corrector" if corr_attempts < state.get("max_retries", 2) else "reject"
-            verification_status = "correction_requested"
+            verification_status = PipelineState.CORRECTION_REQUESTED.value
         elif decision_val == "VERIFY_AGAIN":
             route = "verifier" if retry_count < state.get("max_retries", 2) else "human_escalation"
-            verification_status = "reverification_requested"
+            verification_status = PipelineState.REVERIFICATION_REQUESTED.value
         elif decision_val == "REJECT":
             route = "reject"
-            verification_status = "rejected_by_judge"
+            verification_status = PipelineState.REJECTED_BY_JUDGE.value
         else:
             route = "human_escalation"
-            verification_status = "judge_abstain"
+            verification_status = PipelineState.JUDGE_ABSTAIN.value
 
         bus = add_bus_message(
             state,
@@ -616,12 +718,31 @@ async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
             },
         )
 
+        answer_status_val = str(dumped_judge.get("answer_status") or "").upper()
+        if not answer_status_val:
+            answer_status_val = (
+                "REQUIRES_CORRECTION" if decision_val == "CORRECT"
+                else "ACCEPTED" if decision_val == "ACCEPT"
+                else "REJECTED" if decision_val == "REJECT"
+                else "NEEDS_REVIEW"
+            )
+        correction_requested = bool(corr_req)
+
         return {
             "judge": dumped_judge,
             "judge_result": dumped_judge,
             "judge_decision": decision_val,
+            "answer_status": answer_status_val,
+            "correction_requested": correction_requested,
             "severity": severity_val,
             "correction_request": corr_req,
+            "judge_summary": {
+                "decision": decision_val,
+                "answer_status": answer_status_val,
+                "correction_requested": correction_requested,
+                "severity": severity_val,
+                "reason": dumped_judge.get("reason", ""),
+            },
             "route": route,
             "terminal_status": "accepted" if decision_val == "ACCEPT" else state.get("terminal_status"),
             "retry_count": new_retry_count,
@@ -663,33 +784,43 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
             corr_req = None
 
         if corr_req is None:
-            original_resp = state.get("llm_response") or state.get("draft_response", "")
-            user_q = state.get("user_query", "")
-            v_res = state.get("verifier_result") or {}
-            claims_to_correct = []
-            claims_to_preserve = []
-            trusted_ev = []
-            contra_ev = []
-            if isinstance(v_res, dict):
-                for cr in v_res.get("claim_reports", []):
-                    verdict_str = str(cr.get("verdict", "")).lower()
-                    if "contradict" in verdict_str:
-                        claims_to_correct.append(cr)
-                        contra_ev.extend(cr.get("evidence", []))
-                    elif "verif" in verdict_str and "unverif" not in verdict_str:
-                        claims_to_preserve.append(cr)
-                        trusted_ev.extend(cr.get("evidence", []))
+            # Enforcement of the Corrector contract: the Corrector must only run
+            # when the Judge issued a non-empty CorrectionRequest. Self-reconstructing
+            # a correction from verifier output is an explicit opt-out ONLY and never
+            # the default — without authorization we fail closed and escalate.
+            if os.environ.get("HG_CORRECTOR_RECONSTRUCT", "false").strip().lower() == "true":
+                original_resp = state.get("llm_response") or state.get("draft_response", "")
+                user_q = state.get("user_query", "")
+                v_res = state.get("verifier_result") or {}
+                claims_to_correct = []
+                claims_to_preserve = []
+                trusted_ev = []
+                contra_ev = []
+                if isinstance(v_res, dict):
+                    for cr in v_res.get("claim_reports", []):
+                        verdict_str = str(cr.get("verdict", "")).lower()
+                        if "contradict" in verdict_str:
+                            claims_to_correct.append(cr)
+                            contra_ev.extend(cr.get("evidence", []))
+                        elif "verif" in verdict_str and "unverif" not in verdict_str:
+                            claims_to_preserve.append(cr)
+                            trusted_ev.extend(cr.get("evidence", []))
 
-            corr_req = CorrectionRequest(
-                execution_id=state.get("execution_id") or state.get("request_id") or str(uuid.uuid4()),
-                user_query=user_q,
-                original_response=original_resp,
-                claims_to_correct=claims_to_correct,
-                claims_to_preserve=claims_to_preserve,
-                trusted_evidence=trusted_ev,
-                contradictory_evidence=contra_ev,
-                correction_instructions="Repair contradicted claim(s) using evidence.",
-            )
+                corr_req = CorrectionRequest(
+                    execution_id=state.get("execution_id") or state.get("request_id") or str(uuid.uuid4()),
+                    user_query=user_q,
+                    original_response=original_resp,
+                    claims_to_correct=claims_to_correct,
+                    claims_to_preserve=claims_to_preserve,
+                    trusted_evidence=trusted_ev,
+                    contradictory_evidence=contra_ev,
+                    correction_instructions="Repair contradicted claim(s) using evidence.",
+                )
+            else:
+                raise ValueError(
+                    "correction_request_missing: Corrector must only run with a Judge-issued "
+                    "CorrectionRequest; refusing to self-reconstruct"
+                )
 
         def _run_corrector():
             provider = os.environ.get("HG_CORRECTOR_PROVIDER", "openrouter").strip().lower()
@@ -767,18 +898,18 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             or str(uuid.uuid4())
         )
 
-        claim_texts = []
-        changed = corr_res.get("changed_claims")
-        if changed and isinstance(changed, list):
-            for c in changed:
-                if isinstance(c, dict) and c.get("text"):
-                    claim_texts.append(c["text"])
-                elif isinstance(c, str) and c.strip():
-                    claim_texts.append(c.strip())
+        candidate_text = (
+            corr_res.get("corrected_text")
+            or state.get("final_response")
+            or state.get("llm_response", "")
+        )
+        if not candidate_text or not candidate_text.strip():
+            candidate_text = state.get("llm_response") or state.get("draft_response", "")
 
-        if not claim_texts:
-            sentences = [s.strip() for s in candidate_text.replace("\n", " ").split(".") if len(s.strip()) > 10]
-            claim_texts = sentences[:2] if sentences else [candidate_text[:200]]
+        # Re-verify the corrected answer itself: extract fresh claims from the
+        # corrected text and verify THOSE. Never trust the Corrector's diff alone
+        # or naive sentence splitting to define what got verified.
+        claim_texts = extract_claims(candidate_text)
 
         suspicious_claims = [
             SuspiciousClaim(claim_id=f"rev-{idx+1}", text=txt)
@@ -815,9 +946,18 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             1 for r in canonical_v_res.claim_reports
             if str(getattr(r, "verdict", "")).lower() in ("contradicted", "verdictlabel.contradicted")
         )
+        verified_count = sum(
+            1 for r in canonical_v_res.claim_reports
+            if str(getattr(r, "verdict", "")).lower() in ("verified", "verdictlabel.verified")
+        )
+        # Fail closed: a corrected answer is only trusted when verification completed,
+        # produced NO contradictions, AND at least one claim was positively verified.
+        # An all-unverified (or empty) corrected text must never pass the loop.
         passed = (
             canonical_v_res.status == ExecutionStatus.COMPLETED
             and remaining_contradictions == 0
+            and verified_count > 0
+            and bool(candidate_text.strip())
         )
 
         rev_result = ReverificationResult(
@@ -837,6 +977,8 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             payload={
                 "passed": passed,
                 "remaining_contradictions": remaining_contradictions,
+                "verified_claims": verified_count,
+                "claims_extracted": len(claim_texts),
                 "reverification_attempt": rev_attempts,
             },
         )
@@ -844,6 +986,13 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
         return {
             "reverification_result": dumped_rev,
             "reverification_attempt_count": rev_attempts,
+            "reverification_summary": {
+                "claims_extracted": len(claim_texts),
+                "remaining_contradictions": remaining_contradictions,
+                "verified_claims": verified_count,
+                "passed": passed,
+                "attempt_count": rev_attempts,
+            },
             "route": "judge",
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
@@ -900,6 +1049,15 @@ def _judge_route(state: HalluciGuardState) -> str:
     if decision == "ACCEPT":
         return "memory"
     elif decision == "CORRECT":
+        # Fail closed: only run the Corrector when there is a non-empty
+        # CorrectionRequest payload; CORRECT without work is a contract violation.
+        correction_req = state.get("correction_request")
+        if not correction_req:
+            judge = state.get("judge") or state.get("judge_result")
+            if isinstance(judge, dict):
+                correction_req = judge.get("correction_request")
+        if not correction_req:
+            return "human_escalation"
         active = state.get("active_agents")
         if active is not None and "corrector" not in active:
             return "human_escalation"
@@ -940,20 +1098,18 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         if rev_res and isinstance(rev_res, dict):
             if rev_res.get("passed") is True:
                 v_res = rev_res.get("verifier_result", {})
-                for cr in v_res.get("claim_reports", []):
-                    verdict_str = str(cr.get("verdict", "")).lower()
-                    if "contradict" not in verdict_str:
-                        verified_reports.append(cr)
+                verified_reports = [
+                    cr for cr in v_res.get("claim_reports", []) if _is_verified_report(cr)
+                ]
         elif not rev_res:
             v_res = state.get("verifier_result")
             if v_res and isinstance(v_res, dict):
-                for cr in v_res.get("claim_reports", []):
-                    verdict_str = str(cr.get("verdict", "")).lower()
-                    if "contradict" not in verdict_str:
-                        verified_reports.append(cr)
+                verified_reports = [
+                    cr for cr in v_res.get("claim_reports", []) if _is_verified_report(cr)
+                ]
             if not verified_reports:
                 claim_evidence = state.get("verifier", {}).get("claim_evidence", [])
-                verified_reports = [r for r in claim_evidence if "contradict" not in str(r.get("verdict", "")).lower()]
+                verified_reports = [r for r in claim_evidence if _is_verified_report(r)]
 
     if not verified_reports:
         memory = {
@@ -1017,32 +1173,47 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                     confidence=float(
                         report.get("confidence_score", report.get("trust_score", 0.0))
                     ),
+                    verification_status="VERIFIED",
+                    verified_at=utc_now(),
+                    provenance=f"halluciguard:execution:{state.get('execution_id', '')}",
+                    origin="halluciguard_verifier",
                     metadata={
                         "execution_id": state.get("execution_id", ""),
                         "request_id": state.get("request_id", ""),
                     },
                 )
-                stored.append(_dump(await memory_agent.store_fact(req)))
+                stored.append(
+                    _dump(await memory_agent.store_fact(req))
+                )
         finally:
             await memory_agent.close()
 
+        # Count ONLY facts the memory agent actually accepted as stored; facts
+        # skipped by the persistability gate must never inflate stored_count.
+        persisted = [f for f in stored if f.get("stored", True)]
+
         memory = {
             "stored": stored,
-            "count": len(stored),
+            "count": len(persisted),
+            "skipped": len(stored) - len(persisted),
             "knowledge_graph": True,
             "vector_memory": True,
         }
         mem_result = MemoryResult(
-            status=MemoryStatus.STORED,
-            stored_count=len(stored),
-            fact_ids=[f.get("fact_id", f"fact-{i}") for i, f in enumerate(stored)],
+            status=MemoryStatus.STORED if persisted else MemoryStatus.SKIPPED,
+            stored_count=len(persisted),
+            fact_ids=[f.get("fact_id") for f in persisted if f.get("fact_id")],
         )
         bus = add_bus_message(
             state,
             source_agent="memory",
             target_agent="supervisor",
             message_type="MEMORY_WRITE_RESULT",
-            payload={"stored_count": len(stored), "status": "stored"},
+            payload={
+                "stored_count": len(persisted),
+                "skipped": len(stored) - len(persisted),
+                "status": "stored" if persisted else "skipped",
+            },
         )
         return {
             "memory": memory,
@@ -1055,7 +1226,7 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                 "memory",
                 "completed",
                 latency_ms=elapsed_ms(node_start),
-                stored_count=len(stored),
+                stored_count=len(persisted),
             ),
         }
     except Exception as exc:
@@ -1077,7 +1248,7 @@ def _accept_node(state: HalluciGuardState) -> dict[str, Any]:
     return {
         "final_response": state.get("llm_response", ""),
         "terminal_status": "accepted",
-        "verification_status": "accepted",
+        "verification_status": PipelineState.ACCEPTED.value,
         "updated_at": utc_now(),
         "trace": add_trace(
             state, "accept", "completed", reason="accepted by detector/supervisor"
@@ -1099,7 +1270,7 @@ def _reject_node(state: HalluciGuardState) -> dict[str, Any]:
     return {
         "final_response": msg,
         "terminal_status": "rejected",
-        "verification_status": "rejected",
+        "verification_status": PipelineState.REJECTED.value,
         "updated_at": utc_now(),
         "trace": add_trace(
             state, "reject", "completed", decision="REJECT"
@@ -1121,7 +1292,7 @@ def _human_escalation_node(state: HalluciGuardState) -> dict[str, Any]:
     return {
         "final_response": msg,
         "terminal_status": "human_review",
-        "verification_status": "human_review_required",
+        "verification_status": PipelineState.HUMAN_REVIEW_REQUIRED.value,
         "updated_at": utc_now(),
         "trace": add_trace(
             state,
@@ -1251,6 +1422,12 @@ async def run_verification(
             "max_retries": 2,
             "correction_attempt_count": 0,
             "reverification_attempt_count": 0,
+            "draft_claims": [],
+            "verification_summary": {},
+            "judge_summary": {},
+            "reverification_summary": {},
+            "answer_status": "",
+            "correction_requested": False,
             "created_at": now,
             "updated_at": now,
             "inter_agent_bus": [],

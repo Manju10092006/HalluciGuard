@@ -130,9 +130,10 @@ async def test_verifier_receives_llm_response_not_user_query(monkeypatch):
     await _verifier_node(state)
 
     assert captured_payload is not None
-    # Suspicious claims passed to pipeline must be the LLM response, NOT the query
+    # Suspicious claims passed to pipeline must be the LLM response, NOT the query.
+    # The decomposer strips trailing punctuation, so compare on content not exact text.
     suspicious_claim = captured_payload.suspicious_claims[0]
-    assert suspicious_claim.text == "Python was created by Elon Musk in 1999."
+    assert suspicious_claim.text.rstrip(".") == "Python was created by Elon Musk in 1999"
     assert suspicious_claim.text != "Who created Python?"
 
 
@@ -263,13 +264,17 @@ async def test_detector_always_verify_override(monkeypatch):
 # ===========================================================================
 
 def test_judge_routes():
+    corr_req = {"execution_id": "e-1", "user_query": "q", "original_response": "r"}
     assert _judge_route({"judge_decision": "ACCEPT"}) == "memory"
     assert _judge_route({"judge_decision": "REJECT"}) == "reject"
     assert _judge_route({"judge_decision": "ABSTAIN"}) == "human_escalation"
     assert _judge_route({"judge_decision": "VERIFY_AGAIN", "retry_count": 0, "max_retries": 2}) == "verifier"
     assert _judge_route({"judge_decision": "VERIFY_AGAIN", "retry_count": 2, "max_retries": 2}) == "human_escalation"
-    assert _judge_route({"judge_decision": "CORRECT", "correction_attempt_count": 0, "max_retries": 2}) == "corrector"
-    assert _judge_route({"judge_decision": "CORRECT", "correction_attempt_count": 2, "max_retries": 2}) == "reject"
+    # Corrector only runs with a non-empty CorrectionRequest payload
+    assert _judge_route({"judge_decision": "CORRECT", "correction_attempt_count": 0, "max_retries": 2, "correction_request": corr_req}) == "corrector"
+    assert _judge_route({"judge_decision": "CORRECT", "correction_attempt_count": 2, "max_retries": 2, "correction_request": corr_req}) == "reject"
+    # CORRECT decision without a payload is a contract violation -> fail closed
+    assert _judge_route({"judge_decision": "CORRECT", "correction_attempt_count": 0, "max_retries": 2}) == "human_escalation"
 
 
 # ===========================================================================
@@ -542,6 +547,11 @@ async def test_reverification_failure_retry_exhaustion_terminates_safely():
     async def mock_judge(s):
         return {
             "judge_decision": "CORRECT",
+            "correction_request": {
+                "execution_id": "ex-retry",
+                "user_query": "q",
+                "original_response": "draft",
+            },
             "route": "corrector",
             "trace": add_trace(s, "judge", "completed", decision="CORRECT"),
         }
