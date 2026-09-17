@@ -45,6 +45,20 @@ from orchestration.schemas import (
 logger = logging.getLogger("HalluciGuard.JudgeAgent")
 
 
+def _answer_status_for(
+    decision: JudgeDecision,
+    correction_req: Optional["CorrectionRequest"],
+) -> str:
+    """Map a routing decision to the draft answer's interpretive status."""
+    if decision == JudgeDecision.REJECT:
+        return "REJECTED"
+    if decision == JudgeDecision.CORRECT:
+        return "REQUIRES_CORRECTION"
+    if decision == JudgeDecision.ACCEPT:
+        return "ACCEPTED"
+    return "NEEDS_REVIEW"
+
+
 class JudgeAgent:
     """
     Canonical Judge Agent.
@@ -97,6 +111,8 @@ class JudgeAgent:
                 explanation="Grounding evidence was absent or failed schema validation. Unsafe to proceed.",
                 confidence=0.0,
                 correction_request=None,
+                answer_status=_answer_status_for(JudgeDecision.ABSTAIN, None),
+                correction_requested=False,
                 status=ExecutionStatus.FAILED
             )
 
@@ -113,6 +129,8 @@ class JudgeAgent:
                 explanation="Grounding investigation failed to execute. Unsafe to proceed.",
                 confidence=0.0,
                 correction_request=None,
+                answer_status=_answer_status_for(JudgeDecision.ABSTAIN, None),
+                correction_requested=False,
                 status=ExecutionStatus.FAILED
             )
 
@@ -256,6 +274,8 @@ class JudgeAgent:
             explanation=explanation,
             confidence=confidence,
             correction_request=correction_req,
+            answer_status=_answer_status_for(decision, correction_req),
+            correction_requested=correction_req is not None,
             status=ExecutionStatus.COMPLETED
         )
 
@@ -284,6 +304,8 @@ class JudgeAgent:
                         explanation="Corrected text verified with 0 remaining contradictions.",
                         confidence=0.90,
                         correction_request=None,
+                        answer_status=_answer_status_for(JudgeDecision.ACCEPT, None),
+                        correction_requested=False,
                         status=ExecutionStatus.COMPLETED
                     )
                 elif retry_count < self.config.max_verification_retries:
@@ -294,6 +316,8 @@ class JudgeAgent:
                         explanation=f"Re-verification retained factual contradiction(s). Retrying bounded correction (attempt {retry_count + 1}).",
                         confidence=0.40,
                         correction_request=None,
+                        answer_status=_answer_status_for(JudgeDecision.CORRECT, None),
+                        correction_requested=False,
                         status=ExecutionStatus.COMPLETED
                     )
                 else:
@@ -304,6 +328,8 @@ class JudgeAgent:
                         explanation="Correction retained factual contradictions and retry budget exhausted. Rolling back.",
                         confidence=0.20,
                         correction_request=None,
+                        answer_status=_answer_status_for(JudgeDecision.REJECT, None),
+                        correction_requested=False,
                         status=ExecutionStatus.COMPLETED
                     )
         elif isinstance(reverification_result, ReverificationResult):
@@ -317,6 +343,8 @@ class JudgeAgent:
                 explanation="Refined text verified by Verifier with zero remaining contradictions.",
                 confidence=0.92,
                 correction_request=None,
+                answer_status=_answer_status_for(JudgeDecision.ACCEPT, None),
+                correction_requested=False,
                 status=ExecutionStatus.COMPLETED
             )
 
@@ -349,13 +377,16 @@ class JudgeAgent:
                         contradictory_evidence=contra_ev,
                         correction_instructions=f"Re-verification attempt {retry_count + 1}: repair remaining contradicted claim(s).",
                     )
+            retry_decision = JudgeDecision.CORRECT if corr_req else JudgeDecision.REJECT
             return JudgeResult(
-                decision=JudgeDecision.CORRECT if corr_req else JudgeDecision.REJECT,
+                decision=retry_decision,
                 severity=SeverityLevel.HIGH,
                 reason=f"Post-correction re-verification failed with {rem_count} remaining contradiction(s). Triggering correction retry pass {retry_count + 1}.",
                 explanation=f"Re-verification retained factual contradiction(s). Retrying bounded correction (attempt {retry_count + 1}/{self.config.max_verification_retries}).",
                 confidence=0.40,
                 correction_request=corr_req,
+                answer_status=_answer_status_for(retry_decision, corr_req),
+                correction_requested=corr_req is not None,
                 status=ExecutionStatus.COMPLETED
             )
         else:
@@ -366,6 +397,8 @@ class JudgeAgent:
                 explanation="Correction failed re-verification gate and retries exhausted. Rolling back to safe response.",
                 confidence=0.20,
                 correction_request=None,
+                answer_status=_answer_status_for(JudgeDecision.REJECT, None),
+                correction_requested=False,
                 status=ExecutionStatus.COMPLETED
             )
 

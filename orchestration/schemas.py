@@ -94,6 +94,44 @@ class ValidationStatus(str, Enum):
     WARNING = "warning"
 
 
+class PipelineState(str, Enum):
+    """Canonical pipeline states written to ``verification_status``.
+
+    Values deliberately match the historical wire format so existing API
+    consumers and tests observe identical strings while the semantics are now
+    centralized in one typed place.
+    """
+    DETECTOR_SAFE_FAST_PATH = "detector_safe_fast_path"
+    VERIFICATION_REQUIRED = "verification_required"
+    VERIFIED = "verified"
+    CONTRADICTED = "contradicted"
+    CONFLICTED = "conflicted"
+    UNVERIFIED = "unverified"
+    VERIFIED_AND_ACCEPTED = "verified_and_accepted"
+    CORRECTION_REQUESTED = "correction_requested"
+    REVERIFICATION_REQUESTED = "reverification_requested"
+    REJECTED_BY_JUDGE = "rejected_by_judge"
+    JUDGE_ABSTAIN = "judge_abstain"
+    AGENT_FAILED = "agent_failed"
+    GENERATION_FAILED = "generation_failed"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    HUMAN_REVIEW_REQUIRED = "human_review_required"
+
+
+class EvidenceClass(str, Enum):
+    """Evidence ranking class assigned by the Verifier (spec §11).
+
+    PRIMARY_SUPPORT / PRIMARY_CONTRADICTION directly decide the claim verdict.
+    SECONDARY_SUPPORT is corroborating context. LOW_QUALITY is retrieved but
+    not sufficiently useful for verification.
+    """
+    PRIMARY_SUPPORT = "PRIMARY_SUPPORT"
+    PRIMARY_CONTRADICTION = "PRIMARY_CONTRADICTION"
+    SECONDARY_SUPPORT = "SECONDARY_SUPPORT"
+    LOW_QUALITY = "LOW_QUALITY"
+
+
 # ---------------------------------------------------------------------------
 # 1. Detector Contract
 # ---------------------------------------------------------------------------
@@ -170,11 +208,26 @@ class Evidence(BaseModel):
         le=1.0,
         description="NLI classification confidence score (0.0 to 1.0).",
     )
+    contradiction_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="NLI contradiction confidence score (0.0 to 1.0).",
+    )
     credibility_score: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
         description="Calibrated credibility and authority score of the source (0.0 to 1.0).",
+    )
+    evidence_class: EvidenceClass = Field(
+        default=EvidenceClass.LOW_QUALITY,
+        description="Ranked class of this evidence passage for the claim (spec §11).",
+    )
+    rank: int = Field(
+        default=1,
+        ge=1,
+        description="Position of this evidence passage after claim-level ranking.",
     )
 
 
@@ -344,6 +397,20 @@ class JudgeResult(BaseModel):
         default=None,
         description="Targeted correction payload if decision == CORRECT, else None.",
     )
+    answer_status: str = Field(
+        default="",
+        description=(
+            "Interpretive verdict on the draft answer itself: ACCEPTED when the response "
+            "is grounded, REQUIRES_CORRECTION when a non-empty correction payload is "
+            "attached, REJECTED when blocked, or NEEDS_REVIEW for retry/abstain outcomes. "
+            "Distinct from the routing `decision`: a decision of CORRECT always yields "
+            "answer_status REQUIRES_CORRECTION, and ACCEPT always yields ACCEPTED."
+        ),
+    )
+    correction_requested: bool = Field(
+        default=False,
+        description="True only when `correction_request` is a non-empty payload.",
+    )
     status: ExecutionStatus = Field(
         default=ExecutionStatus.COMPLETED,
         description="Status of the judge agent evaluation.",
@@ -449,6 +516,8 @@ __all__ = [
     "ExecutionStatus",
     "MemoryStatus",
     "ValidationStatus",
+    "PipelineState",
+    "EvidenceClass",
     "DetectorResult",
     "Evidence",
     "ClaimReport",

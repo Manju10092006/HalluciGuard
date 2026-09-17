@@ -104,12 +104,46 @@ class MemoryAgent:
             verdict_a in negative and verdict_b in positive
         )
 
+    @staticmethod
+    def _persistability_gate(request: StoreFactRequest) -> tuple[bool, str]:
+        """Spec §13: only sufficiently-supported facts may become permanent memory.
+
+        CONTRADICTED, NOT_ENOUGH_EVIDENCE, and UNCERTAIN pipeline states (as well
+        as negative verdicts) must never be persisted as factual memory. Negative
+        examples still feed the pattern learner separately.
+        """
+        verdict = str(request.verdict or "").strip().lower()
+        if verdict in ("contradicted", "likely_hallucinated", "unverified", "conflicted"):
+            return False, f"non_supported_verdict:{verdict}"
+
+        verification_status = str(request.verification_status or "").strip().upper()
+        blocking = {
+            "CONTRADICTED",
+            "CONTRADICTION",
+            "NOT_ENOUGH_EVIDENCE",
+            "INSUFFICIENT_EVIDENCE",
+            "UNCERTAIN",
+            "UNVERIFIED",
+            "REJECTED",
+            "ABSTAINED",
+            "ABSTAIN",
+        }
+        if verification_status in blocking:
+            return False, f"non_persistable_verification_status:{verification_status}"
+
+        if request.confidence is None or request.confidence <= 0.0:
+            return False, "zero_confidence_fact"
+
+        return True, ""
+
     async def store_fact(self, request: StoreFactRequest) -> StoreFactResponse:
         fact_id = str(uuid.uuid4())
         now = datetime.utcnow()
         contradictions: list[ContradictionAlert] = []
 
-        # Duplicate + contradiction detection against existing memory
+        # Duplicate + contradiction detection against existing memory. This runs
+        # BEFORE the persistence gate so the system can still surface conflict
+        # alerts about non-persistable input even though it is never stored.
         similar = self.vectors.search(
             query=request.claim_text,
             top_k=self._settings.contradiction_top_k,
@@ -141,6 +175,33 @@ class MemoryAgent:
                     )
                 )
 
+        persistable, gate_reason = self._persistability_gate(request)
+        if not persistable:
+            pattern_updated = False
+            if str(request.verdict or "").lower() in ("likely_hallucinated", "contradicted"):
+                patterns = await self.patterns.observe_claim(
+                    claim_text=request.claim_text,
+                    domain=request.domain,
+                    verdict=request.verdict,
+                )
+                pattern_updated = len(patterns) > 0
+            logger.info(
+                "Memory safety gate blocked persistence of %r: %s",
+                request.claim_text[:60],
+                gate_reason,
+            )
+            return StoreFactResponse(
+                fact_id="",
+                entities_created=0,
+                edges_created=0,
+                pattern_updated=pattern_updated,
+                trust_updates=[],
+                duplicate_of=duplicate_of,
+                contradictions=contradictions,
+                stored=False,
+                reason=gate_reason,
+            )
+
         if duplicate_of:
             logger.info("Duplicate claim detected, reusing fact %s", duplicate_of)
             return StoreFactResponse(
@@ -161,6 +222,10 @@ class MemoryAgent:
                 "domain": request.domain,
                 "verdict": request.verdict,
                 "confidence": request.confidence,
+                "verification_status": request.verification_status,
+                "verified_at": request.verified_at.isoformat() if request.verified_at else now.isoformat(),
+                "provenance": request.provenance,
+                "origin": request.origin,
                 "fact_id": fact_id,
             },
             confidence=request.confidence,
@@ -173,6 +238,10 @@ class MemoryAgent:
                 "domain": request.domain,
                 "verdict": request.verdict,
                 "claim_text": request.claim_text,
+                "verification_status": request.verification_status,
+                "verified_at": request.verified_at.isoformat() if request.verified_at else now.isoformat(),
+                "provenance": request.provenance,
+                "origin": request.origin,
             },
             confidence=request.confidence,
         )
@@ -206,6 +275,10 @@ class MemoryAgent:
                 "domain": request.domain,
                 "verdict": request.verdict,
                 "confidence": request.confidence,
+                "verification_status": request.verification_status,
+                "verified_at": request.verified_at.isoformat() if request.verified_at else now.isoformat(),
+                "provenance": request.provenance,
+                "origin": request.origin,
                 "fact_id": fact_id,
                 "timestamp": now.isoformat(),
             },
@@ -264,7 +337,7 @@ class MemoryAgent:
     ) -> BatchStoreResponse:
         results: list[StoreFactResponse] = []
         errors: list[dict[str, str]] = []
-        stored = duplicates = failed = 0
+        stored = duplicates = failed = skipped = 0
 
         for request in requests:
             try:
@@ -274,6 +347,8 @@ class MemoryAgent:
                     duplicates += 1
                 elif response.stored:
                     stored += 1
+                elif response.reason:
+                    skipped += 1
                 else:
                     failed += 1
             except Exception as e:
@@ -287,6 +362,7 @@ class MemoryAgent:
             stored=stored,
             duplicates=duplicates,
             failed=failed,
+            skipped=skipped,
             results=results,
             errors=errors,
         )

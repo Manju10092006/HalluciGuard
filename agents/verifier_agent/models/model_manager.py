@@ -22,10 +22,6 @@ import time
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
-import torch
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from transformers import pipeline as hf_pipeline
-
 from config.settings import get_settings
 
 logger = logging.getLogger("halluciguard.model_manager")
@@ -35,6 +31,25 @@ logger = logging.getLogger("halluciguard.model_manager")
 # ---------------------------------------------------------------------------
 _DEFAULT_MAX_CACHED_MODELS = int(os.environ.get("HALLUCIGUARD_MAX_MODELS", "8"))
 _GPU_MEMORY_THRESHOLD_MB = int(os.environ.get("HALLUCIGUARD_GPU_THRESHOLD_MB", "512"))
+
+
+def _nli_pipeline_kwargs(model_name: str, device: int, *, local_files_only: bool = False) -> Dict[str, Any]:
+    kwargs: Dict[str, Any] = {
+        "task": "text-classification",
+        "model": model_name,
+        "top_k": None,
+        "device": device,
+        # Capitalization: claim + evidence pairs routinely exceed the
+        # model's 512-token window (e.g. 518 > 512). Truncate rather than
+        # raise an indexing error; prefer keeping the short claim intact.
+        "tokenizer_kwargs": {
+            "truncation": "only_first",
+            "max_length": 512,
+        },
+    }
+    if local_files_only:
+        kwargs["model_kwargs"] = {"local_files_only": True}
+    return kwargs
 
 
 class ModelManager:
@@ -81,6 +96,8 @@ class ModelManager:
     # ------------------------------------------------------------------
     @staticmethod
     def _detect_device() -> str:
+        import torch
+
         if torch.cuda.is_available():
             try:
                 free_mem = torch.cuda.mem_get_info()[0] / (1024 ** 2)
@@ -111,6 +128,8 @@ class ModelManager:
     # ------------------------------------------------------------------
     def _evict_if_needed(self) -> None:
         """Evict the least-recently-used model if cache is full."""
+        import torch
+
         while len(self._models) > self._max_cached:
             evicted_name, evicted_model = self._models.popitem(last=False)
             del evicted_model
@@ -134,6 +153,8 @@ class ModelManager:
     # ------------------------------------------------------------------
     def load_embedding_model(self, model_name: Optional[str] = None) -> Any:
         """Load and cache a SentenceTransformer embedding model."""
+        from sentence_transformers import SentenceTransformer
+
         model_name = model_name or get_settings().embedding_model
         with self._lock:
             if model_name in self._models:
@@ -171,6 +192,8 @@ class ModelManager:
 
     def load_reranker_model(self, model_name: Optional[str] = None) -> Any:
         """Load and cache a CrossEncoder reranker model."""
+        from sentence_transformers import CrossEncoder
+
         model_name = model_name or get_settings().reranker_model
         with self._lock:
             if model_name in self._models:
@@ -203,6 +226,8 @@ class ModelManager:
 
     def load_nli_model(self, model_name: Optional[str] = None) -> Any:
         """Load and cache an NLI text-classification pipeline."""
+        from transformers import pipeline as hf_pipeline
+
         settings = get_settings()
         default_nli = settings.nli_model
         if not model_name:
@@ -218,12 +243,7 @@ class ModelManager:
             self._evict_if_needed()
             t0 = time.monotonic()
 
-            kwargs: Dict[str, Any] = {
-                "task": "text-classification",
-                "model": model_name,
-                "top_k": None,
-                "device": self._hf_device,
-            }
+            kwargs = _nli_pipeline_kwargs(model_name, self._hf_device)
 
             try:
                 model = hf_pipeline(**kwargs)
@@ -231,11 +251,7 @@ class ModelManager:
                 logger.warning(f"Primary NLI load failed for {model_name}: {primary_err}. Attempting local_files_only fallback.")
                 try:
                     model = hf_pipeline(
-                        task="text-classification",
-                        model=model_name,
-                        top_k=None,
-                        device=self._hf_device,
-                        model_kwargs={"local_files_only": True},
+                        **_nli_pipeline_kwargs(model_name, self._hf_device, local_files_only=True)
                     )
                 except Exception as offline_err:
                     if self.device == "cuda":
@@ -257,6 +273,8 @@ class ModelManager:
 
     def load_zero_shot_model(self) -> Any:
         """Load and cache a zero-shot classification pipeline."""
+        from transformers import pipeline as hf_pipeline
+
         model_name = get_settings().zero_shot_model
         with self._lock:
             if model_name in self._models:
@@ -298,6 +316,8 @@ class ModelManager:
         task: str = "text-classification",
     ) -> Any:
         """Load a generic HuggingFace classification pipeline."""
+        from transformers import pipeline as hf_pipeline
+
         cache_key = f"{task}::{model_name}"
         with self._lock:
             if cache_key in self._models:
@@ -313,7 +333,11 @@ class ModelManager:
                     top_k=None,
                     device=self._hf_device,
                     model_kwargs={"local_files_only": not settings.allow_model_downloads},
-                    tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
+                    tokenizer_kwargs={
+                        "local_files_only": not settings.allow_model_downloads,
+                        "truncation": "only_first",
+                        "max_length": 512,
+                    },
                 )
             except Exception as primary_err:
                 if self.device == "cuda":
@@ -324,7 +348,11 @@ class ModelManager:
                         top_k=None,
                         device=-1,
                         model_kwargs={"local_files_only": not settings.allow_model_downloads},
-                        tokenizer_kwargs={"local_files_only": not settings.allow_model_downloads},
+                        tokenizer_kwargs={
+                            "local_files_only": not settings.allow_model_downloads,
+                            "truncation": "only_first",
+                            "max_length": 512,
+                        },
                     )
                 else:
                     raise
@@ -346,6 +374,8 @@ class ModelManager:
     # ------------------------------------------------------------------
     def unload_model(self, model_name: str) -> bool:
         """Unload a specific model from cache. Returns True if found."""
+        import torch
+
         with self._lock:
             if model_name in self._models:
                 del self._models[model_name]
@@ -360,6 +390,8 @@ class ModelManager:
 
     def unload_all(self) -> None:
         """Unload every cached model and release GPU memory."""
+        import torch
+
         with self._lock:
             count = len(self._models)
             self._models.clear()
@@ -389,6 +421,8 @@ class ModelManager:
 
     def status(self) -> Dict[str, Any]:
         """Return comprehensive runtime status for the /health endpoint."""
+        import torch
+
         settings = get_settings()
         all_expected = [
             settings.nli_model,

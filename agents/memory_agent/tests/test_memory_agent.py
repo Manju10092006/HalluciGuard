@@ -54,6 +54,25 @@ class TestStoreFact:
     @pytest.mark.asyncio
     async def test_store_basic_fact(self, agent):
         req = StoreFactRequest(
+            claim_text="Aspirin is used for pain relief",
+            domain="healthcare",
+            verdict="verified",
+            evidence=[],
+            source_ids=[],
+            confidence=0.9,
+            verification_status="VERIFIED",
+            verified_at=None,
+            provenance="test:execution:abc",
+        )
+        resp = await agent.store_fact(req)
+        assert resp.stored is True
+        assert resp.fact_id
+        assert resp.entities_created >= 2
+        assert resp.edges_created >= 1
+
+    @pytest.mark.asyncio
+    async def test_store_gate_blocks_negative_verdict(self, agent):
+        req = StoreFactRequest(
             claim_text="Aspirin cures cancer",
             domain="healthcare",
             verdict="likely_hallucinated",
@@ -62,9 +81,24 @@ class TestStoreFact:
             confidence=0.1,
         )
         resp = await agent.store_fact(req)
-        assert resp.fact_id
-        assert resp.entities_created >= 2
-        assert resp.edges_created >= 1
+        assert resp.stored is False
+        assert resp.entities_created == 0
+        assert resp.reason and "non_supported_verdict" in resp.reason
+
+    @pytest.mark.asyncio
+    async def test_store_gate_blocks_verification_status(self, agent):
+        req = StoreFactRequest(
+            claim_text="Guideline says X, but sources are contradictory",
+            domain="healthcare",
+            verdict="verified",
+            evidence=[],
+            source_ids=[],
+            confidence=0.7,
+            verification_status="CONTRADICTED",
+        )
+        resp = await agent.store_fact(req)
+        assert resp.stored is False
+        assert resp.reason and "non_persistable_verification_status" in resp.reason
 
     @pytest.mark.asyncio
     async def test_store_fact_with_evidence(self, agent):

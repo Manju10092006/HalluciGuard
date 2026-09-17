@@ -31,8 +31,15 @@ from scorers.evidence_scorer import EvidenceScorer
 class TestVerifierV1Stabilization(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
+        self._orig_verifier_cache_enabled = os.environ.get("VERIFIER_CACHE_ENABLED")
         os.environ["VERIFIER_CACHE_ENABLED"] = "false"
         self.pipeline = VerificationPipeline()
+
+    async def asyncTearDown(self):
+        if self._orig_verifier_cache_enabled is None:
+            os.environ.pop("VERIFIER_CACHE_ENABLED", None)
+        else:
+            os.environ["VERIFIER_CACHE_ENABLED"] = self._orig_verifier_cache_enabled
 
     async def test_1_paris_capital_of_france(self):
         inp = VerifierInputV2(
@@ -116,14 +123,18 @@ class TestVerifierV1Stabilization(unittest.IsolatedAsyncioTestCase):
 
     async def test_7_cache_toggle(self):
         cache = self.pipeline.cache
+        original = os.environ.get("VERIFIER_CACHE_ENABLED")
+        try:
+            os.environ["VERIFIER_CACHE_ENABLED"] = "false"
+            self.assertFalse(cache.is_enabled())
 
-        os.environ["VERIFIER_CACHE_ENABLED"] = "false"
-        self.assertFalse(cache.is_enabled())
-
-        os.environ["VERIFIER_CACHE_ENABLED"] = "true"
-        self.assertTrue(cache.is_enabled())
-
-        os.environ["VERIFIER_CACHE_ENABLED"] = "false"
+            os.environ["VERIFIER_CACHE_ENABLED"] = "true"
+            self.assertTrue(cache.is_enabled())
+        finally:
+            if original is None:
+                os.environ.pop("VERIFIER_CACHE_ENABLED", None)
+            else:
+                os.environ["VERIFIER_CACHE_ENABLED"] = original
 
     def test_8_degraded_nli_handling(self):
         scorer = EvidenceScorer()
