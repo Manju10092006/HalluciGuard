@@ -11,20 +11,18 @@ import sys
 # Critical Windows Environment & DLL Initialization for PyTorch / C++ extensions
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
+# Derive torch native lib dir dynamically instead of hardcoding machine paths.
 if sys.platform == "win32":
-    known_dll_dirs = [
-        r"C:\ProgramData\anaconda3\Library\bin",
-        r"C:\ProgramData\anaconda3\DLLs",
-    ]
-    for d in known_dll_dirs:
-        if os.path.exists(d):
-            try:
-                os.add_dll_directory(d)
-            except Exception:
-                pass
+    try:
+        from .utils import init_dll_paths
+
+        init_dll_paths()
+    except Exception:
+        pass
 
 from .config import DetectorConfig
 from .detector import DetectorAgent
+from .model_manager import ModelManager
 from .models import (
     DetectionInput,
     DetectionResult,
@@ -35,6 +33,7 @@ from .models import (
 __all__ = [
     "DetectorAgent",
     "DetectorConfig",
+    "ModelManager",
     "DetectionInput",
     "DetectionResult",
     "RiskLevel",
