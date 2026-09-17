@@ -7,18 +7,49 @@ replacing the old heuristic signal weights.
 
 import os
 
+from pydantic import BaseModel, Field, model_validator
+
 try:
     from pydantic_settings import BaseSettings
     ConfigBase = BaseSettings
 except ImportError:
-    from pydantic import BaseModel
     ConfigBase = BaseModel
 
-from pydantic import Field
+
+class SignalWeights(BaseModel):
+    """Legacy signal-based detector weight configuration.
+
+    Retained for backward compatibility with the ablation evaluator and
+    signal-weight unit tests, even though the HaluEval classifier is now the
+    primary detector.
+    """
+
+    token_probability: float = Field(default=0.40, ge=0.0, le=1.0)
+    entropy: float = Field(default=0.30, ge=0.0, le=1.0)
+    semantic_similarity: float = Field(default=0.30, ge=0.0, le=1.0)
+    self_consistency: float = Field(default=0.00, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _weights_must_sum_to_one(self) -> "SignalWeights":
+        total = (
+            self.token_probability
+            + self.entropy
+            + self.semantic_similarity
+            + self.self_consistency
+        )
+        if abs(total - 1.0) > 1e-4:
+            raise ValueError("Signal weights must sum to 1.0")
+        return self
 
 
 class DetectorConfig(ConfigBase):
     """Configuration settings for the HaluEval-based Detector Agent."""
+
+    # --- Legacy signal weights (kept for backward compatibility) ---
+    signal_weights: SignalWeights = Field(
+        default_factory=SignalWeights,
+        description="Legacy signal weights (kept for backward compatibility)."
+    )
 
     # --- Risk Threshold Configuration ---
     low_risk_threshold: float = Field(

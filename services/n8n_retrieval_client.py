@@ -61,18 +61,10 @@ class N8NRetrievalClient:
         timeout_seconds: Optional[float] = None,
     ) -> None:
         self.webhook_url = (
-            webhook_url
-            or os.environ.get(
-                "N8N_RETRIEVAL_WEBHOOK_URL",
-                "https://manju200609.app.n8n.cloud/webhook/halluciguard-verify-v2",
-            )
+            webhook_url or os.environ.get("N8N_RETRIEVAL_WEBHOOK_URL", "")
         ).strip()
         self.health_url = (
-            health_url
-            or os.environ.get(
-                "N8N_HEALTH_WEBHOOK_URL",
-                "https://manju200609.app.n8n.cloud/webhook/halluciguard-health",
-            )
+            health_url or os.environ.get("N8N_HEALTH_WEBHOOK_URL", "")
         ).strip()
         self.auth_mode = (
             auth_mode
@@ -117,6 +109,15 @@ class N8NRetrievalClient:
 
     async def check_health(self) -> Dict[str, Any]:
         """Query n8n health webhook endpoint with authentication headers."""
+        if not self.health_url:
+            logger.error("n8n health webhook URL is not configured (set N8N_HEALTH_WEBHOOK_URL)")
+            return {
+                "healthy": False,
+                "status_code": None,
+                "latency_ms": 0,
+                "url": "",
+                "error": "n8n health webhook URL not configured",
+            }
         start_time = time.time()
         headers = self._build_headers()
         try:
@@ -310,6 +311,12 @@ class N8NRetrievalClient:
         
         Guaranteed to not raise unhandled exceptions; returns controlled N8NRetrievalResult.
         """
+        if not self.webhook_url:
+            logger.error("n8n retrieval webhook URL is not configured (set N8N_RETRIEVAL_WEBHOOK_URL)")
+            return N8NRetrievalResult(
+                success=False,
+                error="n8n retrieval webhook URL not configured",
+            )
         req_id = request_id or str(uuid.uuid4())
         eff_domain = domain or "general"
         
