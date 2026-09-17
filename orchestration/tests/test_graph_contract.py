@@ -67,7 +67,26 @@ def test_judge_route_accept():
 
 def test_judge_route_correct():
     from orchestration.graph import _judge_route
-    assert _judge_route({"judge_decision": "CORRECT", "active_agents": ["corrector"]}) == "corrector"
+    # Corrector only runs with a non-empty CorrectionRequest payload.
+    assert (
+        _judge_route(
+            {
+                "judge_decision": "CORRECT",
+                "active_agents": ["corrector"],
+                "correction_request": {"execution_id": "e", "user_query": "q", "original_response": "r"},
+            }
+        )
+        == "corrector"
+    )
+
+
+def test_judge_route_correct_missing_payload_fails_closed():
+    from orchestration.graph import _judge_route
+    # CORRECT decision without a correction payload is a contract violation.
+    assert (
+        _judge_route({"judge_decision": "CORRECT", "active_agents": ["corrector"]})
+        == "human_escalation"
+    )
 
 
 def test_judge_route_correction_unavailable_fails_closed():
