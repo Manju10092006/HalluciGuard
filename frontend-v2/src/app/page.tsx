@@ -19,6 +19,7 @@ import {
   FileSearch,
   FileText,
   GitBranch,
+  Globe,
   Link2,
   Mail,
   Menu,
@@ -578,17 +579,166 @@ function Contact() {
   )
 }
 
-function Footer() {
+function OrbitingCirclesVisual() {
+  const avatars = [
+    { id: 1, url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80' },
+    { id: 2, url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80' },
+    { id: 3, url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80' },
+    { id: 4, url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80' },
+    { id: 5, url: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&auto=format&fit=crop&q=80' },
+    { id: 6, url: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=100&auto=format&fit=crop&q=80' },
+  ]
+
   return (
-    <footer>
-      <div className="footer-glow" aria-hidden="true" />
-      <div className="section-shell footer-inner">
-        <a className="brand footer-brand" href="#top"><BrandMark /><span>HalluciGuard</span></a>
-        <h2>Don&apos;t trust the answer.<br /><em>Trace the evidence.</em></h2>
-        <div className="footer-line">
-          <span>Evidence-grounded claim verification</span>
-          <span>Curated product preview</span>
-          <a href="#top">Back to top ↑</a>
+    <div className="orbit-container" aria-hidden="true">
+      {/* Dashed Orbital Rings */}
+      <div className="orbit-ring ring-outer">
+        <div className="orbit-spinner spinner-outer">
+          <div className="avatar-node avatar-outer-1">
+            <img src={avatars[4].url} alt="" />
+          </div>
+          <div className="avatar-node avatar-outer-2">
+            <img src={avatars[5].url} alt="" />
+          </div>
+        </div>
+      </div>
+
+      <div className="orbit-ring ring-middle">
+        <div className="orbit-spinner spinner-middle">
+          <div className="avatar-node avatar-mid-1">
+            <img src={avatars[2].url} alt="" />
+          </div>
+          <div className="avatar-node avatar-mid-2">
+            <img src={avatars[3].url} alt="" />
+          </div>
+        </div>
+      </div>
+
+      <div className="orbit-ring ring-inner">
+        <div className="orbit-spinner spinner-inner">
+          <div className="avatar-node avatar-in-1">
+            <img src={avatars[0].url} alt="" />
+          </div>
+          <div className="avatar-node avatar-in-2">
+            <img src={avatars[1].url} alt="" />
+          </div>
+        </div>
+      </div>
+
+      {/* Center Brand Badge */}
+      <div className="orbit-center">
+        <div className="orbit-center-badge">
+          <BrandMark />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Footer() {
+  const [newsletterEmail, setNewsletterEmail] = useState('')
+  const [subscribed, setSubscribed] = useState(false)
+
+  const handleSubscribe = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newsletterEmail) {
+      setSubscribed(true)
+      setNewsletterEmail('')
+    }
+  }
+
+  return (
+    <footer className="v2-footer">
+      <div className="section-shell">
+        {/* Affiliate / Partner Callout Card */}
+        <div className="affiliate-card" data-reveal>
+          <div className="affiliate-content">
+            <span className="affiliate-tag">Become an Affiliate</span>
+            <h2 className="affiliate-heading">Join our Affiliate Program</h2>
+            <p className="affiliate-desc">
+              Earn up to <strong>$200</strong> with our generous <strong>40% commission</strong> for every sale you drive with your referral link.
+            </p>
+            <a className="affiliate-cta-btn cursor-pointer" href="#contact">
+              Become an affiliate <ArrowUpRight size={16} />
+            </a>
+          </div>
+          <div className="affiliate-visual">
+            <OrbitingCirclesVisual />
+          </div>
+        </div>
+
+        {/* Footer Navigation Grid */}
+        <div className="footer-grid-v2" data-reveal>
+          {/* Column 1: Brand Info */}
+          <div className="footer-col brand-col">
+            <a className="brand footer-brand-logo" href="#top">
+              <BrandMark />
+              <span>HalluciGuard</span>
+            </a>
+            <p className="footer-tagline">
+              The most Powerful AI Verification Platform &amp; Design System for researchers and developers.
+            </p>
+          </div>
+
+          {/* Column 2: Company */}
+          <div className="footer-col">
+            <h4 className="footer-col-title">Company</h4>
+            <ul className="footer-link-list">
+              <li><a href="#investigation">Pricing</a></li>
+              <li><a href="#contact">Contact Us</a></li>
+              <li><a href="#contact">Become an Affiliate <ArrowUpRight size={13} /></a></li>
+              <li><a href="#evidence">Projects <ArrowUpRight size={13} /></a></li>
+            </ul>
+          </div>
+
+          {/* Column 3: Socials */}
+          <div className="footer-col">
+            <h4 className="footer-col-title">Socials</h4>
+            <ul className="footer-link-list">
+              <li><a href="https://behance.net" target="_blank" rel="noopener noreferrer">Behance <ArrowUpRight size={13} /></a></li>
+              <li><a href="https://dribbble.net" target="_blank" rel="noopener noreferrer">Dribbble <ArrowUpRight size={13} /></a></li>
+              <li><a href="https://twitter.com" target="_blank" rel="noopener noreferrer">Twitter/X <ArrowUpRight size={13} /></a></li>
+              <li><a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub <ArrowUpRight size={13} /></a></li>
+            </ul>
+          </div>
+
+          {/* Column 4: Newsletter */}
+          <div className="footer-col newsletter-col">
+            <h4 className="footer-col-title">Newsletter</h4>
+            <p className="newsletter-desc">
+              Receive product updates news, exclusive discounts and early access.
+            </p>
+            <form className="newsletter-form" onSubmit={handleSubscribe}>
+              <div className="newsletter-input-wrap">
+                <span className="email-prefix">@</span>
+                <input
+                  type="email"
+                  placeholder="Enter your email..."
+                  value={newsletterEmail}
+                  onChange={(e) => setNewsletterEmail(e.target.value)}
+                  required
+                />
+                <button type="submit" className="newsletter-submit-btn" aria-label="Subscribe">
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            </form>
+            {subscribed && <p className="newsletter-success">Thanks for subscribing!</p>}
+          </div>
+        </div>
+
+        {/* Sub-footer Bar */}
+        <div className="sub-footer-bar">
+          <p className="copyright-text">
+            &copy; 2025 HalluciGuard &middot; All rights reserved &middot; Made with HalluciGuard
+          </p>
+          <div className="sub-footer-right">
+            <span>Built for HalluciGuard</span>
+            <div className="footer-social-icons">
+              <a href="https://dribbble.com" target="_blank" rel="noopener noreferrer" aria-label="Dribbble"><Globe size={15} /></a>
+              <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" aria-label="Twitter"><ArrowUpRight size={15} /></a>
+            </div>
+          </div>
         </div>
       </div>
     </footer>
