@@ -1,8 +1,13 @@
 import re
 from typing import List, Tuple
-from app.models import (
-    JudgeVerificationPayload, CorrectionPlan, ClaimDiff, ClaimStatus, DiffAction
-)
+try:
+    from app.models import (
+        JudgeVerificationPayload, CorrectionPlan, ClaimDiff, ClaimStatus, DiffAction
+    )
+except ModuleNotFoundError:
+    from .models import (
+        JudgeVerificationPayload, CorrectionPlan, ClaimDiff, ClaimStatus, DiffAction
+    )
 
 class ResponseMerger:
     def computeDiffs(self, payload: JudgeVerificationPayload, plan: CorrectionPlan, finalResponse: str) -> List[ClaimDiff]:

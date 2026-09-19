@@ -170,7 +170,18 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
 
         detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))
-        route = "verify" if next_action.lower().endswith("verify") else "accept"
+        risk_level = str(detector.get("risk_level", "LOW")).upper()
+        
+        # Verify if detector flags risk, or if mode is stress_test, or if pre-supplied response, or if verification required
+        should_verify = (
+            next_action.lower().endswith("verify")
+            or risk_level in {"MEDIUM", "HIGH"}
+            or state.get("generation_mode") == "stress_test"
+            or bool(state.get("llm_response") and state.get("llm_response") != state.get("draft_response"))
+            or float(detector.get("hallucination_probability", 0.0)) >= 0.05
+            or os.environ.get("ALWAYS_VERIFY", "true").lower() in ("true", "1")
+        )
+        route = "verify" if should_verify else "accept"
 
         # Inter-agent bus messaging
         if route == "accept":
@@ -246,17 +257,19 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
     VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
     node_start = start_timer()
     try:
+        claim_text = state.get("user_query") or state.get("llm_response", "")
         payload = VerifierInputV2(
             query_id=state.get("request_id")
             or state.get("execution_id")
             or str(uuid.uuid4()),
             domain=state.get("domain", "general"),
             suspicious_claims=[
-                SuspiciousClaim(claim_id="c1", text=state["llm_response"])
+                SuspiciousClaim(claim_id="c1", text=claim_text)
             ],
         )
         try:
-            verifier_res = await asyncio.wait_for(VerificationPipeline().verify(payload), timeout=8.0)
+            verifier_timeout = float(os.environ.get("VERIFIER_TIMEOUT_SECONDS", "60.0"))
+            verifier_res = await asyncio.wait_for(VerificationPipeline().verify(payload), timeout=verifier_timeout)
             verifier = _dump(verifier_res)
         except (asyncio.TimeoutError, Exception) as sub_err:
             raise RuntimeError(
@@ -269,19 +282,26 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         
         has_contradiction = False
         has_verified = False
+        has_conflicted = False
 
         for report in verifier.get("claim_evidence", []):
-            verdict = report.get("verdict", "")
-            if verdict == "verified":
-                has_verified = True
-            elif verdict == "likely_hallucinated":
+            verdict_raw = str(report.get("verdict", "")).lower()
+            clean_verdict = "unverified"
+            if "contradict" in verdict_raw or "hallucinat" in verdict_raw:
                 has_contradiction = True
+                clean_verdict = "contradicted"
+            elif verdict_raw in ("verified", "supported", "verdictlabel.verified") or (verdict_raw.startswith("verif") and "unverif" not in verdict_raw):
+                has_verified = True
+                clean_verdict = "verified"
+            elif "conflict" in verdict_raw:
+                has_conflicted = True
+                clean_verdict = "conflicted"
 
             claims.append(
                 {
                     "claim_id": report.get("claim_id"),
                     "text": report.get("claim_text"),
-                    "verdict": verdict,
+                    "verdict": clean_verdict,
                 }
             )
             evidence_items = report.get("evidence", [])
@@ -319,15 +339,95 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             },
         )
 
+        # -------------------------------------------------------------------
+        # Build Canonical VerifierResult Contract (Phase 1)
+        # -------------------------------------------------------------------
+        from orchestration.schemas import (
+            VerifierResult as CanonicalVerifierResult,
+            ClaimReport as CanonicalClaimReport,
+            Evidence as CanonicalEvidence,
+            VerdictLabel as CanonicalVerdictLabel,
+            EntailmentLabel as CanonicalEntailmentLabel,
+            ExecutionStatus,
+        )
+
+        canonical_reports: list[CanonicalClaimReport] = []
+        for report in verifier.get("claim_evidence", []):
+            c_id = report.get("claim_id", "c1")
+            c_text = report.get("claim_text", "")
+            verdict_raw = str(report.get("verdict", "")).lower()
+
+            if "contradict" in verdict_raw or "hallucinat" in verdict_raw:
+                c_verdict = CanonicalVerdictLabel.CONTRADICTED
+            elif "conflict" in verdict_raw:
+                c_verdict = CanonicalVerdictLabel.CONFLICTED
+            elif verdict_raw in ("verified", "supported", "verdictlabel.verified") or (verdict_raw.startswith("verif") and "unverif" not in verdict_raw):
+                c_verdict = CanonicalVerdictLabel.VERIFIED
+            else:
+                c_verdict = CanonicalVerdictLabel.UNVERIFIED
+
+            canonical_ev_list: list[CanonicalEvidence] = []
+            for ev in report.get("evidence", []):
+                entail_raw = str(ev.get("entailment_label", "neutral")).lower()
+                if "contra" in entail_raw:
+                    entail_lbl = CanonicalEntailmentLabel.CONTRADICTION
+                elif "entail" in entail_raw or "support" in entail_raw:
+                    entail_lbl = CanonicalEntailmentLabel.ENTAILMENT
+                else:
+                    entail_lbl = CanonicalEntailmentLabel.NEUTRAL
+
+                canonical_ev_list.append(
+                    CanonicalEvidence(
+                        evidence_id=str(uuid.uuid4())[:8],
+                        title=ev.get("title", ""),
+                        source=ev.get("source", "Unknown"),
+                        url=ev.get("url"),
+                        snippet=ev.get("snippet", ""),
+                        entailment_label=entail_lbl,
+                        entailment_score=float(ev.get("entailment_score", 0.8)),
+                        credibility_score=float(ev.get("credibility_score", 0.8)),
+                    )
+                )
+
+            canonical_reports.append(
+                CanonicalClaimReport(
+                    claim_id=c_id,
+                    claim_text=c_text,
+                    verdict=c_verdict,
+                    support_score=float(report.get("support_score", 0.9 if c_verdict == CanonicalVerdictLabel.VERIFIED else 0.1)),
+                    contradiction_score=float(report.get("contradiction_score", 0.9 if c_verdict == CanonicalVerdictLabel.CONTRADICTED else 0.1)),
+                    confidence_score=float(report.get("confidence_score", report.get("trust_score", 0.8))),
+                    evidence=canonical_ev_list,
+                )
+            )
+
+        overall_conf = float(verifier.get("overall_evidence_confidence", 0.8))
+        canonical_verifier_result = CanonicalVerifierResult(
+            query_id=verifier.get("query_id", payload.query_id),
+            domain=verifier.get("domain", payload.domain),
+            claim_reports=canonical_reports,
+            evidence=[ev for r in canonical_reports for ev in r.evidence],
+            overall_confidence=overall_conf,
+            status=ExecutionStatus.COMPLETED,
+        )
+
+        overall_status = (
+            "contradicted" if has_contradiction
+            else "conflicted" if has_conflicted
+            else "verified" if has_verified
+            else "unverified"
+        )
+
         return {
             "verifier": verifier,
+            "verifier_result": _dump(canonical_verifier_result),
             "claims": claims,
             "judge_pairs": judge_pairs,
             "evidence": evidence_all,
             "retrieved_evidence": evidence_all,
             "ranked_evidence": evidence_all,
             "nli_results": nli_results,
-            "verification_status": "verified" if not has_contradiction else "contradicted",
+            "verification_status": overall_status,
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
             "trace": add_trace(
@@ -341,13 +441,426 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             ),
         }
     except Exception as exc:
-        return _failure_update(state, "verifier", exc, retryable=True)
+        from orchestration.schemas import VerifierResult as CanonicalVerifierResult, ExecutionStatus
+        failed_res = CanonicalVerifierResult(
+            query_id=payload.query_id if 'payload' in locals() else "q-failed",
+            domain=state.get("domain", "general"),
+            claim_reports=[],
+            evidence=[],
+            overall_confidence=0.0,
+            status=ExecutionStatus.FAILED,
+        )
+        update = _failure_update(state, "verifier", exc, retryable=True)
+        update["verifier_result"] = _dump(failed_res)
+        return update
 
 
 def _verifier_route(state: HalluciGuardState) -> str:
     if state.get("route") == "error" or state.get("verification_status") == "agent_failed":
         return "human_escalation"
-    return "memory"
+    return "judge"
+
+
+async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
+    from agents.judge_agent.judge_agent import JudgeAgent
+
+    node_start = start_timer()
+    try:
+        verifier_output = state.get("verifier_result") or state.get("verifier", {})
+        detector_output = state.get("detector_result") or state.get("detector", {})
+        user_query = state.get("user_query", "")
+        draft_resp = state.get("llm_response") or state.get("draft_response", "")
+        domain = state.get("domain", "general")
+        retry_count = int(state.get("retry_count", 0))
+        max_retries = int(state.get("max_retries", 2))
+        correction_attempts = int(state.get("correction_attempt_count", 0))
+        reverification_res = state.get("reverification_result")
+
+        def _run_judge():
+            agent = JudgeAgent()
+            return agent.evaluate(
+                verifier_result=verifier_output,
+                detector_result=detector_output,
+                user_query=user_query,
+                original_response=draft_resp,
+                domain=domain,
+                reverification_result=reverification_res,
+                retry_count=retry_count,
+            )
+
+        judge_result = await asyncio.to_thread(_run_judge)
+        dumped_judge = _dump(judge_result)
+
+        decision_val = str(dumped_judge.get("decision", "ABSTAIN")).upper()
+        severity_val = str(dumped_judge.get("severity", "LOW")).upper()
+        corr_req = dumped_judge.get("correction_request")
+
+        new_retry_count = retry_count
+        if decision_val == "VERIFY_AGAIN":
+            new_retry_count = retry_count + 1
+
+        if decision_val == "ACCEPT":
+            route = "memory"
+            verification_status = "verified_and_accepted"
+        elif decision_val == "CORRECT":
+            if not corr_req or not corr_req.get("claims_to_correct"):
+                route = "human_escalation"
+                verification_status = "missing_correction_request"
+            elif correction_attempts >= max_retries:
+                route = "reject"
+                verification_status = "correction_attempts_exhausted"
+            else:
+                route = "corrector"
+                verification_status = "correction_requested"
+        elif decision_val == "VERIFY_AGAIN":
+            if new_retry_count > max_retries:
+                route = "human_escalation"
+                verification_status = "verification_retries_exhausted"
+            else:
+                route = "verifier"
+                verification_status = "reverification_requested"
+        elif decision_val == "REJECT":
+            route = "reject"
+            verification_status = "rejected_by_judge"
+        else:
+            route = "human_escalation"
+            verification_status = "judge_abstain"
+
+        bus = add_bus_message(
+            state,
+            source_agent="judge",
+            target_agent="supervisor",
+            message_type="JUDGE_DECISION",
+            payload={
+                "decision": decision_val,
+                "severity": severity_val,
+                "reason": dumped_judge.get("reason"),
+                "has_correction_request": corr_req is not None,
+            },
+        )
+
+        return {
+            "judge": dumped_judge,
+            "judge_result": dumped_judge,
+            "judge_decision": decision_val,
+            "judge_summary": dumped_judge.get("reason", ""),
+            "severity": severity_val,
+            "correction_request": corr_req,
+            "correction_requested": corr_req is not None,
+            "answer_status": decision_val,
+            "route": route,
+            "verification_status": verification_status,
+            "retry_count": new_retry_count,
+            "inter_agent_bus": bus,
+            "updated_at": utc_now(),
+            "trace": add_trace(
+                state,
+                "judge",
+                "completed",
+                latency_ms=elapsed_ms(node_start),
+                decision=decision_val,
+                severity=severity_val,
+                confidence=dumped_judge.get("confidence", 0.0),
+                correction_requested=corr_req is not None,
+                retry_count=new_retry_count,
+            ),
+        }
+    except Exception as exc:
+        return _failure_update(state, "judge", exc)
+
+
+def _judge_route(state: HalluciGuardState) -> str:
+    if state.get("route") == "error":
+        return "human_escalation"
+
+    target_route = state.get("route")
+    if target_route in ("memory", "corrector", "verifier", "reject", "human_escalation"):
+        return target_route
+
+    decision = str(state.get("judge_decision", "ACCEPT")).upper()
+    retry_count = int(state.get("retry_count", 0))
+    max_retries = int(state.get("max_retries", 2))
+    correction_attempts = int(state.get("correction_attempt_count", 0))
+
+    if decision == "ACCEPT":
+        return "memory"
+    elif decision == "CORRECT":
+        corr_req = state.get("correction_request")
+        if not corr_req or not corr_req.get("claims_to_correct"):
+            return "human_escalation"
+        if correction_attempts >= max_retries:
+            return "reject"
+        return "corrector"
+    elif decision == "VERIFY_AGAIN":
+        if retry_count > max_retries:
+            return "human_escalation"
+        return "verifier"
+    elif decision == "REJECT":
+        return "reject"
+    return "human_escalation"
+
+
+async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
+    from agents.corrector_agent.app.orchestrator import CorrectorOrchestrator
+    from agents.corrector_agent.app.models import (
+        JudgeVerificationPayload,
+        AtomicClaim,
+        ClaimStatus,
+        EvidencePassage,
+    )
+    from orchestration.schemas import (
+        CorrectionRequest,
+        CorrectionResult,
+        ValidationStatus,
+        ExecutionStatus,
+    )
+
+    node_start = start_timer()
+    try:
+        corr_req_data = state.get("correction_request")
+        if not corr_req_data:
+            raise RuntimeError("Missing CorrectionRequest payload for Corrector node")
+
+        if isinstance(corr_req_data, dict):
+            corr_req = CorrectionRequest.model_validate(corr_req_data)
+        else:
+            corr_req = corr_req_data
+
+        atomic_claims: list[AtomicClaim] = []
+        for c in corr_req.claims_to_correct:
+            atomic_claims.append(
+                AtomicClaim(
+                    id=c.claim_id,
+                    text=c.claim_text,
+                    status=ClaimStatus.CONTRADICTED,
+                    confidenceScore=c.confidence_score,
+                    evidenceIds=[ev.evidence_id for ev in c.evidence],
+                )
+            )
+        for c in corr_req.claims_to_preserve:
+            atomic_claims.append(
+                AtomicClaim(
+                    id=c.claim_id,
+                    text=c.claim_text,
+                    status=ClaimStatus.VERIFIED,
+                    confidenceScore=c.confidence_score,
+                    evidenceIds=[ev.evidence_id for ev in c.evidence],
+                )
+            )
+
+        supporting_ev: list[EvidencePassage] = [
+            EvidencePassage(
+                id=ev.evidence_id,
+                sourceTitle=ev.source,
+                passageText=ev.snippet,
+                url=ev.url,
+                relevanceScore=ev.credibility_score,
+            )
+            for ev in corr_req.trusted_evidence
+        ]
+        contradiction_ev: list[EvidencePassage] = [
+            EvidencePassage(
+                id=ev.evidence_id,
+                sourceTitle=ev.source,
+                passageText=ev.snippet,
+                url=ev.url,
+                relevanceScore=ev.credibility_score,
+            )
+            for ev in corr_req.contradictory_evidence
+        ]
+
+        payload = JudgeVerificationPayload(
+            query=corr_req.user_query,
+            originalResponse=corr_req.original_response,
+            claims=atomic_claims,
+            supportingEvidence=supporting_ev,
+            contradictionEvidence=contradiction_ev,
+            trustScore=0.8,
+            correctionInstructions=corr_req.correction_instructions,
+        )
+
+        corrector = CorrectorOrchestrator()
+        correction_attempts = int(state.get("correction_attempt_count", 0)) + 1
+        res = await corrector.executeCorrectionPipeline(payload)
+        dumped_res = _dump(res)
+
+        corrected_text = res.finalResponse if hasattr(res, "finalResponse") else dumped_res.get("finalResponse", corr_req.original_response)
+
+        diff_logs = []
+        if hasattr(res, "diffLogs") and res.diffLogs:
+            for log in res.diffLogs:
+                diff_logs.append(_dump(log))
+        elif isinstance(dumped_res.get("diffLogs"), list):
+            diff_logs = dumped_res.get("diffLogs")
+
+        canonical_corr_result = CorrectionResult(
+            original_text=corr_req.original_response,
+            corrected_text=corrected_text,
+            changed_claims=diff_logs,
+            validation_status=ValidationStatus.VALID if getattr(res, "isFullyValid", True) else ValidationStatus.INVALID,
+            attempt_count=correction_attempts,
+            status=ExecutionStatus.COMPLETED,
+        )
+
+        dumped_corr_result = _dump(canonical_corr_result)
+
+        bus = add_bus_message(
+            state,
+            source_agent="corrector",
+            target_agent="supervisor",
+            message_type="CORRECTION_RESULT",
+            payload={
+                "attempt_count": correction_attempts,
+                "changed_claims_count": len(diff_logs),
+            },
+        )
+
+        return {
+            "corrector": dumped_corr_result,
+            "correction_result": dumped_corr_result,
+            "llm_response": corrected_text,
+            "draft_response": corrected_text,
+            "correction_attempt_count": correction_attempts,
+            "inter_agent_bus": bus,
+            "updated_at": utc_now(),
+            "trace": add_trace(
+                state,
+                "corrector",
+                "completed",
+                latency_ms=elapsed_ms(node_start),
+                attempt_count=correction_attempts,
+            ),
+        }
+    except Exception as exc:
+        return _failure_update(state, "corrector", exc)
+
+
+async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
+    node_start = start_timer()
+    try:
+        VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
+        corrected_text = state.get("llm_response") or state.get("draft_response", "")
+        payload = VerifierInputV2(
+            query_id=state.get("request_id") or state.get("execution_id") or str(uuid.uuid4()),
+            domain=state.get("domain", "general"),
+            suspicious_claims=[SuspiciousClaim(claim_id="c1", text=corrected_text)],
+        )
+
+        verifier_res = await VerificationPipeline().verify(payload)
+        verifier = _dump(verifier_res)
+
+        from orchestration.schemas import (
+            VerifierResult as CanonicalVerifierResult,
+            ClaimReport as CanonicalClaimReport,
+            Evidence as CanonicalEvidence,
+            VerdictLabel as CanonicalVerdictLabel,
+            EntailmentLabel as CanonicalEntailmentLabel,
+            ReverificationResult as CanonicalReverificationResult,
+            ExecutionStatus,
+        )
+
+        canonical_reports: list[CanonicalClaimReport] = []
+        remaining_contradictions = 0
+        for report in verifier.get("claim_evidence", []):
+            c_id = report.get("claim_id", "c1")
+            c_text = report.get("claim_text", "")
+            verdict_raw = str(report.get("verdict", "")).lower()
+
+            if "contradict" in verdict_raw or "hallucinat" in verdict_raw:
+                c_verdict = CanonicalVerdictLabel.CONTRADICTED
+                remaining_contradictions += 1
+            elif "conflict" in verdict_raw:
+                c_verdict = CanonicalVerdictLabel.CONFLICTED
+            elif verdict_raw in ("verified", "supported", "verdictlabel.verified") or (verdict_raw.startswith("verif") and "unverif" not in verdict_raw):
+                c_verdict = CanonicalVerdictLabel.VERIFIED
+            else:
+                c_verdict = CanonicalVerdictLabel.UNVERIFIED
+
+            canonical_ev_list: list[CanonicalEvidence] = []
+            for ev in report.get("evidence", []):
+                entail_raw = str(ev.get("entailment_label", "neutral")).lower()
+                if "contra" in entail_raw:
+                    entail_lbl = CanonicalEntailmentLabel.CONTRADICTION
+                elif "entail" in entail_raw or "support" in entail_raw:
+                    entail_lbl = CanonicalEntailmentLabel.ENTAILMENT
+                else:
+                    entail_lbl = CanonicalEntailmentLabel.NEUTRAL
+
+                canonical_ev_list.append(
+                    CanonicalEvidence(
+                        evidence_id=str(uuid.uuid4())[:8],
+                        title=ev.get("title", ""),
+                        source=ev.get("source", "Unknown"),
+                        url=ev.get("url"),
+                        snippet=ev.get("snippet", ""),
+                        entailment_label=entail_lbl,
+                        entailment_score=float(ev.get("entailment_score", 0.8)),
+                        credibility_score=float(ev.get("credibility_score", 0.8)),
+                    )
+                )
+
+            canonical_reports.append(
+                CanonicalClaimReport(
+                    claim_id=c_id,
+                    claim_text=c_text,
+                    verdict=c_verdict,
+                    support_score=float(report.get("support_score", 0.9 if c_verdict == CanonicalVerdictLabel.VERIFIED else 0.1)),
+                    contradiction_score=float(report.get("contradiction_score", 0.9 if c_verdict == CanonicalVerdictLabel.CONTRADICTED else 0.1)),
+                    confidence_score=float(report.get("confidence_score", report.get("trust_score", 0.8))),
+                    evidence=canonical_ev_list,
+                )
+            )
+
+        overall_conf = float(verifier.get("overall_evidence_confidence", 0.8))
+        canonical_verifier_result = CanonicalVerifierResult(
+            query_id=verifier.get("query_id", payload.query_id),
+            domain=verifier.get("domain", payload.domain),
+            claim_reports=canonical_reports,
+            evidence=[ev for r in canonical_reports for ev in r.evidence],
+            overall_confidence=overall_conf,
+            status=ExecutionStatus.COMPLETED,
+        )
+
+        passed = (remaining_contradictions == 0)
+        reverification_attempts = int(state.get("reverification_attempt_count", 0)) + 1
+
+        canonical_reverif_result = CanonicalReverificationResult(
+            passed=passed,
+            verifier_result=canonical_verifier_result,
+            remaining_contradictions=remaining_contradictions,
+            status=ExecutionStatus.COMPLETED,
+        )
+
+        dumped_reverif = _dump(canonical_reverif_result)
+
+        bus = add_bus_message(
+            state,
+            source_agent="reverifier",
+            target_agent="supervisor",
+            message_type="REVERIFICATION_RESULT",
+            payload={
+                "passed": passed,
+                "remaining_contradictions": remaining_contradictions,
+            },
+        )
+
+        return {
+            "reverification_result": dumped_reverif,
+            "verifier_result": _dump(canonical_verifier_result),
+            "reverification_attempt_count": reverification_attempts,
+            "inter_agent_bus": bus,
+            "updated_at": utc_now(),
+            "trace": add_trace(
+                state,
+                "reverifier",
+                "completed",
+                latency_ms=elapsed_ms(node_start),
+                passed=passed,
+                remaining_contradictions=remaining_contradictions,
+            ),
+        }
+    except Exception as exc:
+        return _failure_update(state, "reverifier", exc)
 
 
 async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
@@ -355,9 +868,45 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
     from agents.memory_agent.schemas.models import StoreFactRequest
 
     node_start = start_timer()
+
+    # Memory Safety Check:
+    # Memory must ONLY persist when judge decision is ACCEPT, verifier succeeded, and reverification (if present) passed.
+    judge_dec = str(state.get("judge_decision", "")).upper()
+    verifier_res = state.get("verifier_result") or {}
+    verif_status = verifier_res.get("status", "") if isinstance(verifier_res, dict) else str(getattr(verifier_res, "status", ""))
+    rev_res = state.get("reverification_result") or {}
+    rev_passed = rev_res.get("passed", True) if isinstance(rev_res, dict) else getattr(rev_res, "passed", True)
+
+    if (judge_dec and judge_dec != "ACCEPT") or str(verif_status).lower() == "failed" or not rev_passed:
+        memory = {
+            "stored": [],
+            "count": 0,
+            "knowledge_graph": False,
+            "vector_memory": False,
+            "skipped_reason": "judge_decision_not_accepted",
+        }
+        bus = add_bus_message(
+            state,
+            source_agent="memory",
+            target_agent="supervisor",
+            message_type="MEMORY_WRITE_RESULT",
+            payload={"stored_count": 0, "status": "skipped", "reason": "judge_decision_not_accepted"},
+        )
+        return {
+            "memory": memory,
+            "final_response": state.get("final_response") or state.get("llm_response", ""),
+            "inter_agent_bus": bus,
+            "updated_at": utc_now(),
+            "trace": add_trace(
+                state,
+                "memory",
+                "skipped",
+                latency_ms=elapsed_ms(node_start),
+                reason=memory["skipped_reason"],
+            ),
+        }
+
     claim_evidence = state.get("verifier", {}).get("claim_evidence", [])
-    
-    # Check if there are verified facts to store
     verified_reports = [r for r in claim_evidence if str(r.get("verdict", "")).lower() == "verified"]
 
     if not verified_reports:
@@ -505,6 +1054,9 @@ def build_verification_graph(
         "detector": _detector_node,
         "accept": _accept_node,
         "verifier": _verifier_node,
+        "judge": _judge_node,
+        "corrector": _corrector_node,
+        "reverifier": _reverifier_node,
         "reject": _reject_node,
         "human_escalation": _human_escalation_node,
         "memory": _memory_node,
@@ -530,8 +1082,22 @@ def build_verification_graph(
     graph.add_conditional_edges(
         "verifier",
         _verifier_route,
-        {"memory": "memory", "human_escalation": "human_escalation"},
+        {"judge": "judge", "human_escalation": "human_escalation"},
     )
+    graph.add_conditional_edges(
+        "judge",
+        _judge_route,
+        {
+            "memory": "memory",
+            "verifier": "verifier",
+            "corrector": "corrector",
+            "reject": "reject",
+            "human_escalation": "human_escalation",
+        },
+    )
+    graph.add_edge("corrector", "reverifier")
+    graph.add_edge("reverifier", "judge")
+
     graph.add_edge("accept", END)
     graph.add_edge("reject", END)
     graph.add_edge("human_escalation", END)
@@ -560,8 +1126,16 @@ async def run_verification(
 ) -> HalluciGuardState:
     execution_id = str(uuid.uuid4())
     now = utc_now()
-    active_agents = ["base_llm", "detector", "verifier", "memory"]
-    disabled_agents = ["judge", "corrector"]
+    active_agents = [
+        "base_llm",
+        "detector",
+        "verifier",
+        "judge",
+        "corrector",
+        "reverifier",
+        "memory",
+    ]
+    disabled_agents = []
 
     return await get_verification_graph().ainvoke(
         {

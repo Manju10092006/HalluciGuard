@@ -3,12 +3,26 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from dotenv import load_dotenv
+
+# Ensure local .env is loaded in development and production
+load_dotenv()
+
+from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from services.base_llm_service import BaseLLMService
 
+from .auth import (
+    authenticate_google_user,
+    authenticate_user,
+    clear_user_history,
+    get_user_by_token,
+    get_user_history,
+    register_user,
+    save_user_history,
+)
 from .graph import run_verification
 from .runtime_validation import validate_orchestration_startup
 
@@ -22,27 +36,171 @@ class VerificationRequest(BaseModel):
     request_id: Optional[str] = Field(default=None, description="Optional caller correlation ID.")
 
 
+class RegisterRequest(BaseModel):
+    email: str = Field(min_length=3, description="User email address")
+    password: str = Field(min_length=6, description="User password (min 6 characters)")
+    name: Optional[str] = Field(default=None, description="User display name")
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, description="User email address")
+    password: str = Field(min_length=1, description="User password")
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(min_length=10, description="Google OAuth ID Token JWT")
+
+
+class SaveHistoryRequest(BaseModel):
+    query: str = Field(min_length=1, description="User query text")
+    result: Dict[str, Any] = Field(description="Verification result JSON payload")
+
+
 app = FastAPI(
     title="HalluciGuard Verification Engine",
     version="2.0.0",
-    description="Production LangGraph supervisor orchestrating OpenRouter Base LLM, Detector, Verifier, and Memory agents.",
+    description="Production LangGraph supervisor orchestrating OpenRouter Base LLM, Detector, Verifier, and Memory agents with JWT Auth.",
 )
 
-# Configure CORS for Vercel Frontend and Local Development
-raw_cors = os.environ.get(
-    "CORS_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000,https://*.vercel.app",
-)
-allowed_origins = [origin.strip() for origin in raw_cors.split(",") if origin.strip()]
-
+# Configure CORS for Vercel Frontend, Mobile Devices, and Local Development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=False,
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
+
+def _get_auth_user(authorization: Optional[str] = Header(None)) -> Optional[Dict[str, Any]]:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split("Bearer ", 1)[1].strip()
+    if not token:
+        return None
+    try:
+        return get_user_by_token(token)
+    except Exception:
+        return None
+
+
+def _require_auth_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    user = _get_auth_user(authorization)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please provide a valid Bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
+# ── Authentication Endpoints ──────────────────────────────────────────
+
+@app.post("/auth/register")
+async def auth_register(req: RegisterRequest) -> Dict[str, Any]:
+    try:
+        user_dict, token = register_user(
+            email=req.email,
+            password=req.password,
+            name=req.name,
+        )
+        return {
+            "status": "success",
+            "access_token": token,
+            "token_type": "bearer",
+            "user": user_dict,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Registration failed: {exc}") from exc
+
+
+@app.post("/auth/login")
+async def auth_login(req: LoginRequest) -> Dict[str, Any]:
+    try:
+        user_dict, token = authenticate_user(
+            email=req.email,
+            password=req.password,
+        )
+        return {
+            "status": "success",
+            "access_token": token,
+            "token_type": "bearer",
+            "user": user_dict,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Login failed: {exc}") from exc
+
+
+@app.post("/auth/google")
+@app.post("/api/v1/auth/google")
+async def auth_google(req: GoogleAuthRequest) -> Dict[str, Any]:
+    try:
+        user_dict, token = authenticate_google_user(req.credential)
+        return {
+            "status": "success",
+            "access_token": token,
+            "token_type": "bearer",
+            "user": user_dict,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Google authentication failed: {exc}") from exc
+
+
+@app.get("/auth/me")
+async def auth_me(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    user = _require_auth_user(authorization)
+    return {
+        "status": "success",
+        "user": user,
+    }
+
+
+@app.post("/auth/logout")
+async def auth_logout() -> Dict[str, Any]:
+    return {"status": "success", "message": "Successfully signed out"}
+
+
+# ── Authenticated History Endpoints ────────────────────────────────────
+
+@app.get("/api/history")
+async def get_history(
+    limit: int = 50,
+    authorization: Optional[str] = Header(None),
+) -> Dict[str, Any]:
+    user = _require_auth_user(authorization)
+    items = get_user_history(user["id"], limit=limit)
+    return {"status": "success", "history": items}
+
+
+@app.post("/api/history")
+async def save_history(
+    req: SaveHistoryRequest,
+    authorization: Optional[str] = Header(None),
+) -> Dict[str, Any]:
+    user = _require_auth_user(authorization)
+    saved = save_user_history(user["id"], req.query, req.result)
+    return {"status": "success", "record": saved}
+
+
+@app.delete("/api/history")
+async def delete_history(
+    history_id: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+) -> Dict[str, Any]:
+    user = _require_auth_user(authorization)
+    clear_user_history(user["id"], history_id=history_id)
+    return {"status": "success", "message": "History cleared"}
+
+
+# ── System Endpoints ──────────────────────────────────────────────────
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
@@ -53,6 +211,12 @@ async def root() -> Dict[str, Any]:
         "docs_url": "/docs",
         "health_url": "/health",
         "verify_endpoint": "/verify",
+        "auth_endpoints": {
+            "register": "/auth/register",
+            "login": "/auth/login",
+            "me": "/auth/me",
+            "logout": "/auth/logout",
+        },
         "frontend_url": "https://frontend-alpha-umber-63.vercel.app",
     }
 
@@ -102,7 +266,9 @@ def _total_latency_ms(result: Dict[str, Any]) -> int:
     )
 
 
-async def _execute_verification(request: VerificationRequest) -> Dict[str, Any]:
+async def _execute_verification(
+    request: VerificationRequest, authorization: Optional[str] = None
+) -> Dict[str, Any]:
     try:
         result = await run_verification(
             user_query=request.user_query,
@@ -112,14 +278,23 @@ async def _execute_verification(request: VerificationRequest) -> Dict[str, Any]:
             generation_mode=request.generation_mode,
             conversation_history=request.conversation_history,
         )
-        return {
+        claims_ev = (result.get("verifier") or {}).get("claim_evidence", [])
+        if claims_ev:
+            has_c = any("contradict" in str(c.get("verdict", "")).lower() or "hallucinat" in str(c.get("verdict", "")).lower() for c in claims_ev)
+            has_v = any(str(c.get("verdict", "")).lower() in ("verified", "supported", "verdictlabel.verified") or (str(c.get("verdict", "")).lower().startswith("verif") and "unverif" not in str(c.get("verdict", "")).lower()) for c in claims_ev)
+            has_conf = any("conflict" in str(c.get("verdict", "")).lower() for c in claims_ev)
+            derived_status = "contradicted" if has_c else "conflicted" if has_conf else "verified" if has_v else "unverified"
+        else:
+            derived_status = result.get("verification_status", "unverified")
+
+        resp = {
             "execution_id": result.get("execution_id"),
             "request_id": result.get("request_id"),
             "generation": result.get("generation") or result.get("base_llm"),
             "draft_response": result.get("draft_response") or result.get("llm_response"),
             "final_response": result.get("final_response") or result.get("draft_response", result.get("llm_response")),
             "terminal_status": result.get("terminal_status", "accepted"),
-            "verification_status": result.get("verification_status", "unverified"),
+            "verification_status": derived_status,
             "total_latency_ms": _total_latency_ms(result),
             "detector": result.get("detector"),
             "verifier": result.get("verifier"),
@@ -137,6 +312,17 @@ async def _execute_verification(request: VerificationRequest) -> Dict[str, Any]:
             "trace": result.get("trace", []),
             "audit": result.get("audit", {}),
         }
+
+        # Auto-save history if caller is authenticated
+        if authorization:
+            user = _get_auth_user(authorization)
+            if user:
+                try:
+                    save_user_history(user["id"], request.user_query, resp)
+                except Exception:
+                    pass
+
+        return resp
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -145,10 +331,16 @@ async def _execute_verification(request: VerificationRequest) -> Dict[str, Any]:
 
 
 @app.post("/verify")
-async def verify(request: VerificationRequest) -> Dict[str, Any]:
-    return await _execute_verification(request)
+async def verify(
+    request: VerificationRequest,
+    authorization: Optional[str] = Header(None),
+) -> Dict[str, Any]:
+    return await _execute_verification(request, authorization=authorization)
 
 
 @app.post("/api/v1/verify")
-async def verify_v1(request: VerificationRequest) -> Dict[str, Any]:
-    return await _execute_verification(request)
+async def verify_v1(
+    request: VerificationRequest,
+    authorization: Optional[str] = Header(None),
+) -> Dict[str, Any]:
+    return await _execute_verification(request, authorization=authorization)

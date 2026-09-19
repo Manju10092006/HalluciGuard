@@ -1,5 +1,8 @@
 from typing import List, Optional
-from app.models import CorrectionPlan, JudgeVerificationPayload
+try:
+    from app.models import CorrectionPlan, JudgeVerificationPayload
+except ModuleNotFoundError:
+    from .models import CorrectionPlan, JudgeVerificationPayload
 
 class PromptBuilder:
     def buildCorrectionPrompt(

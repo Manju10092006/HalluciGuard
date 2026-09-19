@@ -1,14 +1,26 @@
 import time
-from app.models import (
-    JudgeVerificationPayload, CorrectorExecutionResult, TraceLogEntry, 
-    LlmObservabilityMetrics, CorrectionAttemptResult, ClaimStatus, EvaluationMetrics, PipelineVersionInfo, DiffAction
-)
-from app.planner import CorrectionPlanner
-from app.prompt_builder import PromptBuilder
-from app.merger import ResponseMerger, ResponseValidator
-from app.judge import JudgeVerificationEngine
-from app.model_client import QwenCorrectorClient
-from app.memory_agent import MemoryAgent
+try:
+    from app.models import (
+        JudgeVerificationPayload, CorrectorExecutionResult, TraceLogEntry, 
+        LlmObservabilityMetrics, CorrectionAttemptResult, ClaimStatus, EvaluationMetrics, PipelineVersionInfo, DiffAction
+    )
+    from app.planner import CorrectionPlanner
+    from app.prompt_builder import PromptBuilder
+    from app.merger import ResponseMerger, ResponseValidator
+    from app.judge import JudgeVerificationEngine
+    from app.model_client import QwenCorrectorClient
+    from app.memory_agent import MemoryAgent
+except ModuleNotFoundError:
+    from .models import (
+        JudgeVerificationPayload, CorrectorExecutionResult, TraceLogEntry, 
+        LlmObservabilityMetrics, CorrectionAttemptResult, ClaimStatus, EvaluationMetrics, PipelineVersionInfo, DiffAction
+    )
+    from .planner import CorrectionPlanner
+    from .prompt_builder import PromptBuilder
+    from .merger import ResponseMerger, ResponseValidator
+    from .judge import JudgeVerificationEngine
+    from .model_client import QwenCorrectorClient
+    from .memory_agent import MemoryAgent
 
 class CorrectorOrchestrator:
     def __init__(self):

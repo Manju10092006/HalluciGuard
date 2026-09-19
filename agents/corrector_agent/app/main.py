@@ -5,8 +5,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
 
-from app.models import JudgeVerificationPayload, CorrectorExecutionResult
-from app.orchestrator import CorrectorOrchestrator
+try:
+    from app.models import JudgeVerificationPayload, CorrectorExecutionResult
+    from app.orchestrator import CorrectorOrchestrator
+except ModuleNotFoundError:
+    from .models import JudgeVerificationPayload, CorrectorExecutionResult
+    from .orchestrator import CorrectorOrchestrator
 
 app = FastAPI(title="HalluciGuard Corrector Agent")
 
