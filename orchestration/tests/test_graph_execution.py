@@ -45,7 +45,31 @@ async def test_safe_response_reaches_accept_directly_without_verifier_memory_or_
 async def test_high_risk_routes_verifier_then_memory_without_judge_or_corrector():
     async def verifier(s):
         return {
-            "verifier": {"claim_evidence": []},
+            "verifier_result": {
+                "query_id": "q1",
+                "domain": "general",
+                "claim_reports": [
+                    {
+                        "claim_id": "c1",
+                        "claim_text": "Grounding fact",
+                        "verdict": "verified",
+                        "support_score": 0.95,
+                        "confidence_score": 0.95,
+                        "evidence": [],
+                    }
+                ],
+                "overall_confidence": 0.95,
+                "status": "completed",
+            },
+            "verifier": {
+                "claim_evidence": [
+                    {
+                        "claim_id": "c1",
+                        "claim_text": "Grounding fact",
+                        "verdict": "verified",
+                    }
+                ]
+            },
             "judge_pairs": [],
             "trace": add_trace(s, "verifier", "completed"),
         }
@@ -67,8 +91,8 @@ async def test_high_risk_routes_verifier_then_memory_without_judge_or_corrector(
     nodes = [e["node"] for e in result["trace"]]
     assert "detector" in nodes
     assert "verifier" in nodes
+    assert "judge" in nodes
     assert "memory" in nodes
-    assert "judge" not in nodes
     assert "corrector" not in nodes
 
 

@@ -125,7 +125,8 @@ class JudgeAgent:
         conflicted_claims: List[ClaimReport] = []
 
         for claim in claim_reports:
-            verdict_str = str(claim.verdict).lower()
+            v_val = claim.verdict.value if hasattr(claim.verdict, "value") else claim.verdict
+            verdict_str = str(v_val).lower()
             if verdict_str == VerdictLabel.CONTRADICTED.value:
                 claims_to_correct.append(claim)
                 for ev in claim.evidence:
@@ -419,7 +420,8 @@ class JudgeAgent:
                     ev_text = pair.get("evidence", pair.get("evidence_snippet", ""))
                     src = pair.get("source", "Unknown")
                     rel = pair.get("nli_relation", pair.get("top_relation", pair.get("relation", ""))).lower()
-                    v_raw = str(pair.get("verifier_verdict", pair.get("verdict", ""))).lower()
+                    v_entry = pair.get("verifier_verdict", pair.get("verdict", ""))
+                    v_raw = str(v_entry.value if hasattr(v_entry, "value") else v_entry).lower()
                     ev_lower = ev_text.lower()
 
                     c_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', c_text.lower()))

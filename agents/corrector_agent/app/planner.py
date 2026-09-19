@@ -1,6 +1,11 @@
-from app.models import (
-    CorrectionPlan, JudgeVerificationPayload, AtomicClaim, ClaimToEdit, ClaimStatus
-)
+try:
+    from app.models import (
+        CorrectionPlan, JudgeVerificationPayload, AtomicClaim, ClaimToEdit, ClaimStatus
+    )
+except ModuleNotFoundError:
+    from .models import (
+        CorrectionPlan, JudgeVerificationPayload, AtomicClaim, ClaimToEdit, ClaimStatus
+    )
 
 class CorrectionPlanner:
     def planCorrection(self, payload: JudgeVerificationPayload) -> CorrectionPlan:

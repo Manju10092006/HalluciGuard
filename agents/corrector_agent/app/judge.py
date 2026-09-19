@@ -1,4 +1,7 @@
-from app.models import JudgeVerificationPayload, CorrectionPlan, JudgeVerificationResult
+try:
+    from app.models import JudgeVerificationPayload, CorrectionPlan, JudgeVerificationResult
+except ModuleNotFoundError:
+    from .models import JudgeVerificationPayload, CorrectionPlan, JudgeVerificationResult
 from typing import List
 
 class JudgeVerificationEngine:
