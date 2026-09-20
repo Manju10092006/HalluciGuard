@@ -396,6 +396,7 @@ async def _execute_verification(
             "verification_status": derived_status,
             "total_latency_ms": _total_latency_ms(result),
             "detector": result.get("detector"),
+            "detector_note": "triage signal only — not a verdict; the Verifier is the sole factual arbiter",
             "verifier": verifier_view,
             "memory": result.get("memory"),
             "active_agents": result.get("active_agents") or [
