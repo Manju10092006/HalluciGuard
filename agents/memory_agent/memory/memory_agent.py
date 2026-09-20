@@ -85,12 +85,35 @@ class MemoryAgent:
         logger.info("Memory agent initialized")
 
     async def close(self) -> None:
-        self.kg.save()
-        self.vectors.save()
-        await self.cache.close()
-        await self.patterns.close()
-        await self.trust.close()
-        logger.info("Memory agent shut down")
+        """Best-effort shutdown: persist and release every subsystem.
+
+        Memory is the terminal, audit-only stage of the pipeline. A save or
+        close failure in one subsystem must NOT (a) skip shutdown of the others
+        (leaking DB connections/file handles) nor (b) raise out of the caller's
+        ``finally: await close()`` and turn a Judge-accepted answer into a memory
+        node failure. Every step is attempted; failures are logged and swallowed.
+        """
+        # Ordered (persist first, then release), each guarded independently.
+        steps: list[tuple[str, callable]] = [
+            ("knowledge_graph.save", self.kg.save),
+            ("vector_store.save", self.vectors.save),
+            ("cache.close", self.cache.close),
+            ("patterns.close", self.patterns.close),
+            ("trust.close", self.trust.close),
+        ]
+        errors: list[str] = []
+        for name, fn in steps:
+            try:
+                result = fn()
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception as exc:  # noqa: BLE001 - shutdown must not raise
+                errors.append(f"{name}: {type(exc).__name__}: {exc}")
+                logger.warning("Memory agent shutdown step failed: %s", errors[-1])
+        if errors:
+            logger.warning("Memory agent shut down with %d error(s)", len(errors))
+        else:
+            logger.info("Memory agent shut down")
 
     # ------------------------------------------------------------------
     # Store
@@ -108,12 +131,6 @@ class MemoryAgent:
         fact_id = str(uuid.uuid4())
         now = datetime.utcnow()
         contradictions: list[ContradictionAlert] = []
-
-        # NOTE: store_fact intentionally records claims of ANY verdict — verified
-        # facts as trusted knowledge AND hallucinated/contradicted claims as a
-        # record that powers pattern learning and future contradiction detection.
-        # It therefore does NOT gate on verdict/confidence; poisoning is prevented
-        # upstream in orchestration._memory_node (positive verified-only gate).
 
         # Duplicate + contradiction detection against existing memory
         similar = self.vectors.search(
@@ -312,10 +329,8 @@ class MemoryAgent:
             self.kg.remove_entity(entity.entity_id)
             deleted_from.append("knowledge_graph")
 
-        # Vector Store — persist the deletion, otherwise the removed fact
-        # reappears on the next restart (delete mutated memory only).
+        # Vector Store
         if self.vectors.delete(fact_id):
-            self.vectors.save()
             deleted_from.append("vector_store")
 
         # Cache — invalidate by claim text if found in KG properties
@@ -357,13 +372,11 @@ class MemoryAgent:
         entity.updated_at = datetime.utcnow()
         updated_in.append("knowledge_graph")
 
-        # Update vector store metadata, then persist — otherwise the metadata
-        # change is lost on restart (in-memory mutation only).
+        # Update vector store metadata
         vec_entry = self.vectors.get(request.fact_id)
-        if vec_entry and vec_entry.metadata is not None:
+        if vec_entry and vec_entry.metadata:
             vec_entry.metadata["verdict"] = new_verdict
             vec_entry.metadata["confidence"] = new_confidence
-            self.vectors.save()
             updated_in.append("vector_store")
 
         # Update cache if claim text exists

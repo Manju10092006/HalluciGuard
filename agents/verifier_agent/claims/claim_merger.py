@@ -23,25 +23,31 @@ class ClaimMerger:
 
         merged_evidence = []
         seen_evidence = set()
-        
-        total_support = 0.0
-        total_contradict = 0.0
+
+        # A single suspicious claim is decomposed into atomic sub-claims. When one
+        # sub-claim is strongly grounded (e.g. 0.97 NLI entailment) it must NOT be
+        # washed out by weaker siblings. We therefore aggregate the dominant signal
+        # with a max-biased blend rather than a pure weighted mean, and we PROPAGATE
+        # the evidence-derived confidence_score (previously dropped, which forced the
+        # downstream calibrator into a low fallback and collapsed a well-grounded
+        # answer to ~0.20 confidence).
+        support_scores: list[float] = []
+        contradict_scores: list[float] = []
+        confidence_scores: list[float] = []
         total_trust = 0.0
-        total_weight = 0.0
-        
+
         for report in sub_claim_reports:
             scores = report.get('scores', {})
-            support = scores.get('support_score', 0.0)
-            contradict = scores.get('contradiction_score', 0.0)
-            trust = scores.get('trust_score', 0.0)
-            
-            weight = trust + 0.1  # small base weight
-            total_weight += weight
-            
-            total_support += support * weight
-            total_contradict += contradict * weight
+            support = float(scores.get('support_score', 0.0) or 0.0)
+            contradict = float(scores.get('contradiction_score', 0.0) or 0.0)
+            trust = float(scores.get('trust_score', 0.0) or 0.0)
+            conf = float(scores.get('confidence_score', 0.0) or 0.0)
+
+            support_scores.append(support)
+            contradict_scores.append(contradict)
+            confidence_scores.append(conf)
             total_trust += trust
-            
+
             for evidence in report.get('evidence_items', []):
                 if isinstance(evidence, dict):
                     snippet = evidence.get('snippet', '')
@@ -53,24 +59,30 @@ class ClaimMerger:
                     merged_evidence.append(evidence)
 
         count = len(sub_claim_reports)
-        avg_support = total_support / total_weight if total_weight > 0 else 0.0
-        avg_contradict = total_contradict / total_weight if total_weight > 0 else 0.0
+
+        def _dominant(values: list[float]) -> float:
+            # 70% strongest sub-claim + 30% mean: the best-grounded sub-claim leads,
+            # but broad weak agreement still contributes. Clamped to [0, 1].
+            if not values:
+                return 0.0
+            peak = max(values)
+            mean = sum(values) / len(values)
+            return max(0.0, min(1.0, 0.70 * peak + 0.30 * mean))
+
+        avg_support = _dominant(support_scores)
+        avg_contradict = _dominant(contradict_scores)
         avg_trust = total_trust / count if count > 0 else 0.0
-        
+        merged_confidence = _dominant(confidence_scores)
+
         if avg_support >= 0.30 and avg_contradict >= 0.30:
             overall_verdict = 'conflicted'
         elif avg_support >= 0.30 and avg_support > avg_contradict + 0.10:
             overall_verdict = 'verified'
         elif avg_contradict >= 0.30 and avg_contradict > avg_support + 0.10:
             overall_verdict = 'contradicted'
-        elif avg_support > avg_contradict and avg_support >= 0.30:
-            # Fail-closed: a weak support signal (0.20-0.30) is no longer enough to
-            # upgrade a sub-claim to VERIFIED. It must clear the same 0.30 bar the
-            # per-passage scorer uses, so ungrounded/thin evidence lands in
-            # 'unverified' rather than a false 'verified'.
+        elif avg_support > avg_contradict and avg_support >= 0.20:
             overall_verdict = 'verified'
         elif avg_contradict > avg_support and avg_contradict >= 0.20:
-            # Contradiction stays sensitive at 0.20 (fail-closed toward flagging).
             overall_verdict = 'contradicted'
         else:
             overall_verdict = 'unverified'
@@ -82,7 +94,8 @@ class ClaimMerger:
             'scores': {
                 'support_score': avg_support,
                 'contradiction_score': avg_contradict,
-                'trust_score': avg_trust
+                'trust_score': avg_trust,
+                'confidence_score': merged_confidence,
             },
             'evidence_items': merged_evidence
         }

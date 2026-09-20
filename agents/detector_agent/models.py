@@ -7,7 +7,7 @@ is preserved exactly for backward compatibility with Verifier/Judge/Corrector ag
 """
 
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -38,6 +38,24 @@ class DetectionInput(BaseModel):
         min_length=1,
         examples=["The capital of France is Paris."]
     )
+
+
+class ClaimRisk(BaseModel):
+    """Detector triage result for one atomic factual claim.
+
+    The probability is a routing signal, not a factual verdict.  Only the
+    evidence-backed Verifier is allowed to label a claim verified or
+    contradicted.
+    """
+
+    claim_id: str
+    text: str
+    hallucination_probability: float = Field(..., ge=0.0, le=1.0)
+    confidence_score: float = Field(..., ge=0.0, le=1.0)
+    risk_level: RiskLevel
+    requires_verification: bool
+    classifier_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    token_surprisal_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 class DetectionResult(BaseModel):
@@ -77,10 +95,10 @@ class DetectionResult(BaseModel):
     status: str = Field(
         default="completed",
         description=(
-            "Execution status: 'completed' for a real inference run, 'degraded' "
-            "when the detector fell back to a baseline/default. The orchestration "
-            "degraded-detector gate reads this to force verification, so it must "
-            "be emitted honestly."
+            "Execution status aligned with orchestration ExecutionStatus values "
+            "('completed' | 'degraded' | 'failed'). Orchestration reads this to "
+            "force verification when the detector could not run real inference; "
+            "a missing/empty status previously left that safety gate dead."
         ),
     )
 
@@ -104,6 +122,16 @@ class DetectionResult(BaseModel):
         default="",
         description="Concrete provenance: resolved model dir / HF id when loaded, or 'baseline-heuristic' when degraded.",
     )
+    atomic_claims: List[str] = Field(
+        default_factory=list,
+        description="Complete atomic factual claims extracted from the response.",
+    )
+    per_claim_results: List[ClaimRisk] = Field(
+        default_factory=list,
+        description="Per-claim hallucination-risk triage used by orchestration.",
+    )
+    evaluator_inference_executed: bool = Field(default=False)
+    evaluator_model_source: str = Field(default="")
 
     class Config:
         json_schema_extra = {
@@ -125,5 +153,6 @@ __all__ = [
     "RiskLevel",
     "NextAction",
     "DetectionInput",
+    "ClaimRisk",
     "DetectionResult",
 ]

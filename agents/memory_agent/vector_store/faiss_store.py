@@ -75,13 +75,9 @@ class VectorStore:
         entries_file = self._store_path / "entries.json"
         index_file = self._store_path / "index.faiss"
 
-        # Persist embeddings (not None). Nulling them meant that after a restart
-        # `_load_entries` restored embedding=None, and the first `delete()` ->
-        # `_rebuild_index` (which filters `if e.embedding`) silently rebuilt an
-        # EMPTY index from the surviving entries — wiping all vector recall while
-        # entries remained (store/index desync). Keeping the vectors makes delete
-        # and rebuild correct across restarts.
-        serializable = [e.model_dump() for e in self._entries]
+        serializable = [
+            {**e.model_dump(), "embedding": None} for e in self._entries
+        ]
         entries_file.write_text(
             json.dumps(serializable, default=str, indent=2), encoding="utf-8"
         )

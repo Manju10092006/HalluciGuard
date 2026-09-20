@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest agents/judge_agent/tests/ -q -s)",
+      "Bash(python -m pytest agents/judge_agent/test_judge.py -q -s -p no:cacheprovider)",
+      "Bash(python -m pytest orchestration/tests/ -q)",
+      "Bash(python -m pytest agents/detector_agent/test_config_weights.py -q)",
+      "Bash(python -)",
+      "Bash(python -m pytest agents/corrector_agent/tests/ -q)"
+    ]
+  }
+}

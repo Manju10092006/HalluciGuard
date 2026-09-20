@@ -24,54 +24,10 @@ class EvidenceScorer:
     """
 
     MIN_NLI_SIGNAL = 0.35  # Aligned with decision-grade evidence selection threshold
-    # Near-certain entailment. Above this a relevance-gated passage may support the
-    # claim even without lexical overlap (authoritative paraphrase / coreference);
-    # below it, a passage must be lexically grounded in the claim's subject terms.
-    _STRONG_ENTAILMENT = 0.90
-
-    # Shared stopword set for extracting a claim's discriminative (salient) terms.
-    _CLAIM_STOPWORDS = {
-        "is", "the", "a", "an", "in", "of", "to", "and", "or", "for", "with",
-        "that", "this", "from", "was", "were", "been", "have", "has", "had",
-        "associated", "related", "called", "known", "named", "are", "be", "at",
-        "by", "on", "as", "it",
-    }
 
     def __init__(self, credibility_config: Dict[str, Any] | None = None) -> None:
         self.reliability_manager = SourceReliabilityManager()
         self.relation_verifier = RelationVerifier()
-
-    @classmethod
-    def _salient_claim_words(cls, claim: str) -> List[str]:
-        """Extract a claim's discriminative terms: alphanumeric tokens longer than
-        three characters, excluding stopwords and bare 4-digit years. These are the
-        subject/entity words a genuine piece of evidence must actually mention."""
-        return [
-            w.lower()
-            for w in re.findall(r"[a-zA-Z0-9]+", claim)
-            if len(w) > 3
-            and w.lower() not in cls._CLAIM_STOPWORDS
-            and not (w.isdigit() and len(w) == 4)
-        ]
-
-    @classmethod
-    def _claim_terms_grounded(cls, claim: str, passage_text: str) -> bool:
-        """Return True when the passage covers enough of the claim's salient terms
-        to be genuinely ABOUT the same subject.
-
-        This is the entity/subject-grounding gate for the SUPPORTING branch. It is
-        intentionally stricter than the contradiction-branch coverage guard (which
-        only trips on zero coverage): a false VERIFIED silently poisons memory
-        (fail-open), whereas an over-cautious NEUTRAL merely withholds support
-        (fail-closed). Only enforced when the claim carries >=2 salient terms — too
-        few discriminative terms to gate on reliably."""
-        claim_words = cls._salient_claim_words(claim)
-        if len(claim_words) < 2:
-            return True
-        text_lower = passage_text.lower()
-        covered = sum(1 for w in claim_words if w in text_lower)
-        need = max(1, math.ceil(0.4 * len(claim_words)))
-        return covered >= need
 
     def _get_relevance_gate_threshold(self) -> float:
         """Get the relevance gate threshold from settings, fallback to 0.20."""
@@ -204,18 +160,6 @@ class EvidenceScorer:
 
         if ("entailment" in label or entailment >= self.MIN_NLI_SIGNAL) and entailment > contradiction:
             if entailment >= self.MIN_NLI_SIGNAL:
-                # Entity/subject-grounding gate. A passage may count as SUPPORTING
-                # only when it is lexically about the claim's subject OR the NLI
-                # entailment is near-certain (an authoritative paraphrase). This
-                # blocks a generic, entity-mismatched passage that merely entails
-                # the sentence FORM from manufacturing a false VERIFIED — e.g. "a
-                # topper is the highest-ranking student" must NOT support "Kushal
-                # is the topper of KMIT" — while still admitting paraphrased
-                # primary evidence (an FDA label, a paper abstract) whose
-                # entailment is strong. Fail-closed: a weak, ungrounded match
-                # becomes NEUTRAL (→ UNVERIFIED), never SUPPORTING.
-                if entailment < self._STRONG_ENTAILMENT and not self._claim_terms_grounded(claim, full_text):
-                    return "NEUTRAL"
                 return "SUPPORTING"
             return "NEUTRAL"
         elif ("contradiction" in label or contradiction >= self.MIN_NLI_SIGNAL) and contradiction > entailment:

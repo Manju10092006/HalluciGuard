@@ -110,28 +110,9 @@ class HaluEvalInference:
         model_path: Optional[str] = None,
         max_length: int = 384,
         device: Optional[str] = None,
-        temperature: Optional[float] = None,
     ):
         self.model_path = model_path or self._resolve_model_path()
         self.max_length = max_length
-        # Temperature scaling for the softmax. A DistilBERT binary classifier
-        # saturates to ~0.0001 / ~0.9999; dividing the logits by T > 1 softens the
-        # probabilities into a more calibrated range without changing the argmax
-        # (so the predicted label is unchanged). Default 1.0 preserves raw output;
-        # set HALUEVAL_TEMPERATURE to calibrate on your validation split.
-        if temperature is None:
-            env_t = os.environ.get("HALUEVAL_TEMPERATURE")
-            if env_t is not None:
-                # Explicit env override always wins.
-                try:
-                    temperature = float(env_t)
-                except (TypeError, ValueError):
-                    temperature = 1.0
-            else:
-                # Otherwise auto-load the temperature the trainer fitted on the
-                # validation split (calibration.json in the model dir), if present.
-                temperature = self._load_calibration_temperature() or 1.0
-        self.temperature = temperature if temperature and temperature > 0 else 1.0
 
         # Auto-detect device
         if device is None:
@@ -142,25 +123,6 @@ class HaluEvalInference:
         self._tokenizer: Optional[AutoTokenizer] = None
         self._model: Optional[AutoModelForSequenceClassification] = None
         self._loaded = False
-
-    def _load_calibration_temperature(self) -> Optional[float]:
-        """Load the fitted temperature from calibration.json in the model dir, if
-        the model path is a local directory that contains one. Returns None when
-        absent (e.g. HF-repo model reference or uncalibrated checkpoint)."""
-        try:
-            import json as _json
-
-            if self.model_path and os.path.isdir(self.model_path):
-                cal_path = os.path.join(self.model_path, "calibration.json")
-                if os.path.isfile(cal_path):
-                    with open(cal_path, "r", encoding="utf-8") as f:
-                        t = float(_json.load(f).get("temperature", 0) or 0)
-                    if t > 0:
-                        logger.info("Loaded fitted calibration temperature T=%.4f", t)
-                        return t
-        except Exception as exc:
-            logger.debug("No usable calibration.json (%s)", exc)
-        return None
 
     def _resolve_model_path(self) -> str:
         """Try to find the model artifacts directory."""
@@ -255,24 +217,16 @@ class HaluEvalInference:
 
         with torch.no_grad():
             logits = self._model(**inputs).logits
-            # Temperature scaling softens saturated logits (see __init__). T=1.0 is
-            # a no-op; T>1 pulls extreme probabilities toward the middle without
-            # changing which class wins.
-            probs = torch.softmax(logits / self.temperature, dim=-1)
+            probs = torch.softmax(logits, dim=-1)
 
         no_halluc_prob = probs[0][0].item()
         halluc_prob = probs[0][1].item()
         predicted_label = 1 if halluc_prob > no_halluc_prob else 0
         label_name = "HALLUCINATION" if predicted_label == 1 else "NO_HALLUCINATION"
 
-        # Confidence is the certainty of the prediction = the winning class
-        # probability, NOT 1 - halluc_prob. Under the old definition a confident
-        # HALLUCINATION prediction reported a LOW confidence, which is wrong.
-        confidence = max(halluc_prob, no_halluc_prob)
-
         return InferenceResult(
             hallucination_probability=round(halluc_prob, 6),
-            confidence_score=round(confidence, 6),
+            confidence_score=round(1.0 - halluc_prob, 6),
             predicted_label=predicted_label,
             predicted_label_name=label_name,
         )

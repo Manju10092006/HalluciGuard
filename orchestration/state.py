@@ -69,16 +69,12 @@ class HalluciGuardState(TypedDict, total=False):
 
     # Shared inter-agent contract (Legacy / Backward-compatibility)
     detector: dict[str, Any]
+    detected_claims: list[dict[str, Any]]
     route: str
     claims: list[dict[str, Any]]
     hallucination_probability: float
     confidence: float
     verification_status: str
-    # Evidence-derived hallucination signal (trustworthy; from Verifier verdicts).
-    # The DistilBERT detector probability is triage-only and cannot discriminate
-    # truth, so the user-facing score comes from grounded evidence instead.
-    evidence_hallucination_probability: float
-    evidence_confidence: float
     verifier: dict[str, Any]
     judge_pairs: list[dict[str, Any]]
     evidence: list[dict[str, Any]]

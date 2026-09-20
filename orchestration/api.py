@@ -395,11 +395,8 @@ async def _execute_verification(
             "terminal_status": result.get("terminal_status") or "human_review",
             "verification_status": derived_status,
             "total_latency_ms": _total_latency_ms(result),
-            # Evidence-derived hallucination probability (trustworthy; from the
-            # Verifier). The detector's own probability is triage-only.
-            "hallucination_probability": result.get("evidence_hallucination_probability"),
-            "evidence_confidence": result.get("evidence_confidence"),
             "detector": result.get("detector"),
+            "detector_note": "triage signal only — not a verdict; the Verifier is the sole factual arbiter",
             "verifier": verifier_view,
             "memory": result.get("memory"),
             "active_agents": result.get("active_agents") or [
