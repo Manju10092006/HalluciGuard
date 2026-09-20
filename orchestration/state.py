@@ -69,6 +69,7 @@ class HalluciGuardState(TypedDict, total=False):
 
     # Shared inter-agent contract (Legacy / Backward-compatibility)
     detector: dict[str, Any]
+    detected_claims: list[dict[str, Any]]
     route: str
     claims: list[dict[str, Any]]
     hallucination_probability: float

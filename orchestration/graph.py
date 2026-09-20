@@ -201,6 +201,34 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))
         risk_level = str(detector.get("risk_level", "LOW")).upper()
+        per_claim_results = list(detector.get("per_claim_results") or [])
+        atomic_claims = [
+            {
+                "claim_id": str(item.get("claim_id") or f"c{index}"),
+                "text": str(item.get("text") or "").strip(),
+                "hallucination_probability": float(
+                    item.get("hallucination_probability", 0.0)
+                ),
+                "risk_level": str(item.get("risk_level", "LOW")).upper(),
+                "requires_verification": bool(
+                    item.get("requires_verification", False)
+                ),
+            }
+            for index, item in enumerate(per_claim_results, start=1)
+            if str(item.get("text") or "").strip()
+        ]
+        if not atomic_claims:
+            atomic_claims = [
+                {
+                    "claim_id": "c1",
+                    "text": llm_resp,
+                    "hallucination_probability": float(
+                        detector.get("hallucination_probability", 0.0)
+                    ),
+                    "risk_level": risk_level,
+                    "requires_verification": True,
+                }
+            ]
         
         # Verification is the safe default. The detector fast path is an explicit
         # operator opt-in only; degraded/fallback detector output must never skip evidence.
@@ -237,7 +265,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
                 target_agent="supervisor",
                 message_type="SUSPICIOUS_CLAIMS",
                 payload={
-                    "suspicious_claims": [llm_resp],
+                    "suspicious_claims": atomic_claims,
                     "hallucination_probability": detector.get("hallucination_probability"),
                     "risk_level": detector.get("risk_level", "HIGH"),
                 },
@@ -246,6 +274,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         return {
             "detector": detector,
             "detector_result": detector,
+            "detected_claims": atomic_claims,
             "route": route,
             "hallucination_probability": float(
                 detector.get("hallucination_probability", 0.0)
@@ -400,23 +429,33 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
     VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _verifier_imports()
     node_start = start_timer()
     try:
-        # Verifier evaluates the core factual claim: the model's generated answer.
-        # Prefer the LLM response over the raw user query (the model output is what
-        # must be grounded); fall back to the query only when no draft exists.
+        # Verify the detector's atomic claims individually.  This preserves the
+        # RefChecker-style claim boundary all the way through retrieval/NLI and
+        # prevents a whole paragraph from receiving one misleading verdict.
         claim_text = (
             state.get("llm_response")
             or state.get("draft_response")
             or state.get("user_query")
             or ""
         )
+        detected_claims = list(state.get("detected_claims") or [])
+        suspicious_claims = [
+            SuspiciousClaim(
+                claim_id=str(item.get("claim_id") or f"c{index}"),
+                text=str(item.get("text") or "").strip(),
+            )
+            for index, item in enumerate(detected_claims, start=1)
+            if str(item.get("text") or "").strip()
+        ]
+        if not suspicious_claims:
+            suspicious_claims = [SuspiciousClaim(claim_id="c1", text=claim_text)]
+
         payload = VerifierInputV2(
             query_id=state.get("request_id")
             or state.get("execution_id")
             or str(uuid.uuid4()),
             domain=state.get("domain", "general"),
-            suspicious_claims=[
-                SuspiciousClaim(claim_id="c1", text=claim_text)
-            ],
+            suspicious_claims=suspicious_claims,
         )
         try:
             verifier_timeout = float(os.environ.get("VERIFIER_TIMEOUT_SECONDS", "120.0"))
@@ -698,14 +737,15 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
                 correction_instructions="Repair contradicted claim(s) using evidence.",
             )
 
-        def _run_corrector():
-            provider = os.environ.get("HG_CORRECTOR_PROVIDER", "openrouter").strip().lower()
-            if provider == "openrouter":
-                from services.openrouter_corrector import OpenRouterCorrectorGenerator
-                return CorrectorAgent(generator=OpenRouterCorrectorGenerator()).correct(corr_req)
-            return CorrectorAgent().correct(corr_req)
+        provider = os.environ.get("HG_CORRECTOR_PROVIDER", "openrouter").strip().lower()
+        if provider == "openrouter":
+            from services.character_regenerator import CharacterRegenerator
 
-        corr_res = await asyncio.to_thread(_run_corrector)
+            # Whole-answer regeneration controller.  Its output remains
+            # untrusted until the dedicated Re-Verifier and Judge pass.
+            corr_res = await CharacterRegenerator().regenerate(corr_req)
+        else:
+            corr_res = await asyncio.to_thread(CorrectorAgent().correct, corr_req)
         dumped_corr = _dump(corr_res)
 
         attempt_count = int(state.get("correction_attempt_count", 0)) + 1
@@ -774,18 +814,17 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             or str(uuid.uuid4())
         )
 
-        claim_texts = []
-        changed = corr_res.get("changed_claims")
-        if changed and isinstance(changed, list):
-            for c in changed:
-                if isinstance(c, dict) and c.get("text"):
-                    claim_texts.append(c["text"])
-                elif isinstance(c, str) and c.strip():
-                    claim_texts.append(c.strip())
+        # Re-verify every factual claim in the regenerated answer, not merely
+        # the claims the Character Agent says it changed.  New hallucinations
+        # are therefore visible to the second Judge pass.
+        try:
+            from agents.verifier_agent.claims.claim_decomposer import ClaimDecomposer
 
+            claim_texts = ClaimDecomposer().decompose(candidate_text)
+        except Exception:
+            claim_texts = []
         if not claim_texts:
-            sentences = [s.strip() for s in candidate_text.replace("\n", " ").split(".") if len(s.strip()) > 10]
-            claim_texts = sentences[:2] if sentences else [candidate_text[:200]]
+            claim_texts = [candidate_text]
 
         suspicious_claims = [
             SuspiciousClaim(claim_id=f"rev-{idx+1}", text=txt)
@@ -822,9 +861,15 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             1 for r in canonical_v_res.claim_reports
             if str(getattr(r, "verdict", "")).lower() in ("contradicted", "verdictlabel.contradicted")
         )
+        all_claims_verified = bool(canonical_v_res.claim_reports) and all(
+            str(getattr(r, "verdict", "")).lower()
+            in ("verified", "verdictlabel.verified")
+            for r in canonical_v_res.claim_reports
+        )
         passed = (
             canonical_v_res.status == ExecutionStatus.COMPLETED
             and remaining_contradictions == 0
+            and all_claims_verified
         )
 
         rev_result = ReverificationResult(
@@ -943,24 +988,29 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
     verified_reports: list[dict[str, Any]] = []
 
     # Memory must not store anything if Judge did not ACCEPT or if reverification failed
-    if judge_decision == "ACCEPT" or not judge_decision:
+    if judge_decision == "ACCEPT":
         if rev_res and isinstance(rev_res, dict):
             if rev_res.get("passed") is True:
                 v_res = rev_res.get("verifier_result", {})
                 for cr in v_res.get("claim_reports", []):
                     verdict_str = str(cr.get("verdict", "")).lower()
-                    if "contradict" not in verdict_str:
+                    if verdict_str in {"verified", "verdictlabel.verified"}:
                         verified_reports.append(cr)
         elif not rev_res:
             v_res = state.get("verifier_result")
             if v_res and isinstance(v_res, dict):
                 for cr in v_res.get("claim_reports", []):
                     verdict_str = str(cr.get("verdict", "")).lower()
-                    if "contradict" not in verdict_str:
+                    if verdict_str in {"verified", "verdictlabel.verified"}:
                         verified_reports.append(cr)
             if not verified_reports:
                 claim_evidence = state.get("verifier", {}).get("claim_evidence", [])
-                verified_reports = [r for r in claim_evidence if "contradict" not in str(r.get("verdict", "")).lower()]
+                verified_reports = [
+                    r
+                    for r in claim_evidence
+                    if str(r.get("verdict", "")).lower()
+                    in {"verified", "verdictlabel.verified"}
+                ]
 
     if not verified_reports:
         memory = {

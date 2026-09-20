@@ -247,7 +247,12 @@ class JudgeAgent:
                 reason = f"Unverified claim accepted under relaxed {policy.domain_name} policy baseline after retries exhausted."
                 explanation = f"Claim remains unverified after retry budget was exhausted; accepted under configured relaxed {policy.domain_name} domain policy."
 
-        confidence = round(min(1.0, max(0.0, normalized_verifier.overall_confidence * (1.0 - 0.2 * det_prob))), 4)
+        # Detector probability is a triage prior, not evidence.  Once retrieval
+        # and NLI have run, Judge confidence must come solely from the Verifier;
+        # otherwise a miscalibrated detector can veto authoritative evidence.
+        confidence = round(
+            min(1.0, max(0.0, normalized_verifier.overall_confidence)), 4
+        )
 
         return JudgeResult(
             decision=decision,

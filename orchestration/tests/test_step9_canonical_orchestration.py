@@ -642,6 +642,7 @@ async def test_memory_only_persists_verified_facts_and_emits_memory_result(monke
     )
 
     state = make_base_state(
+        judge_decision="ACCEPT",
         reverification_result=rev_res.model_dump(),
         final_response="Python was created by Guido van Rossum.",
     )

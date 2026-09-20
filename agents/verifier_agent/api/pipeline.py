@@ -293,11 +293,14 @@ class VerificationPipeline:
         if evidence_count <= 0 or base <= 0.0:
             return 0.0
 
-        evidence_factor = 0.75 + 0.25 * min(1.0, evidence_count / 3.0)
+        # EvidenceScorer already applies source-count calibration.  Applying a
+        # second count penalty here made a single authoritative, 0.97-NLI
+        # passage look like ~0.20 confidence.  Preserve the evidence-derived
+        # score and only apply a genuine-conflict penalty at this layer.
         conflict_penalty = (
             0.60 if conflict_res.get("resolution_type") == "genuine_conflict" else 1.0
         )
-        return round(max(0.0, min(1.0, base * evidence_factor * conflict_penalty)), 4)
+        return round(max(0.0, min(1.0, base * conflict_penalty)), 4)
 
     # ------------------------------------------------------------------
     # Main pipeline entry
@@ -712,8 +715,10 @@ class VerificationPipeline:
         latency_ms = int((time.time() - start_time) * 1000)
         self.metrics.record_request(validated_domain, latency_ms, success=True)
 
-        avg_trust = (
-            sum(cr.trust_score for cr in claim_reports) / len(claim_reports)
+        overall_confidence = (
+            # Full-response acceptance requires every atomic claim to clear the
+            # evidence gate, so the least-certain claim is the safe aggregate.
+            min(cr.confidence_score for cr in claim_reports)
             if claim_reports
             else 0.0
         )
@@ -761,7 +766,7 @@ class VerificationPipeline:
             retrieved_sources=total_retrieved,
             verified_sources=sum(len(r.evidence) for r in claim_reports),
             claim_evidence=claim_reports,
-            overall_evidence_confidence=round(avg_trust, 4),
+            overall_evidence_confidence=round(overall_confidence, 4),
             latency_ms=latency_ms,
             pipeline_stages=pipeline_stages_list,
             runtime_models=runtime_models,

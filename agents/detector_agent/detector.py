@@ -25,7 +25,8 @@ from typing import Optional
 
 from .config import DetectorConfig
 from .halueval_inference import HaluEvalInference
-from .models import DetectionResult, NextAction, RiskLevel
+from .models import ClaimRisk, DetectionResult, NextAction, RiskLevel
+from .signals.token_surprisal import TokenSurprisalEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class DetectorAgent:
                 max_length=self.config.halueval_max_length,
             )
         self._inference = DetectorAgent._SHARED_INFERENCE
+        self._token_evaluator = TokenSurprisalEvaluator()
 
     def _ensure_model_loaded(self) -> None:
         """Load the HaluEval model if not already loaded."""
@@ -95,7 +97,21 @@ class DetectorAgent:
         # Load model on first call
         self._ensure_model_loaded()
 
-        # Run HaluEval classifier inference.
+        # RefChecker-style atomicity: factuality is evaluated per proposition,
+        # never by assigning one opaque score to a multi-sentence paragraph.
+        # The verifier owns truth; this stage only prioritizes its workload.
+        try:
+            from agents.verifier_agent.claims.claim_decomposer import ClaimDecomposer
+
+            atomic_claims = ClaimDecomposer().decompose(llm_response)
+        except Exception as exc:
+            logger.warning("[Detector] Atomic claim extraction degraded: %s", exc)
+            atomic_claims = [llm_response.strip()]
+
+        if not atomic_claims:
+            atomic_claims = [llm_response.strip()]
+
+        # Run HaluEval classifier inference for every atomic claim.
         # detector_* diagnostics below guarantee that a failed load can never be
         # mistaken for real ML inference (spec §6).
         model_loaded = bool(getattr(self._inference, "_loaded", False))
@@ -106,17 +122,66 @@ class DetectorAgent:
         else:
             model_source = "baseline-heuristic"
 
+        claim_results: list[ClaimRisk] = []
         try:
             if model_loaded:
-                result = self._inference.predict(user_query, llm_response)
-                hallucination_prob = result.hallucination_probability
-                confidence_score = result.confidence_score
+                for index, claim in enumerate(atomic_claims, start=1):
+                    result = self._inference.predict(user_query, claim)
+                    classifier_probability = float(result.hallucination_probability)
+                    surprisal_probability = self._token_evaluator.score(
+                        user_query, claim
+                    )
+                    # The supplied fine-tuned checkpoint is empirically
+                    # collapsed on contextless production claims.  Prefer the
+                    # HalluDetect evaluator signal when it executed; retain the
+                    # classifier as an explicit fallback/diagnostic prior.
+                    probability = (
+                        surprisal_probability
+                        if surprisal_probability is not None
+                        else classifier_probability
+                    )
+                    risk = self._determine_risk_level(probability)
+                    claim_results.append(
+                        ClaimRisk(
+                            claim_id=f"c{index}",
+                            text=claim,
+                            hallucination_probability=round(probability, 4),
+                            confidence_score=round(1.0 - probability, 4),
+                            risk_level=risk,
+                            requires_verification=risk != RiskLevel.LOW,
+                            classifier_probability=round(classifier_probability, 4),
+                            token_surprisal_probability=(
+                                round(surprisal_probability, 4)
+                                if surprisal_probability is not None
+                                else None
+                            ),
+                        )
+                    )
+                # A response is only as safe as its riskiest factual claim.
+                hallucination_prob = max(
+                    item.hallucination_probability for item in claim_results
+                )
+                confidence_score = min(
+                    item.confidence_score for item in claim_results
+                )
                 inference_executed = True
             else:
                 # Heuristic baseline risk calculation (detector NOT proven — degraded)
                 hallucination_prob = 0.08
                 confidence_score = 0.92
                 degraded = True
+                claim_results = [
+                    ClaimRisk(
+                        claim_id=f"c{index}",
+                        text=claim,
+                        hallucination_probability=hallucination_prob,
+                        confidence_score=confidence_score,
+                        risk_level=self._determine_risk_level(hallucination_prob),
+                        # A degraded detector can never authorize a fast path.
+                        requires_verification=True,
+                    )
+                    for index, claim in enumerate(atomic_claims, start=1)
+                ]
         except Exception as e:
             logger.error(f"[Detector] Inference failed: {e}")
             return self._default_result(f"Inference error: {e}")
@@ -142,6 +207,12 @@ class DetectorAgent:
             detector_inference_executed=inference_executed,
             detector_degraded=degraded,
             detector_model_source=model_source,
+            atomic_claims=atomic_claims,
+            per_claim_results=claim_results,
+            evaluator_inference_executed=any(
+                item.token_surprisal_probability is not None for item in claim_results
+            ),
+            evaluator_model_source=self._token_evaluator.model_name,
         )
 
     def _determine_risk_level(self, hallucination_prob: float) -> RiskLevel:
@@ -172,8 +243,8 @@ class DetectorAgent:
     def _default_result(self, reason: str) -> DetectionResult:
         """Return a safe default result for error/edge cases.
         
-        Defaults to MEDIUM risk with ACCEPT action (conservative but not
-        alarmist for edge cases).
+        Defaults to HIGH-risk verification. Detector failure must fail closed;
+        it must never authorize an unverified response.
         """
         logger.warning(f"[Detector] Using default result: {reason}")
         return DetectionResult(
@@ -186,5 +257,7 @@ class DetectorAgent:
             detector_inference_executed=False,
             detector_degraded=True,
             detector_model_source=f"default:{reason}",
+            atomic_claims=[],
+            per_claim_results=[],
         )
 
