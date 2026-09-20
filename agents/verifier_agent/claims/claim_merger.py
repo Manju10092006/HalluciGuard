@@ -63,9 +63,14 @@ class ClaimMerger:
             overall_verdict = 'verified'
         elif avg_contradict >= 0.30 and avg_contradict > avg_support + 0.10:
             overall_verdict = 'contradicted'
-        elif avg_support > avg_contradict and avg_support >= 0.20:
+        elif avg_support > avg_contradict and avg_support >= 0.30:
+            # Fail-closed: a weak support signal (0.20-0.30) is no longer enough to
+            # upgrade a sub-claim to VERIFIED. It must clear the same 0.30 bar the
+            # per-passage scorer uses, so ungrounded/thin evidence lands in
+            # 'unverified' rather than a false 'verified'.
             overall_verdict = 'verified'
         elif avg_contradict > avg_support and avg_contradict >= 0.20:
+            # Contradiction stays sensitive at 0.20 (fail-closed toward flagging).
             overall_verdict = 'contradicted'
         else:
             overall_verdict = 'unverified'

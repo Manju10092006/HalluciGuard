@@ -56,10 +56,20 @@ async def main():
     prob = float(detector.get("hallucination_probability", 0.0))
     conf = float(detector.get("confidence_score", detector.get("confidence", 0.0)))
     next_action = str(detector.get("next_action", "verify")).upper()
+    print(f"  • Triage Model: {detector.get('detector_model_source', detector.get('model_source', 'n/a'))}")
+    print(f"  • Claims Analyzed (atomic): {detector.get('claims_analyzed', 1)}")
     print(f"  • Hallucination Risk Level: {risk_level}")
-    print(f"  • Hallucination Probability: {prob:.4f}")
+    print(f"  • Triage Probability (model, riskiest claim): {prob:.4f}")
     print(f"  • Confidence Score:          {conf:.4f}")
     print(f"  • Recommended Route Action:  {next_action}")
+    per_claim = detector.get("per_claim") or []
+    if per_claim:
+        print("  • Per-Claim Triage Breakdown:")
+        for c in per_claim:
+            print(f"      [{c.get('claim_id')}] P(halluc)={float(c.get('hallucination_probability',0.0)):.4f} "
+                  f"{str(c.get('risk_level','')).upper():6s} | \"{str(c.get('text',''))[:70]}\"")
+    print("  • NOTE: triage model is a routing signal only; the trustworthy")
+    print("    hallucination score is evidence-derived (see Verifier below).")
 
     # 3. Verifier Agent
     print("\n" + "-" * 80)
@@ -71,6 +81,10 @@ async def main():
     print(f"  • Search Integrations: {sources_attempted}")
     print(f"  • Evaluated Claims Count: {len(claim_evidence)}")
     print(f"  • Verification Status: {result.get('verification_status', 'N/A')}")
+    ev_hp = result.get("evidence_hallucination_probability")
+    if ev_hp is not None:
+        print(f"  • TRUSTWORTHY Hallucination Probability (evidence-derived): {float(ev_hp):.4f}")
+        print(f"  • Evidence Confidence: {float(result.get('evidence_confidence', 0.0)):.4f}")
     
     for idx, claim in enumerate(claim_evidence, 1):
         c_text = claim.get("claim_text") or claim.get("claim") or claim.get("text", "")
@@ -121,7 +135,11 @@ async def main():
         if corrector.get("reasoning"):
             print(f"  • Repair Reasoning: {corrector.get('reasoning')}")
     else:
-        print("  • Status: SKIPPED (Judge emitted ACCEPT / No contradicted claims required repair)")
+        # Report the ACTUAL judge decision — the corrector is skipped for any
+        # decision other than CORRECT (ACCEPT, VERIFY_AGAIN, REJECT, ABSTAIN), so a
+        # hardcoded "Judge emitted ACCEPT" is misleading.
+        jd = str(judge.get("decision", result.get("judge_decision", "N/A"))).upper()
+        print(f"  • Status: SKIPPED (Judge decision = {jd}; correction not requested)")
 
     # 6. Reverifier Node
     print("\n" + "-" * 80)
@@ -134,7 +152,7 @@ async def main():
         print(f"  • Remaining Contradictions: {reverifier.get('remaining_contradictions', 0)}")
         print(f"  • Reverification Attempts: {result.get('reverification_attempt_count', 1)}")
     else:
-        print("  • Status: SKIPPED (Correction was not triggered)")
+        print("  • Status: SKIPPED (No correction performed; nothing to re-verify)")
 
     # 7. Memory Agent
     print("\n" + "-" * 80)
