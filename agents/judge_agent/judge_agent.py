@@ -247,7 +247,15 @@ class JudgeAgent:
                 reason = f"Unverified claim accepted under relaxed {policy.domain_name} policy baseline after retries exhausted."
                 explanation = f"Claim remains unverified after retry budget was exhausted; accepted under configured relaxed {policy.domain_name} domain policy."
 
-        confidence = round(min(1.0, max(0.0, normalized_verifier.overall_confidence * (1.0 - 0.2 * det_prob))), 4)
+        # Final confidence is the Verifier's evidence confidence — the Verifier is
+        # the factual arbiter (§ verifier-is-authority). The Detector is triage
+        # only and, given the known train/serve skew, emits a near-constant
+        # hallucination probability; the old `* (1 - 0.2 * det_prob)` term applied a
+        # flat ~20% haircut to EVERY answer regardless of truth, dragging correct,
+        # fully-grounded responses below acceptance. Genuine high detector risk
+        # still drives the decision through Rule B (empty-evidence gate), not
+        # through this scalar.
+        confidence = round(min(1.0, max(0.0, normalized_verifier.overall_confidence)), 4)
 
         return JudgeResult(
             decision=decision,

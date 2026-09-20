@@ -58,11 +58,21 @@ class ResponseFormatter:
         """Format the full VerifierOutputV2 response."""
         pipeline_stages = pipeline_stages or []
 
-        # Calculate overall evidence confidence
+        # Calculate overall evidence confidence.
+        #
+        # This is the verifier's certainty in its per-claim ASSESSMENTS, which the
+        # Judge consumes as the grounding confidence for its decision. It must be
+        # the calibrated per-claim ``confidence_score`` (evidence certainty &
+        # consensus, non-zero for BOTH verified and contradicted verdicts) — NOT
+        # ``trust_score``. Trust reflects only *supporting*-source reliability, so
+        # it collapses to ~0 on any contradiction and is structurally low even for
+        # strongly-entailed claims; averaging it made well-grounded answers report
+        # ~0.2 confidence and get starved into human review. Averaging the
+        # calibrated confidence restores a faithful, entailment-driven signal.
         if claim_reports:
-            avg_trust = sum(cr.trust_score for cr in claim_reports) / len(claim_reports)
+            avg_confidence = sum(cr.confidence_score for cr in claim_reports) / len(claim_reports)
         else:
-            avg_trust = 0.0
+            avg_confidence = 0.0
 
         return VerifierOutputV2(
             query_id=query_id,
@@ -71,7 +81,7 @@ class ResponseFormatter:
             retrieved_sources=retrieved_sources,
             verified_sources=verified_sources or len(claim_reports),
             claim_evidence=claim_reports,
-            overall_evidence_confidence=round(avg_trust, 4),
+            overall_evidence_confidence=round(avg_confidence, 4),
             latency_ms=latency_ms,
             pipeline_stages=pipeline_stages,
             runtime_models=runtime_models,
