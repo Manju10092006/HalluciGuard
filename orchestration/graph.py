@@ -603,8 +603,32 @@ async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
         draft_resp = state.get("llm_response") or state.get("draft_response", "")
         domain = state.get("domain", "general")
         retry_count = state.get("retry_count", 0)
+        max_retries = int(state.get("max_retries", 2))
         corr_attempts = int(state.get("correction_attempt_count", 0))
         reverification_res = state.get("reverification_result")
+
+        # Terminal-decision reachability fix.
+        #
+        # The Judge's Rule B/D emit VERIFY_AGAIN only while retry_count <
+        # max_verification_retries, and fall through to a TERMINAL decision
+        # (relaxed domain -> ACCEPT, strict -> ABSTAIN) once retries are exhausted.
+        # But the graph increments retry_count in this node AFTER evaluate and the
+        # router escalates VERIFY_AGAIN to human_review as soon as retry_count >=
+        # max_retries — so evaluate was only ever called with 0..max-1 and its
+        # terminal branch was DEAD CODE. Every answer needing even one retry that
+        # stayed unverified was forced to human_review regardless of domain policy
+        # (the exact "correct answer -> human_review" symptom).
+        #
+        # On the final permitted pass we therefore hand evaluate an effective
+        # retry_count of max_retries so it makes its own domain-aware terminal
+        # decision instead of emitting a VERIFY_AGAIN the router would only convert
+        # into human_review. This adds no extra verifier passes. Only the initial
+        # verification loop is affected; the post-correction reverification path
+        # (which never emits VERIFY_AGAIN) is left untouched.
+        if reverification_res is None and (int(retry_count) + 1) >= max_retries:
+            effective_retry_count = max_retries
+        else:
+            effective_retry_count = retry_count
 
         def _run_judge():
             agent = JudgeAgent()
@@ -615,7 +639,7 @@ async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
                 original_response=draft_resp,
                 domain=domain,
                 reverification_result=reverification_res,
-                retry_count=retry_count,
+                retry_count=effective_retry_count,
                 correction_attempt_count=corr_attempts,
             )
 
