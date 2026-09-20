@@ -100,7 +100,6 @@ class JudgeAgent:
                 status=ExecutionStatus.FAILED
             )
 
-        normalized_detector = self._normalize_detector_result(detector_result)
         domain_name = normalized_verifier.domain or domain or "General Knowledge"
         policy = self.domain_registry.get_policy(domain_name)
 
@@ -157,8 +156,6 @@ class JudgeAgent:
         # -------------------------------------------------------------------
         # 4. Apply Policy Decision Governance Tree (Task 8 & 9)
         # -------------------------------------------------------------------
-        det_prob = normalized_detector.hallucination_probability if normalized_detector else 0.0
-
         has_contradictions = len(claims_to_correct) > 0
         has_preservations = len(claims_to_preserve) > 0
         has_unverified = len(unverified_claims) > 0
@@ -204,14 +201,19 @@ class JudgeAgent:
                     correction_instructions=instructions
                 )
 
-        # Rule B: Absent evidence (0 claims evaluated)
+        # Rule B: Absent evidence (0 claims evaluated).
+        #
+        # "No evidence" means the Verifier could not ground the response — it must
+        # NEVER auto-REJECT on the Detector's probability. The Detector is triage
+        # only and, with the known train/serve skew, emits a near-constant ~0.9995
+        # hallucination probability; the old `det_prob >= 0.70` gate therefore
+        # REJECTed essentially EVERY zero-evidence response regardless of truth, and
+        # the Judge cannot even see the degraded flag (orchestration.schemas.
+        # DetectorResult strips it). Fail SAFE instead: retry retrieval while the
+        # budget remains, then ABSTAIN so the answer escalates to human review
+        # rather than being rejected on a broken signal. (verifier-is-authority)
         elif total_claims == 0:
-            if det_prob >= 0.70:
-                decision = JudgeDecision.REJECT
-                severity = SeverityLevel.HIGH
-                reason = f"High hallucination risk ({det_prob:.2f}) with zero supporting evidence."
-                explanation = "Response flagged as high risk by Detector without grounding evidence."
-            elif retry_count < self.config.max_verification_retries:
+            if retry_count < self.config.max_verification_retries:
                 decision = JudgeDecision.VERIFY_AGAIN
                 severity = SeverityLevel.MEDIUM
                 reason = "No verification claims/evidence provided. Requesting retrieval pass."
@@ -248,13 +250,13 @@ class JudgeAgent:
                 explanation = f"Claim remains unverified after retry budget was exhausted; accepted under configured relaxed {policy.domain_name} domain policy."
 
         # Final confidence is the Verifier's evidence confidence — the Verifier is
-        # the factual arbiter (§ verifier-is-authority). The Detector is triage
-        # only and, given the known train/serve skew, emits a near-constant
-        # hallucination probability; the old `* (1 - 0.2 * det_prob)` term applied a
+        # the sole factual arbiter (§ verifier-is-authority). The Detector is triage
+        # only: given the known train/serve skew it emits a near-constant
+        # hallucination probability, so it no longer feeds the Judge's decision OR
+        # this confidence at all. (The old `* (1 - 0.2 * det_prob)` term applied a
         # flat ~20% haircut to EVERY answer regardless of truth, dragging correct,
-        # fully-grounded responses below acceptance. Genuine high detector risk
-        # still drives the decision through Rule B (empty-evidence gate), not
-        # through this scalar.
+        # fully-grounded responses below acceptance; and the old Rule B REJECTed
+        # every zero-evidence case on the same broken signal. Both are gone.)
         confidence = round(min(1.0, max(0.0, normalized_verifier.overall_confidence)), 4)
 
         return JudgeResult(
