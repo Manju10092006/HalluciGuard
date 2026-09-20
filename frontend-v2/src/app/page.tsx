@@ -7,6 +7,7 @@ import { AuthDialog } from '@/components/auth/AuthDialog'
 import Lenis from 'lenis'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
+import Matter from 'matter-js'
 import {
   AlertTriangle,
   ArrowRight,
@@ -473,6 +474,321 @@ function EvidenceConstellation() {
   )
 }
 
+interface PillConfig {
+  text: string
+  bg: string
+  color: string
+  borderColor: string
+}
+
+function MatterPhysicsBox({ pills, isLeft }: { pills: PillConfig[]; isLeft: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const isVisibleRef = useRef(false)
+
+  useEffect(() => {
+    const container = containerRef.current
+    const canvas = canvasRef.current
+    if (!container || !canvas) return
+
+    const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
+    const width = container.clientWidth || 500
+    const height = 440
+
+    canvas.width = width * dpr
+    canvas.height = height * dpr
+    canvas.style.width = `${width}px`
+    canvas.style.height = `${height}px`
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const { Engine, Bodies, Composite, Mouse, MouseConstraint } = Matter
+
+    const engine = Engine.create({
+      gravity: { x: 0, y: 0.95, scale: 0.001 }
+    })
+
+    // Static Boundaries (Invisible Walls)
+    const wallThick = 100
+    const ground = Bodies.rectangle(width / 2, height + wallThick / 2 - 4, width * 2, wallThick, {
+      isStatic: true,
+      friction: 0.8,
+      restitution: 0.35
+    })
+    const leftWall = Bodies.rectangle(-wallThick / 2 + 4, height / 2, wallThick, height * 2, {
+      isStatic: true,
+      friction: 0.8,
+      restitution: 0.35
+    })
+    const rightWall = Bodies.rectangle(width + wallThick / 2 - 4, height / 2, wallThick, height * 2, {
+      isStatic: true,
+      friction: 0.8,
+      restitution: 0.35
+    })
+    const roof = Bodies.rectangle(width / 2, -wallThick / 2 - 250, width * 2, wallThick, {
+      isStatic: true
+    })
+
+    Composite.add(engine.world, [ground, leftWall, rightWall, roof])
+
+    // Mouse Dragging Constraint
+    const mouse = Mouse.create(canvas)
+    mouse.pixelRatio = dpr
+
+    const mouseConstraint = MouseConstraint.create(engine, {
+      mouse,
+      constraint: {
+        stiffness: 0.2,
+        render: { visible: false }
+      }
+    })
+
+    if ((mouseConstraint.mouse as any).element) {
+      const el = (mouseConstraint.mouse as any).element
+      el.removeEventListener('mousewheel', (mouseConstraint.mouse as any).mousewheel)
+      el.removeEventListener('DOMMouseScroll', (mouseConstraint.mouse as any).mousewheel)
+    }
+
+    Composite.add(engine.world, mouseConstraint)
+
+    // Measure pill widths dynamically using canvas context
+    ctx.save()
+    ctx.font = '600 13px "DM Sans", system-ui, sans-serif'
+    const pillSpecs = pills.map((p) => {
+      const textWidth = ctx.measureText(p.text).width
+      const w = Math.max(textWidth + 36, 88)
+      const h = 38
+      return { ...p, w, h }
+    })
+    ctx.restore()
+
+    let activeBodies: Matter.Body[] = []
+    let spawnTimer: NodeJS.Timeout | null = null
+    let resetTimer: NodeJS.Timeout | null = null
+    let spawnIndex = 0
+
+    const spawnNextPill = () => {
+      if (spawnIndex >= pillSpecs.length) {
+        // All pills spawned. Schedule reset after 10s
+        resetTimer = setTimeout(() => {
+          activeBodies.forEach((b) => Composite.remove(engine.world, b))
+          activeBodies = []
+          spawnIndex = 0
+          if (isVisibleRef.current) {
+            spawnTimer = setTimeout(spawnNextPill, 200)
+          }
+        }, 10000)
+        return
+      }
+
+      const p = pillSpecs[spawnIndex]
+      const spawnX = Math.random() * (width - p.w - 40) + p.w / 2 + 20
+      const spawnY = -40
+
+      const body = Bodies.rectangle(spawnX, spawnY, p.w, p.h, {
+        chamfer: { radius: p.h / 2 },
+        restitution: 0.42,
+        friction: 0.55,
+        frictionAir: 0.012,
+        density: 0.002,
+        angle: (Math.random() - 0.5) * 0.4
+      })
+
+      ;(body as any).pillData = {
+        text: p.text,
+        bg: p.bg,
+        color: p.color,
+        borderColor: p.borderColor,
+        w: p.w,
+        h: p.h
+      }
+
+      Composite.add(engine.world, body)
+      activeBodies.push(body)
+      spawnIndex++
+
+      if (isVisibleRef.current) {
+        spawnTimer = setTimeout(spawnNextPill, 220)
+      }
+    }
+
+    // Animation Loop
+    let animId: number
+    const render = () => {
+      if (!isVisibleRef.current) return
+
+      Engine.update(engine, 1000 / 60)
+
+      ctx.clearRect(0, 0, width * dpr, height * dpr)
+      ctx.save()
+      ctx.scale(dpr, dpr)
+
+      const allBodies = Composite.allBodies(engine.world)
+      for (let i = 0; i < allBodies.length; i++) {
+        const b = allBodies[i]
+        const pData = (b as any).pillData
+        if (!pData) continue
+
+        const { x, y } = b.position
+        const angle = b.angle
+        const { text, bg, color, borderColor, w, h } = pData
+
+        ctx.save()
+        ctx.translate(x, y)
+        ctx.rotate(angle)
+
+        // Drop shadow for pills
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.07)'
+        ctx.shadowBlur = 6
+        ctx.shadowOffsetY = 3
+
+        // Rounded pill shape
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-w / 2, -h / 2, w, h, h / 2)
+        } else {
+          const r = h / 2
+          const left = -w / 2
+          const top = -h / 2
+          ctx.moveTo(left + r, top)
+          ctx.lineTo(left + w - r, top)
+          ctx.arcTo(left + w, top, left + w, top + h, r)
+          ctx.lineTo(left + w, top + h - r)
+          ctx.arcTo(left + w, top + h, left + w - r, top + h, r)
+          ctx.lineTo(left + r, top + h)
+          ctx.arcTo(left, top + h, left, top + h - r, r)
+          ctx.lineTo(left, top + r)
+          ctx.arcTo(left, top, left + r, top, r)
+          ctx.closePath()
+        }
+
+        ctx.fillStyle = bg
+        ctx.fill()
+
+        ctx.shadowColor = 'transparent'
+        ctx.lineWidth = 1.2
+        ctx.strokeStyle = borderColor
+        ctx.stroke()
+
+        // Text
+        ctx.fillStyle = color
+        ctx.font = '600 13px "DM Sans", system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(text, 0, 1)
+
+        ctx.restore()
+      }
+
+      ctx.restore()
+
+      animId = requestAnimationFrame(render)
+    }
+
+    // Scroll Activation Observer
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry.isIntersecting) {
+          if (!isVisibleRef.current) {
+            isVisibleRef.current = true
+            render()
+            if (activeBodies.length === 0 && spawnIndex === 0) {
+              spawnNextPill()
+            }
+          }
+        } else {
+          isVisibleRef.current = false
+          if (spawnTimer) clearTimeout(spawnTimer)
+          if (resetTimer) clearTimeout(resetTimer)
+        }
+      },
+      { threshold: 0.15 }
+    )
+
+    observer.observe(container)
+
+    return () => {
+      isVisibleRef.current = false
+      if (spawnTimer) clearTimeout(spawnTimer)
+      if (resetTimer) clearTimeout(resetTimer)
+      observer.disconnect()
+      cancelAnimationFrame(animId)
+      Engine.clear(engine)
+    }
+  }, [pills, isLeft])
+
+  return (
+    <div className="matter-canvas-wrapper" ref={containerRef}>
+      <canvas className="matter-canvas-element" ref={canvasRef} />
+      <span className="matter-interactive-hint">Drag pills to interact</span>
+    </div>
+  )
+}
+
+function MatterComparisonSection() {
+  const leftPills: PillConfig[] = [
+    { text: "Claim", bg: "#14382e", color: "#ffffff", borderColor: "#0e2922" },
+    { text: "Evidence", bg: "#2563eb", color: "#ffffff", borderColor: "#1d4ed8" },
+    { text: "Primary Source", bg: "#7c3aed", color: "#ffffff", borderColor: "#6d28d9" },
+    { text: "Verifier", bg: "#059669", color: "#ffffff", borderColor: "#047857" },
+    { text: "Cross-check", bg: "#0d9488", color: "#ffffff", borderColor: "#0f766e" },
+    { text: "NLI", bg: "#f59e0b", color: "#1e1b4b", borderColor: "#d97706" },
+    { text: "Confidence", bg: "#10b981", color: "#ffffff", borderColor: "#059669" },
+    { text: "Judge", bg: "#4c1d95", color: "#ffffff", borderColor: "#3b0764" },
+    { text: "Correction", bg: "#f17f73", color: "#ffffff", borderColor: "#e15b4c" },
+    { text: "Re-verification", bg: "#164e63", color: "#ffffff", borderColor: "#083344" },
+    { text: "Provenance", bg: "#4f46e5", color: "#ffffff", borderColor: "#4338ca" },
+    { text: "Verified", bg: "#2e7d63", color: "#ffffff", borderColor: "#1f5845" },
+  ]
+
+  const rightPills: PillConfig[] = [
+    { text: "Confident answer", bg: "#94a3b8", color: "#ffffff", borderColor: "#64748b" },
+    { text: "Unknown", bg: "#e2e8f0", color: "#334155", borderColor: "#cbd5e1" },
+    { text: "Assumption", bg: "#64748b", color: "#ffffff", borderColor: "#475569" },
+    { text: "Unsupported", bg: "#475569", color: "#ffffff", borderColor: "#334155" },
+    { text: "Missing source", bg: "#cbd5e1", color: "#1e293b", borderColor: "#94a3b8" },
+    { text: "Unverified", bg: "#e2e8f0", color: "#475569", borderColor: "#cbd5e1" },
+    { text: "Ambiguous", bg: "#78716c", color: "#ffffff", borderColor: "#57534e" },
+    { text: "Contradiction", bg: "#a8a29e", color: "#1c1917", borderColor: "#78716c" },
+    { text: "Outdated", bg: "#57534e", color: "#ffffff", borderColor: "#44403c" },
+    { text: "Risk", bg: "#334155", color: "#ffffff", borderColor: "#1e293b" },
+  ]
+
+  return (
+    <section className="matter-comparison-section" id="verification-difference">
+      <div className="section-shell">
+        <div className="matter-comparison-head" data-reveal>
+          <span className="section-index">THE VERIFICATION DIFFERENCE</span>
+          <h2>An answer is only the beginning.</h2>
+          <p>See what happens when every claim is given a chance to prove itself.</p>
+        </div>
+
+        <div className="matter-boxes-grid" data-reveal>
+          {/* Left Box: With HalluciGuard */}
+          <div className="matter-box-container left-box">
+            <div className="matter-box-header">
+              <span className="matter-box-badge">With HalluciGuard</span>
+              <p className="matter-box-subtext">Claims are separated, verified, and traced to evidence.</p>
+            </div>
+            <MatterPhysicsBox pills={leftPills} isLeft={true} />
+          </div>
+
+          {/* Right Box: Without verification */}
+          <div className="matter-box-container right-box">
+            <div className="matter-box-header">
+              <span className="matter-box-badge">Without verification</span>
+              <p className="matter-box-subtext">Confident statements can pass through without being checked.</p>
+            </div>
+            <MatterPhysicsBox pills={rightPills} isLeft={false} />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function FAQ() {
   const [open, setOpen] = useState(-1)
   const videoSrc = `/help-support.mp4`
@@ -771,6 +1087,7 @@ export default function LandingPage() {
         <EvidenceFormats />
         <Capabilities />
         <EvidenceConstellation />
+        <MatterComparisonSection />
         <FAQ />
         <Contact />
       </main>
