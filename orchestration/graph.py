@@ -186,6 +186,32 @@ def _generate_route(state: HalluciGuardState) -> str:
     return "detector"
 
 
+def _decompose_claims(text: str) -> list[str]:
+    """Split a draft into atomic factual claims using the verifier's spaCy-based
+    ClaimDecomposer (dependency-parse: pronoun resolution, distributive-object
+    splitting, fragment rejection — not naive punctuation splitting).
+
+    Falls back to the whole text as a single claim if decomposition is
+    unavailable or yields nothing. This is the SAME extractor the Verifier uses
+    internally, so detector and verifier operate on the same claim granularity.
+    """
+    try:
+        verifier_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
+        )
+        if verifier_dir not in sys.path:
+            sys.path.insert(0, verifier_dir)
+        from claims.claim_decomposer import ClaimDecomposer
+
+        if not text or not text.strip():
+            return []
+        claims = ClaimDecomposer().decompose(text)
+        return claims or [text.strip()]
+    except Exception:
+        # Never let claim extraction break detection; degrade to whole-draft.
+        return [text.strip()] if text and text.strip() else []
+
+
 async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
     from agents.detector_agent.detector import DetectorAgent
 
@@ -195,10 +221,53 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         if not llm_resp:
             raise ValueError("No LLM response available for detection.")
 
-        def _run_detect():
-            return DetectorAgent().detect(state["user_query"], llm_resp)
+        # CLAIM-LEVEL DETECTION: decompose the draft into atomic claims and score
+        # each one. The draft's risk is the riskiest claim (max), so a single
+        # hallucinated claim buried in true text still routes to verification.
+        user_query = state["user_query"]
+        sub_claims = _decompose_claims(llm_resp)
 
-        detector = _dump(await asyncio.to_thread(_run_detect))
+        def _enum_val(v: Any) -> str:
+            """Normalize a RiskLevel/NextAction (enum, or str-enum repr like
+            'RiskLevel.HIGH' under Python 3.11+) to its bare value ('HIGH')."""
+            s = str(getattr(v, "value", v)).upper()
+            return s.rsplit(".", 1)[-1]
+
+        def _run_detect():
+            agent = DetectorAgent()
+            per_claim: list[dict[str, Any]] = []
+            for idx, claim in enumerate(sub_claims):
+                res = _dump(agent.detect(user_query, claim))
+                per_claim.append(
+                    {
+                        "claim_id": f"c{idx + 1}",
+                        "text": claim,
+                        "hallucination_probability": float(
+                            res.get("hallucination_probability", 0.0)
+                        ),
+                        "risk_level": _enum_val(res.get("risk_level", "LOW")),
+                    }
+                )
+            # Whole-draft detection too, so the aggregate carries full diagnostics
+            # (model_source / loaded / degraded) and a draft-level probability.
+            whole = _dump(agent.detect(user_query, llm_resp))
+            return whole, per_claim
+
+        whole, per_claim = await asyncio.to_thread(_run_detect)
+
+        # Aggregate: riskiest claim drives routing. Keep whole-draft diagnostics.
+        detector = dict(whole)
+        detector["risk_level"] = _enum_val(detector.get("risk_level", "LOW"))
+        detector["next_action"] = _enum_val(detector.get("next_action", "Verify")).title()
+        if per_claim:
+            riskiest = max(per_claim, key=lambda c: c["hallucination_probability"])
+            detector["hallucination_probability"] = riskiest["hallucination_probability"]
+            detector["risk_level"] = riskiest["risk_level"]
+            if riskiest["risk_level"] == "HIGH":
+                detector["next_action"] = "Verify"
+        detector["per_claim"] = per_claim
+        detector["claims_analyzed"] = len(per_claim)
+
         next_action = str(detector.get("next_action", ""))
         risk_level = str(detector.get("risk_level", "LOW")).upper()
         
@@ -237,7 +306,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
                 target_agent="supervisor",
                 message_type="SUSPICIOUS_CLAIMS",
                 payload={
-                    "suspicious_claims": [llm_resp],
+                    "suspicious_claims": [c["text"] for c in per_claim] or [llm_resp],
                     "hallucination_probability": detector.get("hallucination_probability"),
                     "risk_level": detector.get("risk_level", "HIGH"),
                 },
@@ -386,13 +455,34 @@ def _build_canonical_verifier_result(
         )
 
     overall_conf = float(verifier.get("overall_evidence_confidence", verifier.get("overall_confidence", 0.8)))
+
+    # Derive the real overall status from the verifier's per-stage statuses
+    # instead of hardcoding COMPLETED. VerifierOutputV2 has no top-level status
+    # field — it reports `pipeline_stages` (pipeline.py:721-739), where retrieval
+    # can be "degraded" (no passages retrieved → NLI/scoring had no real evidence)
+    # or "failed" (adapter failures). Hardcoding COMPLETED upgraded those
+    # untrustworthy runs to authoritative, so the Judge's degraded-status guard
+    # never fired on the graph path. Propagate the worst stage status: any failed
+    # → FAILED, else any degraded → DEGRADED, else COMPLETED.
+    stage_statuses = {
+        str(s.get("status", "")).lower()
+        for s in (verifier.get("pipeline_stages") or [])
+        if isinstance(s, dict)
+    }
+    if "failed" in stage_statuses:
+        derived_status = ExecutionStatus.FAILED
+    elif "degraded" in stage_statuses:
+        derived_status = ExecutionStatus.DEGRADED
+    else:
+        derived_status = ExecutionStatus.COMPLETED
+
     return CanonicalVerifierResult(
         query_id=verifier.get("query_id", query_id),
         domain=verifier.get("domain", domain),
         claim_reports=canonical_reports,
         evidence=[ev for r in canonical_reports for ev in r.evidence],
         overall_confidence=overall_conf,
-        status=ExecutionStatus.COMPLETED,
+        status=derived_status,
     )
 
 
@@ -501,6 +591,23 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             else "unverified"
         )
 
+        # EVIDENCE-DERIVED HALLUCINATION SIGNAL.
+        # The DistilBERT detector cannot discriminate truth (near-constant ~0.99);
+        # the trustworthy user-facing hallucination probability comes from the
+        # Verifier's evidence-grounded verdicts, not the model. Map the aggregate
+        # verdict to a probability, tempered by evidence confidence.
+        evidence_conf = float(
+            verifier.get("overall_evidence_confidence", verifier.get("overall_confidence", 0.0))
+        )
+        if overall_status == "contradicted":
+            evidence_hallucination_probability = round(0.75 + 0.24 * evidence_conf, 4)
+        elif overall_status == "conflicted":
+            evidence_hallucination_probability = 0.5
+        elif overall_status == "verified":
+            evidence_hallucination_probability = round(max(0.02, 0.25 - 0.23 * evidence_conf), 4)
+        else:  # unverified — no grounding either way; genuine uncertainty
+            evidence_hallucination_probability = 0.5
+
         return {
             "verifier": verifier,
             "verifier_result": _dump(canonical_verifier_result),
@@ -511,6 +618,8 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             "ranked_evidence": evidence_all,
             "nli_results": nli_results,
             "verification_status": overall_status,
+            "evidence_hallucination_probability": evidence_hallucination_probability,
+            "evidence_confidence": evidence_conf,
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
             "trace": add_trace(
@@ -682,7 +791,12 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
                     verdict_str = str(cr.get("verdict", "")).lower()
                     if "contradict" in verdict_str:
                         claims_to_correct.append(cr)
-                        contra_ev.extend(cr.get("evidence", []))
+                        # Refuting evidence states the correct fact and is the
+                        # grounding the Corrector binds as SUPPORTING; it must go to
+                        # trusted_evidence, not contradictory_evidence, or the target
+                        # is skipped as no_usable_evidence and the draft is returned
+                        # unchanged. Mirrors the Judge's correction-request builder.
+                        trusted_ev.extend(cr.get("evidence", []))
                     elif "verif" in verdict_str and "unverif" not in verdict_str:
                         claims_to_preserve.append(cr)
                         trusted_ev.extend(cr.get("evidence", []))
@@ -778,8 +892,18 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
         changed = corr_res.get("changed_claims")
         if changed and isinstance(changed, list):
             for c in changed:
-                if isinstance(c, dict) and c.get("text"):
-                    claim_texts.append(c["text"])
+                if isinstance(c, dict):
+                    # ChangedClaim.to_dict() exposes `corrected`/`original`/`action`
+                    # (contracts.py:135-145) — there is NO `text` key. Re-verify the
+                    # text that was actually EMITTED for this claim: the rewritten
+                    # `corrected` string when the corrector changed it, else the
+                    # `original` it chose to preserve. Reading a nonexistent `text`
+                    # key silently re-checked the first two sentences of the whole
+                    # response instead of the repaired claim, letting a bad
+                    # correction pass the re-verification safety gate.
+                    emitted = (c.get("corrected") or "").strip() or (c.get("original") or "").strip()
+                    if emitted:
+                        claim_texts.append(emitted)
                 elif isinstance(c, str) and c.strip():
                     claim_texts.append(c.strip())
 
@@ -903,7 +1027,7 @@ def _judge_route(state: HalluciGuardState) -> str:
     """
     if state.get("route") == "error":
         return "human_escalation"
-    decision = str(state.get("judge_decision", "ACCEPT")).upper()
+    decision = str(state.get("judge_decision", "ABSTAIN")).upper()
     if decision == "ACCEPT":
         return "memory"
     elif decision == "CORRECT":
@@ -942,25 +1066,42 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
 
     verified_reports: list[dict[str, Any]] = []
 
-    # Memory must not store anything if Judge did not ACCEPT or if reverification failed
-    if judge_decision == "ACCEPT" or not judge_decision:
+    # Memory must not store anything if Judge did not ACCEPT or if reverification failed.
+    # The detector fast-path sets terminal_status='accepted' without a judge, which is
+    # also an explicit operator-approved acceptance.
+    judge_accepted = judge_decision == "ACCEPT"
+    fast_path_accepted = (
+        not judge_decision
+        and str(state.get("terminal_status", "")).lower() == "accepted"
+    )
+    if judge_accepted or fast_path_accepted:
         if rev_res and isinstance(rev_res, dict):
             if rev_res.get("passed") is True:
                 v_res = rev_res.get("verifier_result", {})
                 for cr in v_res.get("claim_reports", []):
                     verdict_str = str(cr.get("verdict", "")).lower()
-                    if "contradict" not in verdict_str:
+                    # Positive gate: persist ONLY genuinely verified claims. Absence
+                    # of a contradiction is not verification — unverified / conflicted
+                    # / insufficient-evidence claims must never enter trusted memory.
+                    if "verif" in verdict_str and "unverif" not in verdict_str:
                         verified_reports.append(cr)
         elif not rev_res:
             v_res = state.get("verifier_result")
             if v_res and isinstance(v_res, dict):
                 for cr in v_res.get("claim_reports", []):
                     verdict_str = str(cr.get("verdict", "")).lower()
-                    if "contradict" not in verdict_str:
+                    # Positive gate: persist ONLY genuinely verified claims. Absence
+                    # of a contradiction is not verification — unverified / conflicted
+                    # / insufficient-evidence claims must never enter trusted memory.
+                    if "verif" in verdict_str and "unverif" not in verdict_str:
                         verified_reports.append(cr)
             if not verified_reports:
                 claim_evidence = state.get("verifier", {}).get("claim_evidence", [])
-                verified_reports = [r for r in claim_evidence if "contradict" not in str(r.get("verdict", "")).lower()]
+                verified_reports = [
+                    r for r in claim_evidence
+                    if "verif" in str(r.get("verdict", "")).lower()
+                    and "unverif" not in str(r.get("verdict", "")).lower()
+                ]
 
     if not verified_reports:
         memory = {

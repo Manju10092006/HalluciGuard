@@ -109,6 +109,12 @@ class MemoryAgent:
         now = datetime.utcnow()
         contradictions: list[ContradictionAlert] = []
 
+        # NOTE: store_fact intentionally records claims of ANY verdict — verified
+        # facts as trusted knowledge AND hallucinated/contradicted claims as a
+        # record that powers pattern learning and future contradiction detection.
+        # It therefore does NOT gate on verdict/confidence; poisoning is prevented
+        # upstream in orchestration._memory_node (positive verified-only gate).
+
         # Duplicate + contradiction detection against existing memory
         similar = self.vectors.search(
             query=request.claim_text,
@@ -306,8 +312,10 @@ class MemoryAgent:
             self.kg.remove_entity(entity.entity_id)
             deleted_from.append("knowledge_graph")
 
-        # Vector Store
+        # Vector Store — persist the deletion, otherwise the removed fact
+        # reappears on the next restart (delete mutated memory only).
         if self.vectors.delete(fact_id):
+            self.vectors.save()
             deleted_from.append("vector_store")
 
         # Cache — invalidate by claim text if found in KG properties
@@ -349,11 +357,13 @@ class MemoryAgent:
         entity.updated_at = datetime.utcnow()
         updated_in.append("knowledge_graph")
 
-        # Update vector store metadata
+        # Update vector store metadata, then persist — otherwise the metadata
+        # change is lost on restart (in-memory mutation only).
         vec_entry = self.vectors.get(request.fact_id)
-        if vec_entry and vec_entry.metadata:
+        if vec_entry and vec_entry.metadata is not None:
             vec_entry.metadata["verdict"] = new_verdict
             vec_entry.metadata["confidence"] = new_confidence
+            self.vectors.save()
             updated_in.append("vector_store")
 
         # Update cache if claim text exists

@@ -104,13 +104,32 @@ class JudgeAgent:
         domain_name = normalized_verifier.domain or domain or "General Knowledge"
         policy = self.domain_registry.get_policy(domain_name)
 
-        if str(normalized_verifier.status).lower() in ("failed", "executionstatus.failed"):
-            logger.warning("VerifierResult status indicates failure. Returning ABSTAIN.")
+        # A verdict is only authoritative when the verification pipeline actually
+        # completed. Any non-healthy terminal status — failed, degraded (e.g. no
+        # passages retrieved, so NLI/scoring ran on nothing), fallback,
+        # terminated_unresolved, or skipped — means the grounding is untrustworthy
+        # and must NOT be treated as a clean verification. Previously only "failed"
+        # was caught, so a degraded run fell through to claim processing and could
+        # be ACCEPTed as fully grounded. The stringified-enum variants (e.g.
+        # "executionstatus.degraded") guard against the non-use_enum_values path.
+        status_str = str(normalized_verifier.status).lower().rsplit(".", 1)[-1]
+        _non_authoritative = {
+            "failed",
+            "degraded",
+            "fallback",
+            "terminated_unresolved",
+            "skipped",
+        }
+        if status_str in _non_authoritative:
+            logger.warning(
+                "VerifierResult status '%s' is not authoritative. Returning ABSTAIN.",
+                status_str,
+            )
             return JudgeResult(
                 decision=JudgeDecision.ABSTAIN,
                 severity=SeverityLevel.HIGH,
-                reason="VerifierResult status indicates failure.",
-                explanation="Grounding investigation failed to execute. Unsafe to proceed.",
+                reason=f"VerifierResult status '{status_str}' indicates non-authoritative grounding.",
+                explanation="Grounding investigation did not complete cleanly. Unsafe to proceed.",
                 confidence=0.0,
                 correction_request=None,
                 status=ExecutionStatus.FAILED
@@ -132,8 +151,17 @@ class JudgeAgent:
             verdict_str = str(claim.verdict).lower()
             if verdict_str == VerdictLabel.CONTRADICTED.value:
                 claims_to_correct.append(claim)
+                # The evidence that refutes a hallucinated claim states the correct
+                # fact, so it is precisely the grounding the Corrector needs to
+                # rewrite the claim. Per the Corrector's binding contract
+                # (agents/corrector_agent/corrector/evidence.py) supporting evidence
+                # is identified by membership in trusted_evidence — "evidence that
+                # refutes a hallucination is exactly what the Judge places in
+                # trusted_evidence." Routing it into contradictory_evidence instead
+                # leaves the correction target with no usable support, so the
+                # Corrector skips it and returns the original response unchanged.
                 for ev in claim.evidence:
-                    contradictory_evidence.append(ev)
+                    trusted_evidence.append(ev)
             elif verdict_str == VerdictLabel.VERIFIED.value:
                 claims_to_preserve.append(claim)
                 for ev in claim.evidence:
@@ -170,6 +198,16 @@ class JudgeAgent:
         reason: str = ""
         explanation: str = ""
         correction_req: Optional[CorrectionRequest] = None
+
+        # Calibrated confidence — computed BEFORE the decision tree so ACCEPT can
+        # actually gate on it. Previously this was computed after the tree and only
+        # stored on the result, so `policy.accept_confidence_threshold` (per-domain,
+        # e.g. Healthcare 0.88) was never enforced: a "verified" claim at confidence
+        # 0.30 in a strict domain was ACCEPTed verbatim. Discounted by detector risk.
+        confidence = round(
+            min(1.0, max(0.0, normalized_verifier.overall_confidence * (1.0 - 0.2 * det_prob))),
+            4,
+        )
 
         # Rule A: Contradicted Claims -> REJECT (if critical safety) or CORRECT
         if has_contradictions:
@@ -222,12 +260,28 @@ class JudgeAgent:
                 reason = f"Insufficient grounding evidence in {policy.domain_name} domain."
                 explanation = "Grounding evidence was absent and retries exhausted."
 
-        # Rule C: All evaluated claims verified -> ACCEPT
+        # Rule C: All evaluated claims verified -> ACCEPT, but ONLY when calibrated
+        # confidence clears the domain's accept_confidence_threshold. "All claims
+        # verified" is necessary, not sufficient: a strict domain (Healthcare 0.88)
+        # must not release a fully-verified-but-low-confidence answer. Below the
+        # threshold we retry retrieval if budget remains, else abstain to human
+        # review — never accept under-grounded content in a strict domain.
         elif not has_contradictions and has_preservations and not has_unverified and not has_conflicted:
-            decision = JudgeDecision.ACCEPT
-            severity = SeverityLevel.LOW
-            reason = "All claims verified against authoritative ground-truth evidence."
-            explanation = f"Response is fully grounded in {policy.domain_name} sources with overall confidence {normalized_verifier.overall_confidence:.2f}."
+            if confidence >= policy.accept_confidence_threshold:
+                decision = JudgeDecision.ACCEPT
+                severity = SeverityLevel.LOW
+                reason = "All claims verified against authoritative ground-truth evidence."
+                explanation = f"Response is fully grounded in {policy.domain_name} sources with confidence {confidence:.2f} (>= {policy.accept_confidence_threshold:.2f} required)."
+            elif retry_count < self.config.max_verification_retries:
+                decision = JudgeDecision.VERIFY_AGAIN
+                severity = SeverityLevel.MEDIUM
+                reason = f"All claims verified but confidence {confidence:.2f} is below the {policy.domain_name} accept threshold {policy.accept_confidence_threshold:.2f}."
+                explanation = "Grounding is directionally correct but under-confident for this domain. Requesting an expanded retrieval pass."
+            else:
+                decision = JudgeDecision.ABSTAIN
+                severity = SeverityLevel.HIGH
+                reason = f"Verified claims did not reach the {policy.domain_name} confidence threshold ({confidence:.2f} < {policy.accept_confidence_threshold:.2f}) after retries."
+                explanation = "Failing closed to human review rather than releasing under-grounded content in a strict domain."
 
         # Rule D: Unverified or Conflicted claims (Task 6, 7 & 9)
         elif has_unverified or has_conflicted:
@@ -242,12 +296,15 @@ class JudgeAgent:
                 reason = f"Insufficient grounding evidence under strict {policy.domain_name} policy."
                 explanation = "Verification retries exhausted without sufficient authoritative grounding."
             else:
-                decision = JudgeDecision.ACCEPT
-                severity = SeverityLevel.LOW
-                reason = f"Unverified claim accepted under relaxed {policy.domain_name} policy baseline after retries exhausted."
-                explanation = f"Claim remains unverified after retry budget was exhausted; accepted under configured relaxed {policy.domain_name} domain policy."
-
-        confidence = round(min(1.0, max(0.0, normalized_verifier.overall_confidence * (1.0 - 0.2 * det_prob))), 4)
+                # Fail-closed invariant: an UNVERIFIED/CONFLICTED claim must NEVER be
+                # accepted, even under a relaxed domain policy. Absence of a
+                # contradiction is not evidence of correctness. After the retry
+                # budget is exhausted without authoritative grounding, abstain to
+                # human review rather than releasing an unverified claim.
+                decision = JudgeDecision.ABSTAIN
+                severity = SeverityLevel.HIGH
+                reason = f"Claim could not be grounded after retries in {policy.domain_name} domain."
+                explanation = "Verification retries were exhausted without authoritative grounding. Failing closed to human review rather than accepting an unverified claim."
 
         return JudgeResult(
             decision=decision,
@@ -334,7 +391,10 @@ class JudgeAgent:
                     verdict_str = str(getattr(cr, "verdict", "")).lower()
                     if "contradict" in verdict_str:
                         claims_to_correct.append(cr)
-                        contra_ev.extend(getattr(cr, "evidence", []))
+                        # Refuting evidence carries the correct fact -> grounding for
+                        # the Corrector, so it belongs in trusted_evidence (see the
+                        # main-path comment and the Corrector binding contract).
+                        trusted_ev.extend(getattr(cr, "evidence", []))
                     elif "verif" in verdict_str and "unverif" not in verdict_str:
                         claims_to_preserve.append(cr)
                         trusted_ev.extend(getattr(cr, "evidence", []))

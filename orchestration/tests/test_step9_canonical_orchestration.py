@@ -644,6 +644,7 @@ async def test_memory_only_persists_verified_facts_and_emits_memory_result(monke
     state = make_base_state(
         reverification_result=rev_res.model_dump(),
         final_response="Python was created by Guido van Rossum.",
+        judge_decision="ACCEPT",
     )
 
     res = await _memory_node(state)
@@ -849,3 +850,67 @@ def test_real_corrector_agent_fails_closed_without_model():
     assert result.corrected_text == "Python was created by Elon Musk."
     assert result.validation_status in ("unvalidated", "warning")
     assert result.status in ("degraded", "terminated_unresolved")
+
+
+# ===========================================================================
+# U. Memory Gate: Missing Judge Decision Without Fast-Path Must Block
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_memory_gate_blocks_when_no_judge_decision_and_no_fast_path(monkeypatch):
+    """Memory must NOT persist facts when judge_decision is absent and terminal_status != accepted."""
+    stored_requests = []
+
+    class MockMemoryAgent:
+        async def initialize(self):
+            pass
+        async def close(self):
+            pass
+        async def store_fact(self, req):
+            stored_requests.append(req)
+            return {"fact_id": "f1"}
+
+    monkeypatch.setattr(
+        "agents.memory_agent.memory.memory_agent.MemoryAgent",
+        MockMemoryAgent,
+    )
+
+    # Verifier result with verified claims, but no judge decision and not fast-path accepted.
+    # This simulates a state where claims exist but the pipeline ended without proper judgment.
+    v_res = VerifierResult(
+        query_id="q1",
+        domain="general",
+        claim_reports=[
+            ClaimReport(
+                claim_id="c1",
+                claim_text="Some fact.",
+                verdict=VerdictLabel.VERIFIED,
+            )
+        ],
+        overall_confidence=0.9,
+    )
+
+    state = make_base_state(
+        verifier_result=v_res.model_dump(),
+        terminal_status="human_review",
+        # judge_decision is intentionally NOT set
+    )
+
+    res = await _memory_node(state)
+
+    assert len(stored_requests) == 0
+    assert res["memory_result"]["status"] == "skipped"
+
+
+# ===========================================================================
+# V. Judge Route: Missing Decision Defaults to ABSTAIN, Not ACCEPT
+# ===========================================================================
+
+def test_judge_route_missing_decision_defaults_to_human_escalation():
+    """_judge_route must route to human_escalation when judge_decision is absent."""
+    # No judge_decision in state at all
+    assert _judge_route({}) == "human_escalation"
+    # Explicitly empty
+    assert _judge_route({"judge_decision": ""}) == "human_escalation"
+    # None value
+    assert _judge_route({"judge_decision": None}) == "human_escalation"

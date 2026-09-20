@@ -49,6 +49,7 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
     DataCollatorWithPadding,
+    EarlyStoppingCallback,
     Trainer,
     TrainingArguments,
 )
@@ -96,7 +97,10 @@ def get_config_from_env() -> dict:
         "base_model":       os.environ.get("HALUEVAL_BASE_MODEL", "distilbert-base-uncased"),
         "output_dir":       os.environ.get("HALUEVAL_OUTPUT_DIR", "artifacts/halueval-detector-final"),
         "max_length":       int(os.environ.get("HALUEVAL_MAX_LENGTH", "384")),
-        "epochs":           int(os.environ.get("HALUEVAL_EPOCHS", "3")),
+        # Raised from 3 -> 6 so EarlyStoppingCallback (patience 2, on eval_loss)
+        # can actually trigger and stop at the best-generalizing checkpoint
+        # instead of always running to a fixed, overfit epoch count.
+        "epochs":           int(os.environ.get("HALUEVAL_EPOCHS", "6")),
         "lr":               float(os.environ.get("HALUEVAL_LR", "2e-5")),
         "train_batch_size": int(os.environ.get("HALUEVAL_TRAIN_BATCH_SIZE", "16")),
         "eval_batch_size":  int(os.environ.get("HALUEVAL_EVAL_BATCH_SIZE", "32")),
@@ -235,6 +239,12 @@ def main():
     # ---------------------------------------------------------------- Step 4
     os.makedirs(output_dir, exist_ok=True)
 
+    # Root-cause fix (2026-09-20 audit): the v2 build selected the best
+    # checkpoint on eval F1 with greater_is_better, which picked the MOST
+    # overfit epoch (epoch 3, eval_loss 0.696 vs 0.408 at epoch 1) and produced
+    # a saturated, near-constant classifier. Select on eval_loss (lower = better,
+    # penalizes overconfidence) and stop early once validation loss stops
+    # improving. Allow more epochs so early stopping can actually trigger.
     training_args = TrainingArguments(
         output_dir=os.path.join(output_dir, "checkpoints"),
         eval_strategy="epoch",
@@ -244,9 +254,11 @@ def main():
         per_device_eval_batch_size=cfg["eval_batch_size"],
         num_train_epochs=cfg["epochs"],
         weight_decay=0.01,
+        warmup_ratio=0.06,
         load_best_model_at_end=True,
-        metric_for_best_model="f1",
-        greater_is_better=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
+        save_total_limit=2,
         seed=cfg["seed"],
         logging_steps=100,
         report_to="none",
@@ -265,6 +277,7 @@ def main():
         data_collator=data_collator,
         compute_metrics=compute_metrics,
         class_weights=class_weights,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
     )
 
     print(f"\n[Step 4] Training ({cfg['epochs']} epochs) on {device}...")
@@ -293,10 +306,64 @@ def main():
     print(f"  TN={cm[0][0]}  FP={cm[0][1]}")
     print(f"  FN={cm[1][0]}  TP={cm[1][1]}")
 
+    # ------------------------------------------------------- Step 6b: CALIBRATE
+    # The v2 model shipped UNCALIBRATED and saturated (softmax ~0.999/~0.001),
+    # so the 0.30/0.50 risk bands were unusable. Fit a single temperature T on the
+    # VALIDATION split (never test) by minimizing NLL, and report ECE before/after.
+    # Inference multiplies logits by 1/T via HALUEVAL_TEMPERATURE.
+    print("\n[Step 6b] Fitting temperature scaling on validation split...")
+
+    def _ece(probs_pos, labels_arr, n_bins=10):
+        conf = np.where(probs_pos >= 0.5, probs_pos, 1 - probs_pos)
+        pred = (probs_pos >= 0.5).astype(int)
+        correct = (pred == labels_arr).astype(float)
+        e = 0.0
+        for b in range(n_bins):
+            lo, hi = b / n_bins, (b + 1) / n_bins
+            mask = (conf > lo) & (conf <= hi) if b > 0 else (conf >= lo) & (conf <= hi)
+            if mask.sum() == 0:
+                continue
+            e += (mask.sum() / len(conf)) * abs(conf[mask].mean() - correct[mask].mean())
+        return float(e)
+
+    val_pred = trainer.predict(tokenized["validation"])
+    val_logits = torch.tensor(val_pred.predictions, dtype=torch.float32)
+    val_labels = torch.tensor(val_pred.label_ids, dtype=torch.long)
+
+    log_t = torch.zeros(1, requires_grad=True)  # T = exp(log_t) > 0
+    opt = torch.optim.LBFGS([log_t], lr=0.1, max_iter=100)
+    nll = nn.CrossEntropyLoss()
+
+    def _closure():
+        opt.zero_grad()
+        loss = nll(val_logits / torch.exp(log_t), val_labels)
+        loss.backward()
+        return loss
+
+    opt.step(_closure)
+    fitted_T = float(torch.exp(log_t).item())
+
+    val_probs_raw = torch.softmax(val_logits, dim=-1)[:, 1].numpy()
+    val_probs_cal = torch.softmax(val_logits / fitted_T, dim=-1)[:, 1].numpy()
+    labels_np = val_pred.label_ids
+    ece_raw = _ece(val_probs_raw, labels_np)
+    ece_cal = _ece(val_probs_cal, labels_np)
+    print(f"[Step 6b] Fitted temperature T={fitted_T:.4f}")
+    print(f"[Step 6b] Validation ECE: raw={ece_raw:.4f} -> calibrated={ece_cal:.4f}")
+    print(f"[Step 6b] Set HALUEVAL_TEMPERATURE={fitted_T:.4f} at inference to apply.")
+
     # ---------------------------------------------------------------- Step 7
     print(f"\n[Step 7] Saving to: {output_dir}")
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
+
+    # Persist calibration so inference can auto-load T instead of hardcoding it.
+    with open(os.path.join(output_dir, "calibration.json"), "w") as f:
+        json.dump(
+            {"temperature": fitted_T, "val_ece_raw": ece_raw, "val_ece_calibrated": ece_cal},
+            f,
+            indent=2,
+        )
 
     metadata = {
         "base_model":          cfg["base_model"],
@@ -329,6 +396,11 @@ def main():
         "test_recall":         float(test_results.get("eval_recall", 0)),
         "test_f1":             float(test_results.get("eval_f1", 0)),
         "confusion_matrix":    cm.tolist(),
+        "calibration_temperature": fitted_T,
+        "val_ece_raw":         ece_raw,
+        "val_ece_calibrated":  ece_cal,
+        "best_checkpoint_metric": "eval_loss",
+        "early_stopping_patience": 2,
     }
     with open(os.path.join(output_dir, "training_metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2)
