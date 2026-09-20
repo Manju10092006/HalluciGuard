@@ -52,14 +52,18 @@ async def main():
     print("2. [AGENT] DETECTOR AGENT (Hallucination Risk & Token Analysis)")
     print("-" * 80)
     detector = result.get("detector_result") or result.get("detector", {})
-    risk_level = str(detector.get("risk_level", "UNKNOWN")).upper()
+    risk_level = str(detector.get("risk_level", "UNKNOWN")).upper().split(".")[-1]
     prob = float(detector.get("hallucination_probability", 0.0))
     conf = float(detector.get("confidence_score", detector.get("confidence", 0.0)))
-    next_action = str(detector.get("next_action", "verify")).upper()
+    next_action = str(detector.get("next_action", "verify")).upper().split(".")[-1]
+    degraded = bool(detector.get("detector_degraded")) or not detector.get("detector_inference_executed", True)
     print(f"  • Hallucination Risk Level: {risk_level}")
     print(f"  • Hallucination Probability: {prob:.4f}")
     print(f"  • Confidence Score:          {conf:.4f}")
     print(f"  • Recommended Route Action:  {next_action}")
+    print(f"  • Detector Degraded:         {degraded}")
+    print("  • NOTE: Detector is TRIAGE-ONLY (known train/serve skew -> near-constant")
+    print("          output); it never decides the outcome. The Verifier is the arbiter.")
 
     # 3. Verifier Agent
     print("\n" + "-" * 80)
