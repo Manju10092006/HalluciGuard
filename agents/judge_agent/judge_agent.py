@@ -200,12 +200,19 @@ class JudgeAgent:
         correction_req: Optional[CorrectionRequest] = None
 
         # Calibrated confidence — computed BEFORE the decision tree so ACCEPT can
-        # actually gate on it. Previously this was computed after the tree and only
-        # stored on the result, so `policy.accept_confidence_threshold` (per-domain,
-        # e.g. Healthcare 0.88) was never enforced: a "verified" claim at confidence
-        # 0.30 in a strict domain was ACCEPTed verbatim. Discounted by detector risk.
+        # actually gate on it via `policy.accept_confidence_threshold` (per-domain,
+        # e.g. Healthcare 0.88): a "verified" claim at confidence 0.30 in a strict
+        # domain must NOT be ACCEPTed verbatim.
+        #
+        # Detector DECOUPLING: confidence comes SOLELY from the Verifier. The
+        # detector is a triage-only prior (known train/serve skew -> near-constant
+        # output); once retrieval and NLI have run it must not discount the
+        # authoritative grounding, or a miscalibrated detector could veto a
+        # correct, well-grounded answer. (The previous `* (1 - 0.2*det_prob)`
+        # discount is removed.) det_prob is still consulted as a triage signal in
+        # the zero-evidence branch below, never as a confidence multiplier.
         confidence = round(
-            min(1.0, max(0.0, normalized_verifier.overall_confidence * (1.0 - 0.2 * det_prob))),
+            min(1.0, max(0.0, normalized_verifier.overall_confidence)),
             4,
         )
 

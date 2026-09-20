@@ -50,6 +50,16 @@ class RelationVerifier:
         "sister_of": "sibling",
     }
 
+    # Negation cues used to mark a triple's polarity. The extractor is otherwise
+    # polarity-blind (it collapses "X was NOT created by Y" into the positive triple
+    # (X, created_by, Y)), so relation checks must consult Triple.negated before
+    # forcing a contradiction. Matches "not"/"never"/"cannot"/"no longer" and any
+    # "n't" contraction (isn't, wasn't, didn't, doesn't, hasn't, won't, can't, ...).
+    _NEGATION_CUE = re.compile(
+        r"\b(?:not|never|cannot|no\s+longer)\b|n['’]t\b",
+        re.IGNORECASE,
+    )
+
     @staticmethod
     def _clean_str(s: str) -> str:
         s = re.sub(r"[^\w\s\-]", " ", s)
@@ -79,6 +89,11 @@ class RelationVerifier:
             sent_clean = sent.strip()
             if not sent_clean:
                 continue
+
+            # Record where this sentence's triples begin, and detect negation once
+            # so we can stamp every triple from this sentence with its polarity below.
+            _triple_base = len(triples)
+            sent_negated = bool(self._NEGATION_CUE.search(sent_clean))
 
             # ── 1. Capital Relations ──────────────────────────────────
             # e.g., "Hyderabad is the capital ... of the Indian state of Telangana"
@@ -311,6 +326,14 @@ class RelationVerifier:
                     )
                 )
 
+            # Stamp sentence-level polarity onto every triple extracted from this
+            # sentence. Without this a negated claim ("X was NOT created by Y") yields
+            # a positive triple and can be force-contradicted downstream.
+            # verify_relation() consults Triple.negated to stay fail-safe.
+            if sent_negated:
+                for _t in triples[_triple_base:]:
+                    _t.negated = True
+
         return triples
 
     def _names_match(self, name1: str, name2: str) -> bool:
@@ -346,6 +369,23 @@ class RelationVerifier:
             )
 
         c_triple = claim_triples[0]
+
+        # Polarity gate (fail-safe). The extractor is polarity-blind: it collapses
+        # "X was NOT created by Y" into the positive triple (X, created_by, Y). If a
+        # negated claim runs the structural comparison, a TRUE refutation such as
+        # "Python was not created by Elon Musk" matches truth evidence ("created by
+        # Guido van Rossum"), fires OBJECT_MISMATCH, and manufactures a false 0.95
+        # contradiction over ~0 NLI. When the claim is negated we cannot trust the
+        # (polarity-blind) triple, so we abstain here and defer to the polarity-aware
+        # NLI stage by reporting NO_TRIPLE_EXTRACTED.
+        if c_triple.negated:
+            return RelationCheckResult(
+                claim_triple=c_triple,
+                evidence_triples=[],
+                status="NO_TRIPLE_EXTRACTED",
+                mismatch_detail="Claim is negated; relation comparison is polarity-blind, deferring to NLI",
+            )
+
         all_evidence_triples: List[Triple] = []
 
         for p in evidence_passages:

@@ -186,11 +186,17 @@ class TestEdgeCases:
     """Test error handling and edge cases."""
 
     def test_empty_query(self, detector):
-        """Empty query should return a safe default, not crash."""
+        """Empty query must FAIL CLOSED (HIGH/VERIFY), never silently ACCEPT.
+
+        Previously this asserted MEDIUM/ACCEPT, which enshrined a detector
+        failure silently passing an unverified answer. The fail-closed default
+        now emits HIGH/VERIFY with status='degraded'.
+        """
         result = detector.detect(user_query="", llm_response="Some response")
         assert isinstance(result, DetectionResult)
-        assert result.risk_level == RiskLevel.MEDIUM
-        assert result.next_action == NextAction.ACCEPT
+        assert result.risk_level == RiskLevel.HIGH
+        assert result.next_action == NextAction.VERIFY
+        assert result.status == "degraded"
 
     def test_empty_response(self, detector):
         """Empty response should return a safe default, not crash."""
