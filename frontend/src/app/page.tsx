@@ -722,7 +722,6 @@ function MatterPhysicsBox({ pills, isLeft }: { pills: PillConfig[]; isLeft: bool
   return (
     <div className="matter-canvas-wrapper" ref={containerRef}>
       <canvas className="matter-canvas-element" ref={canvasRef} />
-      <span className="matter-interactive-hint">Drag pills to interact</span>
     </div>
   )
 }
@@ -765,23 +764,36 @@ function MatterComparisonSection() {
           <p>See what happens when every claim is given a chance to prove itself.</p>
         </div>
 
-        <div className="matter-boxes-grid" data-reveal>
-          {/* Left Box: With HalluciGuard */}
-          <div className="matter-box-container left-box">
-            <div className="matter-box-header">
-              <span className="matter-box-badge">With HalluciGuard</span>
-              <p className="matter-box-subtext">Claims are separated, verified, and traced to evidence.</p>
+        <div className="matter-comparison-stage" data-reveal>
+          <div className="matter-boxes-grid">
+            {/* Left Column: With HalluciGuard */}
+            <div className="matter-column">
+              <div className="matter-box-header">
+                <span className="matter-box-badge left-badge">With HalluciGuard</span>
+                <p className="matter-box-subtext">Claims are separated, verified, and traced to evidence.</p>
+              </div>
+              <div className="matter-box-container left-box">
+                <MatterPhysicsBox pills={leftPills} isLeft={true} />
+              </div>
             </div>
-            <MatterPhysicsBox pills={leftPills} isLeft={true} />
+
+            {/* Right Column: Without verification */}
+            <div className="matter-column">
+              <div className="matter-box-header">
+                <span className="matter-box-badge right-badge">Without verification</span>
+                <p className="matter-box-subtext">Confident statements can pass through without being checked.</p>
+              </div>
+              <div className="matter-box-container right-box">
+                <MatterPhysicsBox pills={rightPills} isLeft={false} />
+              </div>
+            </div>
           </div>
 
-          {/* Right Box: Without verification */}
-          <div className="matter-box-container right-box">
-            <div className="matter-box-header">
-              <span className="matter-box-badge">Without verification</span>
-              <p className="matter-box-subtext">Confident statements can pass through without being checked.</p>
-            </div>
-            <MatterPhysicsBox pills={rightPills} isLeft={false} />
+          {/* Bottom Action / Hint Link */}
+          <div className="matter-bottom-action">
+            <a className="matter-action-btn" href="#investigation">
+              Drag pills to interact <ArrowRight size={15} />
+            </a>
           </div>
         </div>
       </div>
