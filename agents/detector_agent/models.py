@@ -92,6 +92,15 @@ class DetectionResult(BaseModel):
         default="halueval-distilbert",
         description="Identifier of the model that produced this result."
     )
+    status: str = Field(
+        default="completed",
+        description=(
+            "Execution status aligned with orchestration ExecutionStatus values "
+            "('completed' | 'degraded' | 'failed'). Orchestration reads this to "
+            "force verification when the detector could not run real inference; "
+            "a missing/empty status previously left that safety gate dead."
+        ),
+    )
 
     # --- §6 Detector execution diagnostics (additive; safe defaults) ---
     # These make it impossible for a failed detector load to masquerade as real

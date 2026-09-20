@@ -166,9 +166,12 @@ class DetectorAgent:
                 )
                 inference_executed = True
             else:
-                # Heuristic baseline risk calculation (detector NOT proven — degraded)
-                hallucination_prob = 0.08
-                confidence_score = 0.92
+                # Detector NOT proven — degraded. Emit an HONEST "unknown" posture
+                # (0.5) rather than a fabricated confident-low 0.08/0.92, which
+                # masqueraded a dead model as a safe answer. 0.5 maps to HIGH ->
+                # VERIFY, so a degraded detector always routes to evidence.
+                hallucination_prob = 0.5
+                confidence_score = 0.5
                 degraded = True
                 claim_results = [
                     ClaimRisk(
@@ -203,6 +206,7 @@ class DetectorAgent:
             risk_level=risk_level,
             next_action=next_action,
             model_source=model_source,
+            status="degraded" if degraded else "completed",
             detector_model_loaded=model_loaded,
             detector_inference_executed=inference_executed,
             detector_degraded=degraded,
@@ -242,17 +246,21 @@ class DetectorAgent:
 
     def _default_result(self, reason: str) -> DetectionResult:
         """Return a safe default result for error/edge cases.
-        
+
         Defaults to HIGH-risk verification. Detector failure must fail closed;
-        it must never authorize an unverified response.
+        it must never authorize an unverified response. Previously this returned
+        MEDIUM/ACCEPT, which silently PASSED an unverified answer on empty input
+        or an inference error — directly contradicting this docstring and the
+        fail-closed design. It now emits HIGH/VERIFY with status='degraded'.
         """
         logger.warning(f"[Detector] Using default result: {reason}")
         return DetectionResult(
             confidence_score=0.50,
             hallucination_probability=0.50,
-            risk_level=RiskLevel.MEDIUM,
-            next_action=NextAction.ACCEPT,
+            risk_level=RiskLevel.HIGH,
+            next_action=NextAction.VERIFY,
             model_source="baseline-heuristic",
+            status="degraded",
             detector_model_loaded=bool(getattr(self._inference, "_loaded", False)),
             detector_inference_executed=False,
             detector_degraded=True,

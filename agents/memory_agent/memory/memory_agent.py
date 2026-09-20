@@ -85,12 +85,35 @@ class MemoryAgent:
         logger.info("Memory agent initialized")
 
     async def close(self) -> None:
-        self.kg.save()
-        self.vectors.save()
-        await self.cache.close()
-        await self.patterns.close()
-        await self.trust.close()
-        logger.info("Memory agent shut down")
+        """Best-effort shutdown: persist and release every subsystem.
+
+        Memory is the terminal, audit-only stage of the pipeline. A save or
+        close failure in one subsystem must NOT (a) skip shutdown of the others
+        (leaking DB connections/file handles) nor (b) raise out of the caller's
+        ``finally: await close()`` and turn a Judge-accepted answer into a memory
+        node failure. Every step is attempted; failures are logged and swallowed.
+        """
+        # Ordered (persist first, then release), each guarded independently.
+        steps: list[tuple[str, callable]] = [
+            ("knowledge_graph.save", self.kg.save),
+            ("vector_store.save", self.vectors.save),
+            ("cache.close", self.cache.close),
+            ("patterns.close", self.patterns.close),
+            ("trust.close", self.trust.close),
+        ]
+        errors: list[str] = []
+        for name, fn in steps:
+            try:
+                result = fn()
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception as exc:  # noqa: BLE001 - shutdown must not raise
+                errors.append(f"{name}: {type(exc).__name__}: {exc}")
+                logger.warning("Memory agent shutdown step failed: %s", errors[-1])
+        if errors:
+            logger.warning("Memory agent shut down with %d error(s)", len(errors))
+        else:
+            logger.info("Memory agent shut down")
 
     # ------------------------------------------------------------------
     # Store

@@ -45,6 +45,18 @@ from orchestration.schemas import (
 logger = logging.getLogger("HalluciGuard.JudgeAgent")
 
 
+def _verdict_value(value: Any) -> str:
+    """Robustly extract a verdict as a lowercase value string.
+
+    Claim verdicts normally arrive as plain strings (schemas use
+    ``use_enum_values=True``), but a raw ``VerdictLabel`` enum can slip through
+    on direct construction. ``str(VerdictLabel.CONTRADICTED)`` yields
+    ``"VerdictLabel.CONTRADICTED"`` for a ``(str, Enum)`` member, which would
+    fail exact comparison against ``"contradicted"``. Prefer ``.value``.
+    """
+    return str(getattr(value, "value", value)).lower()
+
+
 class JudgeAgent:
     """
     Canonical Judge Agent.
@@ -129,7 +141,7 @@ class JudgeAgent:
         conflicted_claims: List[ClaimReport] = []
 
         for claim in claim_reports:
-            verdict_str = str(claim.verdict).lower()
+            verdict_str = _verdict_value(claim.verdict)
             if verdict_str == VerdictLabel.CONTRADICTED.value:
                 claims_to_correct.append(claim)
                 for ev in claim.evidence:
@@ -171,38 +183,51 @@ class JudgeAgent:
         explanation: str = ""
         correction_req: Optional[CorrectionRequest] = None
 
-        # Rule A: Contradicted Claims -> REJECT (if critical safety) or CORRECT
+        # Rule A: Contradicted Claims -> CORRECT (correct-first policy)
+        #
+        # Policy decision: even in safety-critical (VERY_STRICT / STRICT) domains a
+        # contradicted claim is sent to the Corrector to regenerate from evidence
+        # FIRST. We never hard-REJECT a fixable contradiction on the initial pass —
+        # rejection is reserved for the post-correction path: if the regenerated
+        # answer still fails re-verification after the bounded retry budget,
+        # `_evaluate_reverification` issues the REJECT. This matches the intended
+        # BASE -> ... -> CORRECTOR -> RE-VERIFIER -> JUDGE flow and avoids blocking a
+        # repairable answer, while strict-domain contradictions are marked HIGH
+        # severity so the failure path escalates decisively.
         if has_contradictions:
             is_critical_domain = policy.strictness_level in ["VERY_STRICT", "STRICT"]
             is_high_contradiction = any(c.contradiction_score >= policy.reject_contradiction_threshold for c in claims_to_correct)
 
-            if is_critical_domain and is_high_contradiction:
-                decision = JudgeDecision.REJECT
-                severity = SeverityLevel.CRITICAL
-                reason = f"Critical factual contradiction detected in {policy.domain_name} domain."
-                explanation = f"Claim(s) strongly refuting ground-truth. Rejected to prevent safety/compliance risk."
-            else:
-                decision = JudgeDecision.CORRECT
-                severity = SeverityLevel.MEDIUM
-                reason = f"Identified {len(claims_to_correct)} contradicted claim(s) requiring evidence-grounded repair."
-                explanation = f"Response contains fixable factual errors. Directing Corrector to repair flagged claims while preserving verified claims."
-
-                instructions = (
-                    f"Modify only the {len(claims_to_correct)} claim(s) flagged in claims_to_correct using "
-                    f"contradictory_evidence and trusted_evidence. "
-                    f"Preserve all {len(claims_to_preserve)} claim(s) in claims_to_preserve without altering facts."
+            decision = JudgeDecision.CORRECT
+            severity = SeverityLevel.HIGH if (is_critical_domain and is_high_contradiction) else SeverityLevel.MEDIUM
+            reason = f"Identified {len(claims_to_correct)} contradicted claim(s) requiring evidence-grounded repair."
+            explanation = (
+                f"Response contains fixable factual errors. Directing Corrector to repair flagged claims "
+                f"while preserving verified claims."
+                + (
+                    f" High-severity contradiction in safety-critical {policy.domain_name} domain: "
+                    f"correction will be gated by re-verification and rejected if it cannot be grounded."
+                    if (is_critical_domain and is_high_contradiction)
+                    else ""
                 )
+            )
 
-                correction_req = CorrectionRequest(
-                    execution_id=f"exec-{int(time.time())}",
-                    user_query=user_query,
-                    original_response=response_text,
-                    claims_to_correct=claims_to_correct,
-                    claims_to_preserve=claims_to_preserve,
-                    trusted_evidence=trusted_evidence,
-                    contradictory_evidence=contradictory_evidence,
-                    correction_instructions=instructions
-                )
+            instructions = (
+                f"Modify only the {len(claims_to_correct)} claim(s) flagged in claims_to_correct using "
+                f"contradictory_evidence and trusted_evidence. "
+                f"Preserve all {len(claims_to_preserve)} claim(s) in claims_to_preserve without altering facts."
+            )
+
+            correction_req = CorrectionRequest(
+                execution_id=f"exec-{int(time.time())}",
+                user_query=user_query,
+                original_response=response_text,
+                claims_to_correct=claims_to_correct,
+                claims_to_preserve=claims_to_preserve,
+                trusted_evidence=trusted_evidence,
+                contradictory_evidence=contradictory_evidence,
+                correction_instructions=instructions
+            )
 
         # Rule B: Absent evidence (0 claims evaluated)
         elif total_claims == 0:
@@ -228,6 +253,41 @@ class JudgeAgent:
             severity = SeverityLevel.LOW
             reason = "All claims verified against authoritative ground-truth evidence."
             explanation = f"Response is fully grounded in {policy.domain_name} sources with overall confidence {normalized_verifier.overall_confidence:.2f}."
+
+        # Rule C2: Verified-dominant with only MINOR unverified detail -> ACCEPT.
+        #
+        # Atomic-claim decomposition is noisy: a correct answer is routinely split
+        # into several sub-claims where one is malformed or ungroundable (e.g. a
+        # dangling fragment from the dependency parse). The old tree forced such an
+        # answer through VERIFY_AGAIN on every pass, and because decomposition is
+        # deterministic the same fragment stayed unverified — burning the entire
+        # retry budget on passes whose outcome was predetermined, only to ACCEPT at
+        # the end anyway (relaxed branch below). When there are NO contradictions,
+        # NO genuine conflicts, at least one verified claim, and the verified claims
+        # dominate the unverified remainder, a MODERATE/RELAXED domain accepts now
+        # instead of thrashing. Conflicts and STRICT/VERY_STRICT domains still fall
+        # through to the conservative retry/abstain path.
+        elif (
+            not has_contradictions
+            and not has_conflicted
+            and has_preservations
+            and has_unverified
+            and policy.strictness_level in ("MODERATE", "RELAXED")
+            and len(claims_to_preserve) >= len(unverified_claims)
+        ):
+            decision = JudgeDecision.ACCEPT
+            severity = SeverityLevel.LOW
+            reason = (
+                f"Verified claims dominate ({len(claims_to_preserve)} verified vs "
+                f"{len(unverified_claims)} unverified) with no contradictions; minor "
+                f"unverified detail tolerated under {policy.domain_name} policy."
+            )
+            explanation = (
+                f"{len(claims_to_preserve)} of {total_claims} claim(s) are grounded and "
+                f"none are contradicted or conflicted. The unverified remainder is minor "
+                f"(likely a decomposition artifact) and does not warrant blocking a "
+                f"substantively grounded response in a {policy.strictness_level.lower()} domain."
+            )
 
         # Rule D: Unverified or Conflicted claims (Task 6, 7 & 9)
         elif has_unverified or has_conflicted:

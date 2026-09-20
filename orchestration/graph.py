@@ -1103,12 +1103,12 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         await memory_agent.initialize()
         stored = []
         try:
-            for report in verified_reports:
-                evidence = report.get("evidence", [])
-                sources = [
-                    str(e.get("source", "")) for e in evidence if e.get("source")
-                ]
-                req = StoreFactRequest(
+            # Build every StoreFactRequest, then persist as a batch. store_facts_batch
+            # isolates per-claim failures (one bad claim is recorded in errors and the
+            # rest still persist) so a single store error can never lose the whole
+            # audit for a Judge-accepted answer.
+            reqs = [
+                StoreFactRequest(
                     claim_text=str(report.get("claim_text", "")),
                     domain=state.get("domain", "general"),
                     verdict="verified",
@@ -1119,9 +1119,13 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                             "url": e.get("url"),
                             "snippet": e.get("snippet", ""),
                         }
-                        for e in evidence
+                        for e in report.get("evidence", [])
                     ],
-                    source_ids=sources,
+                    source_ids=[
+                        str(e.get("source", ""))
+                        for e in report.get("evidence", [])
+                        if e.get("source")
+                    ],
                     confidence=float(
                         report.get("confidence_score", report.get("trust_score", 0.0))
                     ),
@@ -1130,7 +1134,10 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                         "request_id": state.get("request_id", ""),
                     },
                 )
-                stored.append(_dump(await memory_agent.store_fact(req)))
+                for report in verified_reports
+            ]
+            batch = await memory_agent.store_facts_batch(reqs)
+            stored = [_dump(r) for r in batch.results]
         finally:
             await memory_agent.close()
 
