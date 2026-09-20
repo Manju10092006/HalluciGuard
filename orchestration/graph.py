@@ -755,7 +755,48 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
         corrected_text = dumped_corr.get("corrected_text", "")
         original_text = dumped_corr.get("original_text", state.get("llm_response", ""))
 
-        candidate_text = corrected_text if corrected_text else original_text
+        # The Corrector fails closed: when regeneration produced no usable corrected
+        # text (status FAILED / empty), do NOT feed the unchanged contradicted answer
+        # back into the Re-Verifier on a loop it cannot win. Apply the configured
+        # corrector fail policy instead: escalate to a human (default) or reject.
+        correction_failed = exec_status in ("failed", "fallback") or not corrected_text
+        if correction_failed:
+            fail_mode = os.environ.get("HG_CORRECTOR_FAIL_MODE", "escalate").strip().lower()
+            fail_route = "reject" if fail_mode == "reject" else "human_escalation"
+            candidate_text = original_text
+            bus = add_bus_message(
+                state,
+                source_agent="corrector",
+                target_agent="supervisor",
+                message_type="CORRECTION_FAILED",
+                payload={
+                    "validation_status": val_status,
+                    "attempt_count": attempt_count,
+                    "fail_mode": fail_mode,
+                    "route": fail_route,
+                },
+            )
+            return {
+                "corrector": dumped_corr,
+                "correction_result": dumped_corr,
+                "correction_attempt_count": attempt_count,
+                "final_response": candidate_text,
+                "route": fail_route,
+                "verification_status": "correction_failed",
+                "inter_agent_bus": bus,
+                "updated_at": utc_now(),
+                "trace": add_trace(
+                    state,
+                    "corrector",
+                    "failed",
+                    latency_ms=elapsed_ms(node_start),
+                    validation_status=val_status,
+                    attempt_count=attempt_count,
+                    fail_mode=fail_mode,
+                ),
+            }
+
+        candidate_text = corrected_text
 
         bus = add_bus_message(
             state,
@@ -914,9 +955,19 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
 
 
 def _corrector_route(state: HalluciGuardState) -> str:
-    """Fail closed when correction generation did not complete."""
-    if state.get("route") == "error" or not state.get("correction_result"):
+    """Route the corrector's outcome.
+
+    A crash (route == "error") or a missing result always escalates. When the
+    Corrector explicitly failed closed, the node has already chosen the configured
+    fail route ("reject" or "human_escalation"); honour it rather than sending the
+    unchanged answer to the Re-Verifier. Otherwise a usable candidate proceeds to
+    re-verification.
+    """
+    route = state.get("route")
+    if route == "error" or not state.get("correction_result"):
         return "human_escalation"
+    if route in ("reject", "human_escalation"):
+        return route
     return "reverifier"
 
 
@@ -1242,7 +1293,11 @@ def build_verification_graph(
     graph.add_conditional_edges(
         "corrector",
         _corrector_route,
-        {"reverifier": "reverifier", "human_escalation": "human_escalation"},
+        {
+            "reverifier": "reverifier",
+            "reject": "reject",
+            "human_escalation": "human_escalation",
+        },
     )
     graph.add_conditional_edges(
         "reverifier",

@@ -111,39 +111,107 @@ class CharacterRegenerator:
             + "\n</HALLUCIGUARD_CORRECTION_DATA>"
         )
 
-    async def regenerate(self, request: CorrectionRequest) -> CorrectionResult:
-        result = await self._service.generate(
-            user_query=self.build_prompt(request),
-            conversation_history=[],
-            generation_mode="normal",
-            temperature=0.1,
-        )
-        if result.status != "success" or not result.draft_response.strip():
-            raise RuntimeError(
-                "Character Agent generation failed: "
-                + str(result.error or result.error_code or "empty response")
-            )
+    @staticmethod
+    def _max_attempts() -> int:
+        raw = os.environ.get("HG_CORRECTOR_MAX_ATTEMPTS", "").strip()
+        try:
+            return max(1, int(raw)) if raw else 2
+        except ValueError:
+            return 2
 
-        corrected = result.draft_response.strip()
-        if corrected == request.original_response.strip():
-            raise RuntimeError("Character Agent returned the original contradicted answer unchanged")
+    def _failed_result(
+        self, request: CorrectionRequest, reason: str, attempts: int
+    ) -> CorrectionResult:
+        """Fail closed: never raise across the agent boundary.
 
-        changed = [
-            {
-                "claim_id": claim.claim_id,
-                "action": "regenerated",
-                "original": claim.claim_text,
-                "text": corrected,
-            }
-            for claim in request.claims_to_correct
-        ]
+        The original (contradicted) answer is preserved verbatim and NO corrected
+        text is emitted. ``status=FAILED`` signals the orchestration to apply the
+        configured corrector fail policy (human escalation or reject) instead of
+        sending the unchanged answer back through the Re-Verifier on a doomed loop.
+        The diagnostic reason is recorded honestly, never a fabricated correction.
+        """
         return CorrectionResult(
             original_text=request.original_response,
-            corrected_text=corrected,
-            changed_claims=changed,
+            corrected_text="",
+            changed_claims=[
+                {
+                    "claim_id": claim.claim_id,
+                    "action": "correction_failed",
+                    "original": claim.claim_text,
+                    "text": "",
+                    "reason": reason,
+                }
+                for claim in request.claims_to_correct
+            ]
+            or [{"claim_id": "", "action": "correction_failed", "reason": reason}],
             validation_status=ValidationStatus.UNVALIDATED,
-            attempt_count=1,
-            status=ExecutionStatus.COMPLETED,
+            attempt_count=attempts,
+            status=ExecutionStatus.FAILED,
+        )
+
+    async def regenerate(self, request: CorrectionRequest) -> CorrectionResult:
+        """Regenerate a complete corrected answer, failing closed on exhaustion.
+
+        The regeneration is retried a bounded number of times with a small
+        temperature escalation: a first attempt at 0.1 for a faithful, evidence-led
+        rewrite, then a slightly higher temperature so a model that merely echoed
+        the contradicted answer gets a genuine second try. A transient empty
+        response or an unchanged echo no longer crashes the pipeline — it consumes
+        an internal attempt and, only when the whole budget is spent, returns a
+        FAILED result with the original preserved.
+        """
+        prompt = self.build_prompt(request)
+        original = request.original_response.strip()
+        max_attempts = self._max_attempts()
+        temperatures = [0.1, 0.35, 0.5]
+        last_reason = "empty response"
+
+        for attempt in range(1, max_attempts + 1):
+            temperature = temperatures[min(attempt - 1, len(temperatures) - 1)]
+            try:
+                result = await self._service.generate(
+                    user_query=prompt,
+                    conversation_history=[],
+                    generation_mode="normal",
+                    temperature=temperature,
+                )
+            except Exception as exc:  # noqa: BLE001 - boundary must not raise
+                last_reason = f"generation_error: {type(exc).__name__}: {exc}"
+                continue
+
+            if result.status != "success" or not result.draft_response.strip():
+                last_reason = str(
+                    result.error or result.error_code or "empty response"
+                )
+                continue
+
+            corrected = result.draft_response.strip()
+            if corrected == original:
+                last_reason = "model returned the original contradicted answer unchanged"
+                continue
+
+            changed = [
+                {
+                    "claim_id": claim.claim_id,
+                    "action": "regenerated",
+                    "original": claim.claim_text,
+                    "text": corrected,
+                }
+                for claim in request.claims_to_correct
+            ]
+            return CorrectionResult(
+                original_text=request.original_response,
+                corrected_text=corrected,
+                changed_claims=changed,
+                validation_status=ValidationStatus.UNVALIDATED,
+                attempt_count=attempt,
+                status=ExecutionStatus.COMPLETED,
+            )
+
+        return self._failed_result(
+            request,
+            f"character_regeneration_failed_after_{max_attempts}_attempts: {last_reason}",
+            attempts=max_attempts,
         )
 
 
