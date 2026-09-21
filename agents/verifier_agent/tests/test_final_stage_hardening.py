@@ -105,7 +105,7 @@ def test_nli_batch_preserves_input_alignment():
     class FakePipeline:
         model = FakeModel()
 
-        def __call__(self, batch):
+        def __call__(self, batch, **kwargs):  # mimic HF pipeline tokenizer kwargs
             return [
                 [
                     {"label": "ENTAILMENT", "score": 0.92},

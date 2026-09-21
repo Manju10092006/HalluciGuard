@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     rerank_gamma: float = 0.1
     recall_min_similarity: float = 0.0
 
+    # Contradiction confirmation (v1.3)
+    # Vector similarity only SURFACES candidate contradictions; a second stage
+    # confirms them. When nli_contradiction_check is enabled an NLI model is
+    # used; otherwise (or when the model is unavailable) explicit structured
+    # comparison runs (negation asymmetry, temporal-value mismatch).
+    nli_contradiction_check: bool = False
+    nli_contradiction_model: str = "cross-encoder/nli-deberta-v3-base"
+    nli_contradiction_threshold: float = 0.5
+
+    # Storage journal (v1.3)
+    # SQLite-backed operation ledger used to detect partial writes across the
+    # multiple subsystems and to drive reconciliation of derived indexes.
+    storage_journal_path: str = "data/storage_operations.db"
+
     # Domain support
     supported_domains: list[str] = [
         "healthcare",

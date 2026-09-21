@@ -22,6 +22,7 @@ async def agent(tmp_path):
         pattern_db_path=str(tmp_path / "patterns.db"),
         trust_db_path=str(tmp_path / "trust.db"),
         vector_store_path=str(tmp_path / "vectors"),
+        storage_journal_path=str(tmp_path / "journal.db"),
         mock_mode=True,
     )
     kg = KnowledgeGraph(persistence_path=settings.kg_persistence_path)
@@ -54,6 +55,25 @@ class TestStoreFact:
     @pytest.mark.asyncio
     async def test_store_basic_fact(self, agent):
         req = StoreFactRequest(
+            claim_text="Aspirin is used for pain relief",
+            domain="healthcare",
+            verdict="verified",
+            evidence=[],
+            source_ids=[],
+            confidence=0.9,
+            verification_status="VERIFIED",
+            verified_at=None,
+            provenance="test:execution:abc",
+        )
+        resp = await agent.store_fact(req)
+        assert resp.stored is True
+        assert resp.fact_id
+        assert resp.entities_created >= 2
+        assert resp.edges_created >= 1
+
+    @pytest.mark.asyncio
+    async def test_store_gate_blocks_negative_verdict(self, agent):
+        req = StoreFactRequest(
             claim_text="Aspirin cures cancer",
             domain="healthcare",
             verdict="likely_hallucinated",
@@ -62,9 +82,24 @@ class TestStoreFact:
             confidence=0.1,
         )
         resp = await agent.store_fact(req)
-        assert resp.fact_id
-        assert resp.entities_created >= 2
-        assert resp.edges_created >= 1
+        assert resp.stored is False
+        assert resp.entities_created == 0
+        assert resp.reason and "non_supported_verdict" in resp.reason
+
+    @pytest.mark.asyncio
+    async def test_store_gate_blocks_verification_status(self, agent):
+        req = StoreFactRequest(
+            claim_text="Guideline says X, but sources are contradictory",
+            domain="healthcare",
+            verdict="verified",
+            evidence=[],
+            source_ids=[],
+            confidence=0.7,
+            verification_status="CONTRADICTED",
+        )
+        resp = await agent.store_fact(req)
+        assert resp.stored is False
+        assert resp.reason and "non_persistable_verification_status" in resp.reason
 
     @pytest.mark.asyncio
     async def test_store_fact_with_evidence(self, agent):
@@ -146,14 +181,17 @@ class TestRecall:
         assert resp.cached_verification is not None
 
     @pytest.mark.asyncio
-    async def test_recall_includes_patterns(self, agent):
+    async def test_recall_includes_established_patterns(self, agent):
         req = StoreFactRequest(
             claim_text="Aspirin cures cancer completely",
             domain="healthcare",
             verdict="likely_hallucinated",
             confidence=0.05,
         )
-        await agent.store_fact(req)
+        # Patterns only become established after min_support (3) observations;
+        # immature candidate patterns are not surfaced by recall.
+        for _ in range(3):
+            await agent.store_fact(req)
 
         recall_req = RecallRequest(
             query="Aspirin cures cancer",
@@ -162,6 +200,7 @@ class TestRecall:
         )
         resp = await agent.recall(recall_req)
         assert len(resp.relevant_patterns) > 0
+        assert all(p.status == "established" for p in resp.relevant_patterns)
 
 
 class TestStats:

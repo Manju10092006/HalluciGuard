@@ -49,7 +49,16 @@ _TRUST_DELTAS = {
 
 
 class SourceTrustManager:
-    """Evolves source reliability scores based on verification outcomes."""
+    """Heuristic source reliability score.
+
+    This is a hand-designed heuristic score, NOT a statistically validated or
+    Bayesian reliability model. Each verification outcome moves the score by
+        base_delta * learning_rate * min(evidence_count, 5)
+    (e.g. a single correct verification only moves trust by
+    0.05 * 0.1 = 0.005). It is intentionally conservative and is meant to be
+    described as "a heuristic trust score that updates based on verification
+    outcomes", never as calibrated model output.
+    """
 
     def __init__(
         self,

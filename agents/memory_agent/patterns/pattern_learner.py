@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS patterns (
     description TEXT NOT NULL,
     frequency INTEGER DEFAULT 0,
     confidence REAL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'candidate',
     keywords TEXT NOT NULL,
     created_at TEXT NOT NULL,
     last_seen_at TEXT
@@ -61,7 +62,16 @@ _Causal_KEYWORDS = [
 
 
 class PatternLearner:
-    """Tracks common hallucination patterns per domain."""
+    """Rule-based pattern tracker over recurring hallucination categories.
+
+    This is intentionally NOT a trained ML model. It classifies claims with
+    keyword/regex heuristics into six categories (temporal, numerical,
+    statistical, causal, definition, entity) and tracks historical frequency
+    and confidence per domain. A pattern only becomes 'established' once it
+    satisfies BOTH gates: frequency >= min_support and
+    confidence >= confidence_threshold. Below the gates it remains a
+    'candidate'.
+    """
 
     def __init__(
         self,
@@ -79,8 +89,19 @@ class PatternLearner:
         self._db = await aiosqlite.connect(self._db_path)
         await self._db.execute(_CREATE_PATTERNS)
         await self._db.execute(_CREATE_EXAMPLES)
+        await self._ensure_status_column()
         await self._db.commit()
         logger.info("Pattern learner initialized at %s", self._db_path)
+
+    async def _ensure_status_column(self) -> None:
+        """Migrate pre-v1.3 DBs that lack the `status` column."""
+        cursor = await self._db.execute("PRAGMA table_info(patterns)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if "status" not in columns:
+            await self._db.execute(
+                "ALTER TABLE patterns ADD COLUMN status TEXT NOT NULL "
+                "DEFAULT 'candidate'"
+            )
 
     async def close(self) -> None:
         if self._db:
@@ -120,6 +141,20 @@ class PatternLearner:
             detected.append(PatternType.ENTITY)
 
         return detected
+
+    def _status_for(self, frequency: int, confidence: float) -> str:
+        """A pattern is 'established' only when both gates are met.
+
+        frequency < min_support  -> candidate pattern
+        frequency >= min_support and confidence >= confidence_threshold ->
+            established pattern
+        """
+        if (
+            frequency >= self._min_support
+            and confidence >= self._confidence_threshold
+        ):
+            return "established"
+        return "candidate"
 
     @staticmethod
     def _extract_keywords(claim_text: str, max_keywords: int = 10) -> list[str]:
@@ -166,10 +201,11 @@ class PatternLearner:
                     1.0,
                     conf + (0.1 if is_hallucination else -0.05),
                 )
+                new_status = self._status_for(new_freq, new_conf)
                 await self._db.execute(
-                    "UPDATE patterns SET frequency = ?, confidence = ?, last_seen_at = ? "
-                    "WHERE pattern_id = ?",
-                    (new_freq, max(0.0, new_conf), now, pid),
+                    "UPDATE patterns SET frequency = ?, confidence = ?, "
+                    "status = ?, last_seen_at = ? WHERE pattern_id = ?",
+                    (new_freq, max(0.0, new_conf), new_status, now, pid),
                 )
                 pattern = HallucinationPattern(
                     pattern_id=pid,
@@ -178,21 +214,23 @@ class PatternLearner:
                     description=f"Hallucination pattern: {pt.value} in {domain}",
                     frequency=new_freq,
                     confidence=max(0.0, new_conf),
+                    status=new_status,
                     keywords=keywords,
                     last_seen_at=datetime.fromisoformat(now),
                 )
             else:
                 pid = str(uuid.uuid4())
                 initial_conf = 0.7 if is_hallucination else 0.3
+                new_status = self._status_for(1, initial_conf)
                 await self._db.execute(
                     "INSERT INTO patterns "
                     "(pattern_id, pattern_type, domain, description, frequency, "
-                    "confidence, keywords, created_at, last_seen_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "confidence, status, keywords, created_at, last_seen_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         pid, pt.value, domain,
                         f"Hallucination pattern: {pt.value} in {domain}",
-                        1, initial_conf, json.dumps(keywords), now, now,
+                        1, initial_conf, new_status, json.dumps(keywords), now, now,
                     ),
                 )
                 pattern = HallucinationPattern(
@@ -202,6 +240,7 @@ class PatternLearner:
                     description=f"Hallucination pattern: {pt.value} in {domain}",
                     frequency=1,
                     confidence=initial_conf,
+                    status=new_status,
                     keywords=keywords,
                     created_at=datetime.fromisoformat(now),
                     last_seen_at=datetime.fromisoformat(now),
@@ -224,11 +263,20 @@ class PatternLearner:
         min_confidence: float = 0.0,
         top_k: int = 20,
     ) -> list[HallucinationPattern]:
+        """Return only patterns that satisfy BOTH configured learning gates.
+
+        min_support (frequency) and confidence_threshold are enforced here —
+        not just callable min_confidence — so immature candidate patterns are
+        never surfaced as established knowledge.
+        """
         if not self._db:
             return []
 
-        conditions = ["confidence >= ?"]
-        params: list = [min_confidence]
+        conditions = ["frequency >= ?", "confidence >= ?"]
+        params: list = [
+            self._min_support,
+            max(min_confidence, self._confidence_threshold),
+        ]
         if domain:
             conditions.append("domain = ?")
             params.append(domain)
@@ -239,7 +287,7 @@ class PatternLearner:
         where = " AND ".join(conditions)
         sql = (
             f"SELECT pattern_id, pattern_type, domain, description, "
-            f"frequency, confidence, keywords, created_at, last_seen_at "
+            f"frequency, confidence, status, keywords, created_at, last_seen_at "
             f"FROM patterns WHERE {where} "
             f"ORDER BY frequency DESC, confidence DESC LIMIT ?"
         )
@@ -256,9 +304,10 @@ class PatternLearner:
                 description=r[3],
                 frequency=r[4],
                 confidence=r[5],
-                keywords=json.loads(r[6]),
-                created_at=datetime.fromisoformat(r[7]),
-                last_seen_at=datetime.fromisoformat(r[8]) if r[8] else None,
+                status=r[6],
+                keywords=json.loads(r[7]),
+                created_at=datetime.fromisoformat(r[8]),
+                last_seen_at=datetime.fromisoformat(r[9]) if r[9] else None,
             )
             for r in rows
         ]
@@ -267,7 +316,10 @@ class PatternLearner:
         if not self._db:
             return None
         cur = await self._db.execute(
-            "SELECT * FROM patterns WHERE pattern_id = ?", (pattern_id,)
+            "SELECT pattern_id, pattern_type, domain, description, frequency, "
+            "confidence, status, keywords, created_at, last_seen_at "
+            "FROM patterns WHERE pattern_id = ?",
+            (pattern_id,),
         )
         row = await cur.fetchone()
         if not row:
@@ -279,9 +331,10 @@ class PatternLearner:
             description=row[3],
             frequency=row[4],
             confidence=row[5],
-            keywords=json.loads(row[6]),
-            created_at=datetime.fromisoformat(row[7]),
-            last_seen_at=datetime.fromisoformat(row[8]) if row[8] else None,
+            status=row[6],
+            keywords=json.loads(row[7]),
+            created_at=datetime.fromisoformat(row[8]),
+            last_seen_at=datetime.fromisoformat(row[9]) if row[9] else None,
         )
 
     async def get_examples(self, pattern_id: str, limit: int = 10) -> list[str]:
@@ -300,7 +353,8 @@ class PatternLearner:
             return {}
         cur = await self._db.execute(
             "SELECT pattern_type, COUNT(*), AVG(frequency), AVG(confidence) "
-            "FROM patterns WHERE domain = ? GROUP BY pattern_type",
+            "FROM patterns WHERE domain = ? AND status = 'established' "
+            "GROUP BY pattern_type",
             (domain,),
         )
         rows = await cur.fetchall()

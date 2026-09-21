@@ -155,6 +155,10 @@ class HallucinationPattern(BaseModel):
     examples: list[str] = Field(default_factory=list)
     frequency: int = 0
     confidence: float = Field(ge=0.0, le=1.0, default=0.0)
+    status: str = Field(
+        default="candidate",
+        description="'candidate' below min_support; 'established' once frequency >= min_support and confidence >= confidence_threshold.",
+    )
     keywords: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_seen_at: Optional[datetime] = None
@@ -233,6 +237,10 @@ class ContradictionAlert(BaseModel):
     similarity_score: float = Field(ge=0.0, le=1.0)
     existing_verdict: str
     reason: str
+    confirmation_method: Optional[str] = Field(
+        default=None,
+        description="Stage-2 method used to confirm: 'nli', 'structured', or None (unconfirmed).",
+    )
 
 
 class StoreFactRequest(BaseModel):
@@ -245,6 +253,25 @@ class StoreFactRequest(BaseModel):
     source_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Safety gate + provenance (spec §13). Memory must only persist
+    # verified/supported facts; CONTRADICTED, NOT_ENOUGH_EVIDENCE, and
+    # UNCERTAIN states must never become permanent factual memory.
+    verification_status: str = Field(
+        default="VERIFIED",
+        description="Pipeline verification state (SUPPORTED/VERIFIED or blocking states).",
+    )
+    verified_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of verification completion (ISO-8601).",
+    )
+    provenance: Optional[str] = Field(
+        default=None,
+        description="Origin trail of the fact (e.g. execution id / pipeline run).",
+    )
+    origin: str = Field(
+        default="halluciguard_verifier",
+        description="System component that produced the fact.",
+    )
 
 
 class StoreFactResponse(BaseModel):
@@ -258,6 +285,10 @@ class StoreFactResponse(BaseModel):
     duplicate_of: Optional[str] = None
     contradictions: list[ContradictionAlert] = Field(default_factory=list)
     stored: bool = True
+    reason: Optional[str] = Field(
+        default=None,
+        description="Explanation when the fact was skipped (safety gate) or failed.",
+    )
 
 
 class BatchStoreResponse(BaseModel):
@@ -267,6 +298,7 @@ class BatchStoreResponse(BaseModel):
     stored: int
     duplicates: int
     failed: int
+    skipped: int = 0
     results: list[StoreFactResponse] = Field(default_factory=list)
     errors: list[dict[str, str]] = Field(default_factory=list)
 
@@ -365,3 +397,23 @@ class UpdateFactResponse(BaseModel):
     old_confidence: float
     new_confidence: float
     updated_in: list[str] = Field(default_factory=list)
+    persisted: bool = True
+    removed_from: list[str] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Storage Journal Models (v1.3)
+# ---------------------------------------------------------------------------
+
+class StorageOperationRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    op_id: str
+    op_type: str
+    fact_id: str
+    subsystem: str
+    status: str
+    error: Optional[str] = None
+    created_at: datetime
+    reconciled_at: Optional[datetime] = None

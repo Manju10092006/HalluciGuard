@@ -650,8 +650,15 @@ async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
         severity_val = str(dumped_judge.get("severity", "LOW")).upper()
         corr_req = dumped_judge.get("correction_request")
 
-        # Bounded retry tracking: strictly increment for VERIFY_AGAIN
-        new_retry_count = retry_count + 1 if decision_val == "VERIFY_AGAIN" else retry_count
+        # Bounded retry tracking: strictly increment for VERIFY_AGAIN, and once
+        # the retry budget is exhausted (final-permitted pass reached a terminal
+        # decision) report retry_count == max_retries so the state reflects that
+        # the loop is fully bounded and the budget was consumed.
+        new_retry_count = retry_count
+        if decision_val == "VERIFY_AGAIN":
+            new_retry_count = retry_count + 1
+        elif effective_retry_count >= max_retries and retry_count < max_retries:
+            new_retry_count = max_retries
 
         if decision_val == "ACCEPT":
             route = "memory"
@@ -1130,7 +1137,8 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             # Build every StoreFactRequest, then persist as a batch. store_facts_batch
             # isolates per-claim failures (one bad claim is recorded in errors and the
             # rest still persist) so a single store error can never lose the whole
-            # audit for a Judge-accepted answer.
+            # audit for a Judge-accepted answer. store_fact-only agents are supported
+            # via a duck-typed per-claim fallback.
             reqs = [
                 StoreFactRequest(
                     claim_text=str(report.get("claim_text", "")),
@@ -1160,8 +1168,13 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                 )
                 for report in verified_reports
             ]
-            batch = await memory_agent.store_facts_batch(reqs)
-            stored = [_dump(r) for r in batch.results]
+            batch_fn = getattr(memory_agent, "store_facts_batch", None)
+            if batch_fn is not None:
+                batch = await batch_fn(reqs)
+                stored = [_dump(r) for r in batch.results]
+            else:
+                for req in reqs:
+                    stored.append(_dump(await memory_agent.store_fact(req)))
         finally:
             await memory_agent.close()
 
