@@ -193,7 +193,11 @@ class NLIEngine:
             return self._neutral()
         try:
             # Premise = evidence, hypothesis = claim.
-            raw = self.pipeline({"text": evidence or "", "text_pair": claim or ""})
+            raw = self.pipeline(
+                {"text": evidence or "", "text_pair": claim or ""},
+                truncation="only_first",
+                max_length=512,
+            )
             scores = _normalize_scores(_flatten_predictions(raw), self._get_id2label())
             return _decision(scores) if sum(scores.values()) > 0 else self._neutral()
         except Exception as exc:
@@ -229,7 +233,7 @@ class NLIEngine:
                 for evidence in evidences
             ]
             _t0 = time.perf_counter()
-            raw_batch = self.pipeline(batch)
+            raw_batch = self.pipeline(batch, truncation="only_first", max_length=512)
             self.last_latency_ms = int((time.perf_counter() - _t0) * 1000)
             if not isinstance(raw_batch, list) or len(raw_batch) != len(evidences):
                 raise ValueError("NLI batch output is not aligned with input batch")

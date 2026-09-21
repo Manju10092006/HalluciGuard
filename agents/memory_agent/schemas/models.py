@@ -155,6 +155,10 @@ class HallucinationPattern(BaseModel):
     examples: list[str] = Field(default_factory=list)
     frequency: int = 0
     confidence: float = Field(ge=0.0, le=1.0, default=0.0)
+    status: str = Field(
+        default="candidate",
+        description="'candidate' below min_support; 'established' once frequency >= min_support and confidence >= confidence_threshold.",
+    )
     keywords: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_seen_at: Optional[datetime] = None
@@ -233,6 +237,10 @@ class ContradictionAlert(BaseModel):
     similarity_score: float = Field(ge=0.0, le=1.0)
     existing_verdict: str
     reason: str
+    confirmation_method: Optional[str] = Field(
+        default=None,
+        description="Stage-2 method used to confirm: 'nli', 'structured', or None (unconfirmed).",
+    )
 
 
 class StoreFactRequest(BaseModel):
@@ -389,3 +397,23 @@ class UpdateFactResponse(BaseModel):
     old_confidence: float
     new_confidence: float
     updated_in: list[str] = Field(default_factory=list)
+    persisted: bool = True
+    removed_from: list[str] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Storage Journal Models (v1.3)
+# ---------------------------------------------------------------------------
+
+class StorageOperationRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    op_id: str
+    op_type: str
+    fact_id: str
+    subsystem: str
+    status: str
+    error: Optional[str] = None
+    created_at: datetime
+    reconciled_at: Optional[datetime] = None

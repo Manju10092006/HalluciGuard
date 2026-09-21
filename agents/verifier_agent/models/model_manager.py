@@ -245,14 +245,19 @@ class ModelManager:
 
             kwargs = _nli_pipeline_kwargs(model_name, self._hf_device)
 
+            # tokenizer_kwargs is surfaced for config/tests, but it is not a
+            # construction-time pipeline argument in current transformers.
+            # Truncation/max_length are applied per-call by the NLI engine.
+            kwargs.pop("tokenizer_kwargs", None)
+
             try:
                 model = hf_pipeline(**kwargs)
             except Exception as primary_err:
                 logger.warning(f"Primary NLI load failed for {model_name}: {primary_err}. Attempting local_files_only fallback.")
                 try:
-                    model = hf_pipeline(
-                        **_nli_pipeline_kwargs(model_name, self._hf_device, local_files_only=True)
-                    )
+                    offline_kwargs = _nli_pipeline_kwargs(model_name, self._hf_device, local_files_only=True)
+                    offline_kwargs.pop("tokenizer_kwargs", None)
+                    model = hf_pipeline(**offline_kwargs)
                 except Exception as offline_err:
                     if self.device == "cuda":
                         logger.warning(

@@ -328,6 +328,25 @@ async def save(request: Request):
     return {"status": "saved"}
 
 
+@app.post("/storage/reconcile")
+async def reconcile_storage(request: Request, limit: int = 50):
+    """Retry failed per-subsystem writes recorded in the storage journal."""
+    agent = _get_agent(request)
+    return await agent.reconcile(limit=limit)
+
+
+@app.get("/storage/journal")
+async def storage_journal_stats(request: Request):
+    agent = _get_agent(request)
+    return await agent.get_storage_journal_stats()
+
+
+@app.get("/storage/journal/fact/{fact_id}")
+async def storage_journal_for_fact(request: Request, fact_id: str):
+    agent = _get_agent(request)
+    return await agent.journal.get_by_fact(fact_id)
+
+
 @app.get("/metrics")
 async def metrics():
     return Response(

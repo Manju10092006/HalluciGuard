@@ -8,6 +8,7 @@ from agents.memory_agent.trust.source_trust import SourceTrustManager
 from agents.memory_agent.vector_store.faiss_store import VectorStore
 from agents.memory_agent.memory.memory_agent import MemoryAgent
 from agents.memory_agent.schemas.models import (
+    EntityType,
     StoreFactRequest,
     RecallRequest,
     TrustChangeReason,
@@ -22,6 +23,7 @@ async def agent(tmp_path):
         pattern_db_path=str(tmp_path / "patterns.db"),
         trust_db_path=str(tmp_path / "trust.db"),
         vector_store_path=str(tmp_path / "vectors"),
+        storage_journal_path=str(tmp_path / "journal.db"),
         mock_mode=True,
     )
     kg = KnowledgeGraph(persistence_path=settings.kg_persistence_path)
@@ -306,7 +308,7 @@ class TestFactDeletion:
 
 class TestFactUpdate:
     @pytest.mark.asyncio
-    async def test_update_verdict(self, agent):
+    async def test_update_verdict_persists_persistable_state(self, agent):
         from agents.memory_agent.schemas.models import UpdateFactRequest
 
         req = StoreFactRequest(
@@ -319,15 +321,69 @@ class TestFactUpdate:
 
         update = UpdateFactRequest(
             fact_id=resp.fact_id,
+            new_verdict="verified",
+            new_confidence=0.6,
+        )
+        update_resp = await agent.update_fact(update)
+        assert update_resp.persisted is True
+        assert update_resp.removed_from == []
+        assert update_resp.new_confidence == 0.6
+        assert "knowledge_graph" in update_resp.updated_in
+        assert agent.kg.find_entity_by_name(resp.fact_id, EntityType.FACT)
+
+    @pytest.mark.asyncio
+    async def test_update_to_invalid_verdict_retracts_fact(self, agent):
+        """A verified fact must not be re-expressed as a queryable contradictory
+        record. update_fact() applies the same persistence gate as store_fact()
+        and removes the fact from factual memory when it fails."""
+        from agents.memory_agent.schemas.models import UpdateFactRequest
+
+        req = StoreFactRequest(
+            claim_text="Fact to be retracted",
+            domain="test",
+            verdict="verified",
+            confidence=0.9,
+        )
+        resp = await agent.store_fact(req)
+        assert resp.stored is True
+
+        update = UpdateFactRequest(
+            fact_id=resp.fact_id,
             new_verdict="likely_hallucinated",
             new_confidence=0.05,
         )
         update_resp = await agent.update_fact(update)
-        assert update_resp.old_verdict == "verified"
+        assert update_resp.persisted is False
         assert update_resp.new_verdict == "likely_hallucinated"
-        assert update_resp.new_confidence == 0.05
-        assert "knowledge_graph" in update_resp.updated_in
-        assert "vector_store" in update_resp.updated_in
+        assert update_resp.reason and "non_supported_verdict" in update_resp.reason
+        assert "knowledge_graph" in update_resp.removed_from
+        assert "vector_store" in update_resp.removed_from
+
+        # The fact must no longer surface from factual memory.
+        assert not agent.kg.find_entity_by_name(resp.fact_id, EntityType.FACT)
+        assert agent.vectors.get(resp.fact_id) is None
+
+    @pytest.mark.asyncio
+    async def test_update_to_zero_confidence_retracts_fact(self, agent):
+        from agents.memory_agent.schemas.models import UpdateFactRequest
+
+        req = StoreFactRequest(
+            claim_text="Zero confidence retraction",
+            domain="test",
+            verdict="verified",
+            confidence=0.9,
+        )
+        resp = await agent.store_fact(req)
+
+        update = UpdateFactRequest(
+            fact_id=resp.fact_id,
+            new_verdict="verified",
+            new_confidence=0.0,
+        )
+        update_resp = await agent.update_fact(update)
+        assert update_resp.persisted is False
+        assert update_resp.reason == "zero_confidence_fact"
+        assert not agent.kg.find_entity_by_name(resp.fact_id, EntityType.FACT)
 
     @pytest.mark.asyncio
     async def test_update_nonexistent_fact(self, agent):

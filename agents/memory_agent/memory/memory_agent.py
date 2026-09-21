@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from ..cache.verification_cache import VerificationCache
 from ..config.settings import Settings, get_settings
+from ..contradiction.detector import ContradictionDetector
 from ..knowledge_graph.graph import KnowledgeGraph
 from ..patterns.pattern_learner import PatternLearner
+from ..storage.journal import StorageJournal
 from ..schemas.models import (
     BatchStoreResponse,
     CacheStats,
@@ -36,6 +40,22 @@ from ..vector_store.faiss_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
+_BLOCKING_VERDICTS = (
+    "contradicted", "likely_hallucinated", "unverified", "conflicted",
+)
+
+_BLOCKING_STATUSES = {
+    "CONTRADICTED",
+    "CONTRADICTION",
+    "NOT_ENOUGH_EVIDENCE",
+    "INSUFFICIENT_EVIDENCE",
+    "UNCERTAIN",
+    "UNVERIFIED",
+    "REJECTED",
+    "ABSTAINED",
+    "ABSTAIN",
+}
+
 
 class MemoryAgent:
     """Orchestrator that ties all memory subsystems together."""
@@ -48,6 +68,8 @@ class MemoryAgent:
         pattern_learner: Optional[PatternLearner] = None,
         source_trust: Optional[SourceTrustManager] = None,
         vector_store: Optional[VectorStore] = None,
+        contradiction_detector: Optional[ContradictionDetector] = None,
+        journal: Optional[StorageJournal] = None,
     ):
         self._settings = settings or get_settings()
         self.kg = knowledge_graph or KnowledgeGraph(
@@ -76,11 +98,20 @@ class MemoryAgent:
             dimension=self._settings.vector_dimension,
             top_k=self._settings.vector_top_k,
         )
+        self.contradictions = contradiction_detector or ContradictionDetector(
+            nli_model=self._settings.nli_contradiction_model,
+            use_nli=self._settings.nli_contradiction_check,
+            nli_threshold=self._settings.nli_contradiction_threshold,
+        )
+        self.journal = journal or StorageJournal(
+            db_path=self._settings.storage_journal_path,
+        )
 
     async def initialize(self) -> None:
         await self.cache.initialize()
         await self.patterns.initialize()
         await self.trust.initialize()
+        await self.journal.initialize()
         self.vectors.initialize()
         logger.info("Memory agent initialized")
 
@@ -90,6 +121,7 @@ class MemoryAgent:
         await self.cache.close()
         await self.patterns.close()
         await self.trust.close()
+        await self.journal.close()
         logger.info("Memory agent shut down")
 
     # ------------------------------------------------------------------
@@ -105,6 +137,33 @@ class MemoryAgent:
         )
 
     @staticmethod
+    def _check_persistability(
+        verdict: Optional[str],
+        verification_status: Optional[str],
+        confidence: Optional[float],
+    ) -> tuple[bool, str]:
+        """§13 gate shared by store_fact() and update_fact().
+
+        A fact may only remain in factual memory when its verdict, verification
+        status, and confidence are all supported. CONTRADICTED, UNCERTAIN,
+        UNVERIFIED and negative verdicts must never be (re)persisted; updates
+        that would push a stored fact into one of these states must remove it
+        from factual memory instead.
+        """
+        v = str(verdict or "").strip().lower()
+        if v in _BLOCKING_VERDICTS:
+            return False, f"non_supported_verdict:{v}"
+
+        verification_status = str(verification_status or "").strip().upper()
+        if verification_status in _BLOCKING_STATUSES:
+            return False, f"non_persistable_verification_status:{verification_status}"
+
+        if confidence is None or confidence <= 0.0:
+            return False, "zero_confidence_fact"
+
+        return True, ""
+
+    @staticmethod
     def _persistability_gate(request: StoreFactRequest) -> tuple[bool, str]:
         """Spec §13: only sufficiently-supported facts may become permanent memory.
 
@@ -112,29 +171,11 @@ class MemoryAgent:
         as negative verdicts) must never be persisted as factual memory. Negative
         examples still feed the pattern learner separately.
         """
-        verdict = str(request.verdict or "").strip().lower()
-        if verdict in ("contradicted", "likely_hallucinated", "unverified", "conflicted"):
-            return False, f"non_supported_verdict:{verdict}"
-
-        verification_status = str(request.verification_status or "").strip().upper()
-        blocking = {
-            "CONTRADICTED",
-            "CONTRADICTION",
-            "NOT_ENOUGH_EVIDENCE",
-            "INSUFFICIENT_EVIDENCE",
-            "UNCERTAIN",
-            "UNVERIFIED",
-            "REJECTED",
-            "ABSTAINED",
-            "ABSTAIN",
-        }
-        if verification_status in blocking:
-            return False, f"non_persistable_verification_status:{verification_status}"
-
-        if request.confidence is None or request.confidence <= 0.0:
-            return False, "zero_confidence_fact"
-
-        return True, ""
+        return MemoryAgent._check_persistability(
+            verdict=request.verdict,
+            verification_status=request.verification_status,
+            confidence=request.confidence,
+        )
 
     async def store_fact(self, request: StoreFactRequest) -> StoreFactResponse:
         fact_id = str(uuid.uuid4())
@@ -162,18 +203,28 @@ class MemoryAgent:
                     request.verdict, str(res.metadata.get("verdict", ""))
                 )
             ):
-                contradictions.append(
-                    ContradictionAlert(
-                        existing_fact_id=res.entry_id,
-                        existing_claim_text=res.text,
-                        similarity_score=res.score,
-                        existing_verdict=str(res.metadata.get("verdict", "unknown")),
-                        reason=(
-                            f"New verdict '{request.verdict}' conflicts with stored "
-                            f"verdict '{res.metadata.get('verdict')}' for similar claim"
-                        ),
-                    )
+                # Stage 1 (vector similarity + verdict conflict) only found a
+                # CANDIDATE. Stage 2 (NLI or structured comparison) confirms
+                # whether the pair is an actual logical contradiction.
+                confirmed, method, _detail = await self._confirm_contradiction(
+                    existing_text=res.text,
+                    new_text=request.claim_text,
                 )
+                if confirmed:
+                    contradictions.append(
+                        ContradictionAlert(
+                            existing_fact_id=res.entry_id,
+                            existing_claim_text=res.text,
+                            similarity_score=res.score,
+                            existing_verdict=str(res.metadata.get("verdict", "unknown")),
+                            confirmation_method=method,
+                            reason=(
+                                f"New verdict '{request.verdict}' conflicts with stored "
+                                f"verdict '{res.metadata.get('verdict')}' for similar "
+                                f"claim (confirmed by {method})"
+                            ),
+                        )
+                    )
 
         persistable, gate_reason = self._persistability_gate(request)
         if not persistable:
@@ -215,93 +266,141 @@ class MemoryAgent:
                 stored=False,
             )
 
-        claim_node = self.kg.add_entity(
-            name=request.claim_text[:120],
-            entity_type=EntityType.CLAIM,
-            properties={
-                "domain": request.domain,
-                "verdict": request.verdict,
-                "confidence": request.confidence,
-                "verification_status": request.verification_status,
-                "verified_at": request.verified_at.isoformat() if request.verified_at else now.isoformat(),
-                "provenance": request.provenance,
-                "origin": request.origin,
-                "fact_id": fact_id,
-            },
-            confidence=request.confidence,
-        )
+        record_claim_text = request.claim_text
+        kg_payload = {
+            "fact_id": fact_id,
+            "claim_text": request.claim_text,
+            "domain": request.domain,
+            "verdict": request.verdict,
+            "confidence": request.confidence,
+        }
 
-        fact_node = self.kg.add_entity(
-            name=fact_id,
-            entity_type=EntityType.FACT,
-            properties={
-                "domain": request.domain,
-                "verdict": request.verdict,
-                "claim_text": request.claim_text,
-                "verification_status": request.verification_status,
-                "verified_at": request.verified_at.isoformat() if request.verified_at else now.isoformat(),
-                "provenance": request.provenance,
-                "origin": request.origin,
-            },
-            confidence=request.confidence,
-        )
-        self.kg.add_edge(
-            source_id=claim_node.entity_id,
-            target_id=fact_node.entity_id,
-            relation=RelationType.DERIVED_FROM,
-        )
+        async with self._journal_context(
+            "store", fact_id, "knowledge_graph", kg_payload,
+            claim_text=record_claim_text, domain=request.domain,
+        ):
+            claim_node = self.kg.add_entity(
+                name=request.claim_text[:120],
+                entity_type=EntityType.CLAIM,
+                properties={
+                    "domain": request.domain,
+                    "verdict": request.verdict,
+                    "confidence": request.confidence,
+                    "verification_status": request.verification_status,
+                    "verified_at": request.verified_at.isoformat() if request.verified_at else now.isoformat(),
+                    "provenance": request.provenance,
+                    "origin": request.origin,
+                    "fact_id": fact_id,
+                },
+                confidence=request.confidence,
+            )
+
+            fact_node = self.kg.add_entity(
+                name=fact_id,
+                entity_type=EntityType.FACT,
+                properties={
+                    "domain": request.domain,
+                    "verdict": request.verdict,
+                    "claim_text": request.claim_text,
+                    "verification_status": request.verification_status,
+                    "verified_at": request.verified_at.isoformat() if request.verified_at else now.isoformat(),
+                    "provenance": request.provenance,
+                    "origin": request.origin,
+                },
+                confidence=request.confidence,
+            )
+            self.kg.add_edge(
+                source_id=claim_node.entity_id,
+                target_id=fact_node.entity_id,
+                relation=RelationType.DERIVED_FROM,
+            )
+
+            for evidence in request.evidence:
+                source_id = evidence.get("source_id", "")
+                if source_id:
+                    source_node = self.kg.add_entity(
+                        name=source_id,
+                        entity_type=EntityType.SOURCE,
+                        properties={"domain": request.domain},
+                    )
+                    self.kg.add_edge(
+                        source_id=fact_node.entity_id,
+                        target_id=source_node.entity_id,
+                        relation=RelationType.MENTIONS,
+                    )
+
+            self.kg.save()
 
         entities_created = 2
-        edges_created = 1
+        edges_created = 1 + sum(
+            1 for e in request.evidence if e.get("source_id")
+        )
 
-        for evidence in request.evidence:
-            source_id = evidence.get("source_id", "")
-            if source_id:
-                source_node = self.kg.add_entity(
-                    name=source_id,
-                    entity_type=EntityType.SOURCE,
-                    properties={"domain": request.domain},
-                )
-                self.kg.add_edge(
-                    source_id=fact_node.entity_id,
-                    target_id=source_node.entity_id,
-                    relation=RelationType.MENTIONS,
-                )
-                edges_created += 1
-
-        self.vectors.add(
-            text=request.claim_text,
-            metadata={
+        vector_payload = {
+            "claim_text": request.claim_text,
+            "metadata": {
                 "domain": request.domain,
                 "verdict": request.verdict,
                 "confidence": request.confidence,
                 "verification_status": request.verification_status,
-                "verified_at": request.verified_at.isoformat() if request.verified_at else now.isoformat(),
+                "verified_at": (
+                    request.verified_at.isoformat()
+                    if request.verified_at else now.isoformat()
+                ),
                 "provenance": request.provenance,
                 "origin": request.origin,
                 "fact_id": fact_id,
                 "timestamp": now.isoformat(),
             },
-            entry_id=fact_id,
-        )
+        }
+        async with self._journal_context(
+            "store", fact_id, "vector_store", vector_payload,
+            claim_text=record_claim_text, domain=request.domain,
+        ):
+            self.vectors.add(
+                text=request.claim_text,
+                metadata=vector_payload["metadata"],
+                entry_id=fact_id,
+            )
 
         pattern_updated = False
         if request.verdict in ("likely_hallucinated", "contradicted"):
-            patterns = await self.patterns.observe_claim(
-                claim_text=request.claim_text,
-                domain=request.domain,
-                verdict=request.verdict,
-            )
-            pattern_updated = len(patterns) > 0
+            pattern_payload = {
+                "claim_text": request.claim_text,
+                "domain": request.domain,
+                "verdict": request.verdict,
+            }
+            async with self._journal_context(
+                "store", fact_id, "patterns", pattern_payload,
+                claim_text=record_claim_text, domain=request.domain,
+            ):
+                patterns = await self.patterns.observe_claim(
+                    claim_text=request.claim_text,
+                    domain=request.domain,
+                    verdict=request.verdict,
+                )
+                pattern_updated = len(patterns) > 0
 
-        await self.cache.set(
-            domain=request.domain,
-            claim_text=request.claim_text,
-            verdict=request.verdict,
-            evidence_summary=f"Evidence from {len(request.evidence)} sources",
-            confidence=request.confidence,
-            source_count=len(request.source_ids),
-        )
+        cache_payload = {
+            "domain": request.domain,
+            "claim_text": request.claim_text,
+            "verdict": request.verdict,
+            "confidence": request.confidence,
+            "evidence_summary": f"Evidence from {len(request.evidence)} sources",
+            "source_count": len(request.source_ids),
+        }
+        async with self._journal_context(
+            "store", fact_id, "cache", cache_payload,
+            claim_text=record_claim_text, domain=request.domain,
+        ):
+            await self.cache.set(
+                domain=request.domain,
+                claim_text=request.claim_text,
+                verdict=request.verdict,
+                evidence_summary=cache_payload["evidence_summary"],
+                confidence=request.confidence,
+                source_count=cache_payload["source_count"],
+            )
 
         trust_updates: list[TrustUpdate] = []
         for sid in request.source_ids:
@@ -310,16 +409,24 @@ class MemoryAgent:
                 if request.verdict in ("verified", "likely_verified")
                 else TrustChangeReason.VERIFIED_INCORRECT
             )
-            update = await self.trust.update_trust(
-                source_id=sid,
-                source_name=sid,
-                domain=request.domain,
-                reason=reason,
-                evidence_count=len(request.evidence),
-            )
-            trust_updates.append(update)
-
-        self.kg.save()
+            trust_payload = {
+                "source_id": sid,
+                "domain": request.domain,
+                "reason": reason.value,
+                "evidence_count": len(request.evidence),
+            }
+            async with self._journal_context(
+                "store", fact_id, "trust", trust_payload,
+                claim_text=record_claim_text, domain=request.domain,
+            ):
+                update = await self.trust.update_trust(
+                    source_id=sid,
+                    source_name=sid,
+                    domain=request.domain,
+                    reason=reason,
+                    evidence_count=len(request.evidence),
+                )
+                trust_updates.append(update)
 
         return StoreFactResponse(
             fact_id=fact_id,
@@ -368,6 +475,206 @@ class MemoryAgent:
         )
 
     # ------------------------------------------------------------------
+    # Stage-2 contradiction confirmation + storage journal
+    # ------------------------------------------------------------------
+
+    async def _confirm_contradiction(
+        self, existing_text: str, new_text: str
+    ) -> tuple[bool, Optional[str], str]:
+        """Confirm a FAISS candidate pair as a real contradiction.
+
+        Vector similarity only SURFACES candidates; this second stage decides.
+        Returns (confirmed, method, detail) where method is 'nli' or
+        'structured'. Candidates that neither method confirms are dropped.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            confirmed, method = await loop.run_in_executor(
+                None, self.contradictions.confirm, existing_text, new_text
+            )
+        except Exception as e:
+            logger.warning("Stage-2 contradiction check failed: %s", e)
+            return False, None, "stage2_error"
+        detail = f"confirmed by {method}" if confirmed else "unconfirmed"
+        return confirmed, method, detail
+
+    async def _journal(
+        self,
+        op_type: str,
+        fact_id: str,
+        subsystem: str,
+        status: str = "pending",
+        payload: Optional[dict[str, Any]] = None,
+        claim_text: Optional[str] = None,
+        domain: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> str:
+        try:
+            if self.journal is not None:
+                return await self.journal.record(
+                    op_type=op_type,
+                    fact_id=fact_id,
+                    subsystem=subsystem,
+                    status=status,
+                    payload=payload,
+                    claim_text=claim_text,
+                    domain=domain,
+                    error=error,
+                )
+        except Exception as e:
+            logger.warning("Storage journal write failed: %s", e)
+        return ""
+
+    @asynccontextmanager
+    async def _journal_context(
+        self,
+        op_type: str,
+        fact_id: str,
+        subsystem: str,
+        payload: dict[str, Any],
+        claim_text: Optional[str] = None,
+        domain: Optional[str] = None,
+    ):
+        """Record a per-subsystem outcome and isolate subsystem failures.
+
+        A single fact write spans Knowledge Graph, FAISS, Pattern DB, Cache DB,
+        and Source Trust DB — there is no distributed transaction across them.
+        Each write is journaled 'pending' before, then marked 'done' or
+        'failed' after. A failure is isolated (not re-raised) so the other
+        subsystems still complete, and the failed operation can be reconciled
+        later from its journal payload.
+        """
+        op_id = await self._journal(
+            op_type, fact_id, subsystem, "pending", payload,
+            claim_text=claim_text, domain=domain,
+        )
+        try:
+            yield
+        except Exception as e:
+            logger.warning(
+                "Subsystem write failed (%s, fact %s): %s",
+                subsystem, fact_id, e,
+            )
+            if op_id:
+                try:
+                    await self.journal.mark_failed(op_id, str(e))
+                except Exception as je:
+                    logger.warning("Failed to journal failure: %s", je)
+        else:
+            if op_id:
+                try:
+                    await self.journal.mark_done(op_id)
+                except Exception as je:
+                    logger.warning("Failed to journal success: %s", je)
+
+    async def reconcile(self, limit: int = 50) -> dict[str, Any]:
+        """Retry failed subsystem writes for derived indexes.
+
+        knowledge_graph is the canonical record and is not auto-rebuilt;
+        vector_store and cache are derived indexes reconstructed from the
+        journal payload. Patterns/trust failures from the retry are surfaced as
+        unresolved and require manual review.
+        """
+        failed_ops = await self.journal.get_failed(limit)
+        reconciled = unresolved = 0
+        errors: list[dict[str, str]] = []
+        for op in failed_ops:
+            try:
+                if await self._retry_operation(op):
+                    await self.journal.mark_reconciled(op["op_id"])
+                    reconciled += 1
+                else:
+                    unresolved += 1
+            except Exception as e:
+                unresolved += 1
+                errors.append({"op_id": op["op_id"], "error": str(e)})
+
+        return {
+            "attempted": len(failed_ops),
+            "reconciled": reconciled,
+            "unresolved": unresolved,
+            "errors": errors,
+        }
+
+    async def _retry_operation(self, op: dict[str, Any]) -> bool:
+        subsystem = op["subsystem"]
+        payload = op.get("payload") or {}
+        fact_id = op["fact_id"]
+
+        if subsystem == "vector_store":
+            claim_text = payload.get("claim_text") or op.get("claim_text")
+            metadata = payload.get("metadata") or {}
+            if not claim_text:
+                return False
+            if self.vectors.get(fact_id) is not None:
+                return True  # already present
+            self.vectors.add(
+                text=claim_text,
+                metadata=metadata,
+                entry_id=fact_id,
+            )
+            return True
+
+        if subsystem == "cache":
+            claim_text = payload.get("claim_text") or op.get("claim_text")
+            domain = payload.get("domain") or op.get("domain") or "general"
+            if not claim_text:
+                return False
+            await self.cache.set(
+                domain=domain,
+                claim_text=claim_text,
+                verdict=payload.get("verdict", "verified"),
+                evidence_summary=payload.get(
+                    "evidence_summary", "Recovered by storage reconciliation"
+                ),
+                confidence=float(payload.get("confidence", 0.5)),
+                source_count=int(payload.get("source_count", 0)),
+            )
+            return True
+
+        if subsystem == "patterns":
+            claim_text = payload.get("claim_text") or op.get("claim_text")
+            domain = payload.get("domain") or op.get("domain")
+            verdict = payload.get("verdict")
+            if not claim_text or not domain or not verdict:
+                return False
+            await self.patterns.observe_claim(
+                claim_text=claim_text,
+                domain=domain,
+                verdict=verdict,
+            )
+            return True
+
+        if subsystem == "trust":
+            source_id = payload.get("source_id")
+            domain = payload.get("domain")
+            reason_value = payload.get("reason")
+            if not source_id or not domain or not reason_value:
+                return False
+            try:
+                reason = TrustChangeReason(reason_value)
+            except ValueError:
+                return False
+            await self.trust.update_trust(
+                source_id=source_id,
+                source_name=source_id,
+                domain=domain,
+                reason=reason,
+                evidence_count=int(payload.get("evidence_count", 1)),
+            )
+            return True
+
+        # knowledge_graph is the canonical source of truth; it is NOT rebuilt
+        # automatically from a partial payload.
+        logger.warning(
+            "Reconciliation for subsystem %r requires manual review", subsystem,
+        )
+        return False
+
+    async def get_storage_journal_stats(self) -> dict[str, Any]:
+        return await self.journal.get_stats()
+
+    # ------------------------------------------------------------------
     # Fact lifecycle
     # ------------------------------------------------------------------
 
@@ -379,18 +686,35 @@ class MemoryAgent:
         entities = self.kg.find_entity_by_name(fact_id, EntityType.FACT)
         entity = entities[0] if entities else None
         if entity:
-            self.kg.remove_entity(entity.entity_id)
+            async with self._journal_context(
+                "delete", fact_id, "knowledge_graph", {"fact_id": fact_id},
+            ):
+                self.kg.remove_entity(entity.entity_id)
             deleted_from.append("knowledge_graph")
 
         # Vector Store
-        if self.vectors.delete(fact_id):
+        async with self._journal_context(
+            "delete", fact_id, "vector_store", {"fact_id": fact_id},
+        ):
+            deleted_vector = self.vectors.delete(fact_id)
+            if not deleted_vector:
+                raise RuntimeError("vector entry missing for delete")
+        if deleted_vector:
             deleted_from.append("vector_store")
 
         # Cache — invalidate by claim text if found in KG properties
         if entity and entity.properties.get("claim_text"):
             domain = entity.properties.get("domain", "general")
             claim = entity.properties["claim_text"]
-            if await self.cache.invalidate(domain, claim):
+            async with self._journal_context(
+                "delete", fact_id, "cache",
+                {"domain": domain, "claim_text": claim},
+                claim_text=claim, domain=domain,
+            ):
+                removed = await self.cache.invalidate(domain, claim)
+                if not removed:
+                    raise RuntimeError("cache entry missing for delete")
+            if removed:
                 deleted_from.append("cache")
 
         self.kg.save()
@@ -402,7 +726,14 @@ class MemoryAgent:
         )
 
     async def update_fact(self, request: UpdateFactRequest) -> UpdateFactResponse:
-        """Update verdict/confidence of an existing fact across subsystems."""
+        """Update verdict/confidence of an existing fact across subsystems.
+
+        An update must pass the same §13 persistability gate as a fresh store.
+        If the new state is non-persistable (e.g. a verified fact becoming
+        contradicted), the fact is REMOVED from factual memory rather than
+        remaining behind as a contradicting record. The retraction is still
+        reported so the caller can decide whether to alert on it.
+        """
         # fact_id is stored as entity NAME, not ID
         entities = self.kg.find_entity_by_name(request.fact_id, EntityType.FACT)
         entity = entities[0] if entities else None
@@ -417,38 +748,98 @@ class MemoryAgent:
             if request.new_confidence is not None
             else old_confidence
         )
+        verification_status = str(
+            entity.properties.get("verification_status", "VERIFIED")
+        ).strip().upper()
+
+        persistable, gate_reason = MemoryAgent._check_persistability(
+            verdict=new_verdict,
+            verification_status=verification_status,
+            confidence=new_confidence,
+        )
+        if not persistable:
+            logger.info(
+                "Update would invalidate factual memory, removing fact %s: %s",
+                request.fact_id,
+                gate_reason,
+            )
+            deleted = await self.delete_fact(request.fact_id)
+            removed_from = list(deleted.deleted_from or [])
+
+            # Record the retraction as pattern history so it is not lost.
+            if str(new_verdict).lower() in ("likely_hallucinated", "contradicted"):
+                claim_text = entity.properties.get("claim_text", "")
+                if claim_text:
+                    try:
+                        await self.patterns.observe_claim(
+                            claim_text=claim_text,
+                            domain=str(entity.properties.get("domain", "general")),
+                            verdict=new_verdict,
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to record retraction pattern: %s", e)
+
+            return UpdateFactResponse(
+                fact_id=request.fact_id,
+                old_verdict=old_verdict,
+                new_verdict=new_verdict,
+                old_confidence=old_confidence,
+                new_confidence=new_confidence,
+                updated_in=[],
+                persisted=False,
+                removed_from=removed_from,
+                reason=gate_reason,
+            )
+
         updated_in: list[str] = []
 
         # Update KG entity properties
-        entity.properties["verdict"] = new_verdict
-        entity.properties["confidence"] = new_confidence
-        entity.updated_at = datetime.utcnow()
-        updated_in.append("knowledge_graph")
+        async with self._journal_context(
+            "update", request.fact_id, "knowledge_graph",
+            {"fact_id": request.fact_id, "new_verdict": new_verdict,
+             "new_confidence": new_confidence},
+        ):
+            entity.properties["verdict"] = new_verdict
+            entity.properties["confidence"] = new_confidence
+            entity.updated_at = datetime.utcnow()
+            updated_in.append("knowledge_graph")
+            self.kg.save()
 
         # Update vector store metadata
-        vec_entry = self.vectors.get(request.fact_id)
-        if vec_entry and vec_entry.metadata:
-            vec_entry.metadata["verdict"] = new_verdict
-            vec_entry.metadata["confidence"] = new_confidence
-            updated_in.append("vector_store")
+        async with self._journal_context(
+            "update", request.fact_id, "vector_store",
+            {"fact_id": request.fact_id, "new_verdict": new_verdict,
+             "new_confidence": new_confidence},
+        ):
+            vec_entry = self.vectors.get(request.fact_id)
+            if vec_entry and vec_entry.metadata:
+                vec_entry.metadata["verdict"] = new_verdict
+                vec_entry.metadata["confidence"] = new_confidence
+                updated_in.append("vector_store")
+            else:
+                raise RuntimeError("vector entry missing for fact")
 
         # Update cache if claim text exists
         claim_text = entity.properties.get("claim_text")
         if claim_text:
             domain = entity.properties.get("domain", "general")
-            # Invalidate old cache, re-set with new verdict
-            await self.cache.invalidate(domain, claim_text)
-            await self.cache.set(
-                domain=domain,
-                claim_text=claim_text,
-                verdict=new_verdict,
-                evidence_summary=f"Updated: {new_verdict}",
-                confidence=new_confidence,
-                source_count=0,
-            )
-            updated_in.append("cache")
-
-        self.kg.save()
+            async with self._journal_context(
+                "update", request.fact_id, "cache",
+                {"domain": domain, "claim_text": claim_text,
+                 "verdict": new_verdict, "confidence": new_confidence},
+                claim_text=claim_text, domain=domain,
+            ):
+                # Invalidate old cache, re-set with new verdict
+                await self.cache.invalidate(domain, claim_text)
+                await self.cache.set(
+                    domain=domain,
+                    claim_text=claim_text,
+                    verdict=new_verdict,
+                    evidence_summary=f"Updated: {new_verdict}",
+                    confidence=new_confidence,
+                    source_count=0,
+                )
+                updated_in.append("cache")
 
         return UpdateFactResponse(
             fact_id=request.fact_id,
@@ -457,6 +848,7 @@ class MemoryAgent:
             old_confidence=old_confidence,
             new_confidence=new_confidence,
             updated_in=updated_in,
+            persisted=True,
         )
 
     # ------------------------------------------------------------------

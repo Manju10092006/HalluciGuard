@@ -19,6 +19,7 @@ async def client(tmp_path):
         pattern_db_path=str(tmp_path / "patterns.db"),
         trust_db_path=str(tmp_path / "trust.db"),
         vector_store_path=str(tmp_path / "vectors"),
+        storage_journal_path=str(tmp_path / "journal.db"),
     )
     kg = KnowledgeGraph(persistence_path=settings.kg_persistence_path)
     cache = VerificationCache(db_path=settings.cache_db_path, ttl=3600)

@@ -116,7 +116,7 @@ class _FakeNLIPipeline:
         self.device = device
         self._raise = raise_on_call
 
-    def __call__(self, batch):
+    def __call__(self, batch, **kwargs):  # noqa: D401 - mimic HF pipeline kwargs
         if self._raise:
             raise RuntimeError("simulated NLI inference failure")
         # One list-of-label-dicts per input pair.

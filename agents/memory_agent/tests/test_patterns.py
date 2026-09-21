@@ -77,32 +77,49 @@ class TestPatternLearning:
         pytest.fail("Frequency should increase")
 
     @pytest.mark.asyncio
-    async def test_query_patterns(self, learner):
+    async def test_query_does_not_surface_candidates_before_min_support(self, learner):
+        # A single observation leaves the pattern at frequency=1 < min_support,
+        # so it is a 'candidate' and must not be returned by query_patterns.
         await learner.observe_claim(
             claim_text="Aspirin cures cancer", domain="healthcare",
             verdict="likely_hallucinated",
         )
         results = await learner.query_patterns(domain="healthcare")
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_query_returns_established_patterns(self, learner):
+        for _ in range(3):
+            await learner.observe_claim(
+                claim_text="Aspirin cures cancer", domain="healthcare",
+                verdict="likely_hallucinated",
+            )
+        results = await learner.query_patterns(domain="healthcare")
         assert len(results) > 0
+        assert all(p.status == "established" for p in results)
+        assert all(p.frequency >= 3 for p in results)
 
     @pytest.mark.asyncio
     async def test_query_by_type(self, learner):
-        await learner.observe_claim(
-            claim_text="The stock price increased by 45 percent",
-            domain="finance",
-            verdict="likely_hallucinated",
-        )
+        for _ in range(3):
+            await learner.observe_claim(
+                claim_text="The stock price increased by 45 percent",
+                domain="finance",
+                verdict="likely_hallucinated",
+            )
         results = await learner.query_patterns(
             domain="finance", pattern_type=PatternType.NUMERICAL
         )
         assert len(results) > 0
+        assert all(p.status == "established" for p in results)
 
     @pytest.mark.asyncio
     async def test_domain_summary(self, learner):
-        await learner.observe_claim(
-            claim_text="Aspirin cures cancer", domain="healthcare",
-            verdict="likely_hallucinated",
-        )
+        for _ in range(3):
+            await learner.observe_claim(
+                claim_text="Aspirin cures cancer", domain="healthcare",
+                verdict="likely_hallucinated",
+            )
         summary = await learner.get_domain_summary("healthcare")
         assert len(summary) > 0
 
