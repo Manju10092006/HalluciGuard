@@ -19,6 +19,7 @@ async def client(tmp_path):
         pattern_db_path=str(tmp_path / "patterns.db"),
         trust_db_path=str(tmp_path / "trust.db"),
         vector_store_path=str(tmp_path / "vectors"),
+        storage_journal_path=str(tmp_path / "journal.db"),
     )
     kg = KnowledgeGraph(persistence_path=settings.kg_persistence_path)
     cache = VerificationCache(db_path=settings.cache_db_path, ttl=3600)
@@ -72,7 +73,10 @@ class TestBatchEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 2
-        assert data["stored"] == 2
+        # The persistability safety gate must skip (never store) non-verified
+        # verdicts, so only the "verified" claim is persisted as a fact.
+        assert data["stored"] == 1
+        assert data["skipped"] == 1
 
 
 class TestAnalyticsEndpoint:
@@ -201,18 +205,18 @@ class TestUpdateFactEndpoint:
         r = await client.post("/store", json={
             "claim_text": "Update me",
             "domain": "test",
-            "verdict": "likely_hallucinated",
-            "confidence": 0.1,
+            "verdict": "verified",
+            "confidence": 0.9,
         })
         fact_id = r.json()["fact_id"]
         resp = await client.put(
             f"/facts/{fact_id}",
-            json={"new_verdict": "verified", "new_confidence": 0.9},
+            json={"new_verdict": "likely_hallucinated", "new_confidence": 0.1},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["new_verdict"] == "verified"
-        assert data["old_verdict"] == "likely_hallucinated"
+        assert data["new_verdict"] == "likely_hallucinated"
+        assert data["old_verdict"] == "verified"
 
     @pytest.mark.asyncio
     async def test_update_nonexistent(self, client):
