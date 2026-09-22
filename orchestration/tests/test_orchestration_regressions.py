@@ -63,7 +63,7 @@ async def test_verifier_receives_detector_atomic_claims(monkeypatch):
             self.__dict__.update(kwargs)
 
     monkeypatch.setattr(
-        "orchestration.graph._verifier_imports", lambda: (Pipeline, Suspicious, Payload)
+        "orchestration.graph._get_verifier_imports", lambda: (Pipeline, Suspicious, Payload)
     )
     state = _state(
         detected_claims=[
@@ -109,7 +109,7 @@ async def test_reverifier_does_not_pass_unverified_regeneration(monkeypatch):
             self.__dict__.update(kwargs)
 
     monkeypatch.setattr(
-        "orchestration.graph._verifier_imports", lambda: (Pipeline, Suspicious, Payload)
+        "orchestration.graph._get_verifier_imports", lambda: (Pipeline, Suspicious, Payload)
     )
     result = await _reverifier_node(
         _state(

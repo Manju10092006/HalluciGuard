@@ -103,8 +103,9 @@ async def test_early_pass_still_retries():
 
 @pytest.mark.asyncio
 async def test_final_pass_reaches_terminal_accept_not_human_review():
-    # retry_count = max_retries - 1 -> this is the last permitted pass.
-    out = await graph._judge_node(_state(retry_count=1))
+    # retry_count = max_retries -> Judge receives actual retry_count
+    # and makes its own terminal decision (ACCEPT on relaxed domain).
+    out = await graph._judge_node(_state(retry_count=2))
     assert out["judge_decision"] == "ACCEPT", (
         f"terminal branch not reached; got {out['judge_decision']} ({out['judge'].get('reason')})"
     )

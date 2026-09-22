@@ -120,7 +120,7 @@ async def test_verifier_receives_llm_response_not_user_query(monkeypatch):
         MagicMock(side_effect=lambda claim_id, text: MagicMock(claim_id=claim_id, text=text)),
         MagicMock(side_effect=lambda **kw: MagicMock(**kw)),
     )
-    monkeypatch.setattr("orchestration.graph._verifier_imports", lambda: mock_imports)
+    monkeypatch.setattr("orchestration.graph._get_verifier_imports", lambda: mock_imports)
 
     state = make_base_state(
         user_query="Who created Python?",
@@ -363,7 +363,7 @@ async def test_reverifier_node_produces_canonical_reverification_result(monkeypa
         MagicMock(side_effect=lambda claim_id, text: MagicMock(claim_id=claim_id, text=text)),
         MagicMock(side_effect=lambda **kw: MagicMock(**kw)),
     )
-    monkeypatch.setattr("orchestration.graph._verifier_imports", lambda: mock_imports)
+    monkeypatch.setattr("orchestration.graph._get_verifier_imports", lambda: mock_imports)
 
     corr_res = CorrectionResult(
         original_text="Python was created by Elon Musk in 1999.",
@@ -598,6 +598,12 @@ async def test_memory_only_persists_verified_facts_and_emits_memory_result(monke
     """Memory agent must persist verified facts and emit canonical MemoryResult."""
     stored_requests = []
 
+    class BatchResult:
+        stored = 0
+        duplicates = 0
+        failed = 0
+        results = []
+
     class MockMemoryAgent:
         async def initialize(self):
             pass
@@ -606,6 +612,15 @@ async def test_memory_only_persists_verified_facts_and_emits_memory_result(monke
         async def store_fact(self, req):
             stored_requests.append(req)
             return {"fact_id": f"fact-{len(stored_requests)}", "status": "stored"}
+        async def store_facts_batch(self, reqs):
+            results = []
+            for req in reqs:
+                stored_requests.append(req)
+                results.append(type("R", (), {"fact_id": f"fact-{len(stored_requests)}", "status": "stored"})())
+            br = BatchResult()
+            br.stored = len(reqs)
+            br.results = results
+            return br
 
     monkeypatch.setattr(
         "agents.memory_agent.memory.memory_agent.MemoryAgent",
