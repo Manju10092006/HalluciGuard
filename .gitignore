@@ -75,15 +75,22 @@ tmp/
 temp/
 *.tmp
 scratch/
-.cursor/
+.generated/
+runtime outputs
+.next/
+*.tsbuildinfo
+__pycache__/
+.pytest_cache/
+*.pyc
 artifacts/
-data/
-auto_crop_boxes.py
-crop_boxes.py
-verify_and_clean_crops.py
+reports/output/
+benchmarks/output/
+results/
 
-# Jupyter
-.ipynb_checkpoints/
+# Research artifacts (separate from production code)
+research/
+benchmarks/
+experiments/
 
 # Multi-agent orchestration scratch (explorer/reviewer/worker session data)
 .agents/

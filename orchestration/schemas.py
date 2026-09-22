@@ -15,7 +15,23 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+class ContractViolation(ValidationError):
+    """Raised when an agent produces a value that violates the canonical contract."""
+    pass
+
+
+class ErrorType(str, Enum):
+    """Structured error taxonomy for all agent failures."""
+    TIMEOUT = "timeout"
+    NETWORK = "network"
+    CONTRACT = "contract"
+    VALIDATION = "validation"
+    CONFIGURATION = "configuration"
+    DEPENDENCY = "dependency"
+    INTERNAL = "internal"
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +64,23 @@ class VerdictLabel(str, Enum):
     CONTRADICTED = "contradicted"
     UNVERIFIED = "unverified"
     CONFLICTED = "conflicted"
+
+
+class VerificationStatus(str, Enum):
+    """Answer-level verification status reflecting aggregated claim verdicts.
+
+    Precedence rules (highest to lowest):
+        1. Any CONTRADICTED -> CONTRADICTED
+        2. Any CONFLICTED   -> CONFLICTED
+        3. All VERIFIED     -> ALL_VERIFIED
+        4. Mix of verified/unverified/unknown -> PARTIALLY_VERIFIED
+        5. Everything else  -> UNVERIFIED
+    """
+    ALL_VERIFIED = "all_verified"
+    PARTIALLY_VERIFIED = "partially_verified"
+    CONTRADICTED = "contradicted"
+    CONFLICTED = "conflicted"
+    UNVERIFIED = "unverified"
 
 
 class JudgeDecision(str, Enum):
@@ -92,6 +125,81 @@ class ValidationStatus(str, Enum):
     INVALID = "invalid"
     UNVALIDATED = "unvalidated"
     WARNING = "warning"
+
+
+class PipelineStatus(str, Enum):
+    """Clear pipeline-level status to prevent contradictory states."""
+    RUNNING = "running"
+    VERIFIED = "verified"
+    NEEDS_CORRECTION = "needs_correction"
+    REJECTED = "rejected"
+    HUMAN_REVIEW = "human_review"
+    FAILED = "failed"
+
+
+class ErrorType(str, Enum):
+    """Structured error taxonomy for all agent failures."""
+    TIMEOUT = "timeout"
+    NETWORK = "network"
+    CONTRACT = "contract"
+    VALIDATION = "validation"
+    CONFIGURATION = "configuration"
+    DEPENDENCY = "dependency"
+    INTERNAL = "internal"
+
+
+class ContractViolation(Exception):
+    """Raised when an agent produces data that violates a canonical contract.
+
+    Attributes:
+        agent: The name of the agent that produced the invalid data.
+        field: The field name that violated the contract.
+        received: The value that was received.
+        expected: Description of valid values.
+        ctx: Additional context dict with agent, field, received, expected_values.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        agent: str = "unknown",
+        field: str = "",
+        received: Any = None,
+        expected: str = "",
+        ctx: Optional[dict[str, Any]] = None,
+    ):
+        self.agent = agent
+        self.field = field
+        self.received = received
+        self.expected = expected
+        self.ctx = ctx or {}
+        super().__init__(message)
+
+
+class ValidationError(Exception):
+    """Raised when input data fails validation."""
+    pass
+
+
+class VerificationStatus(str, Enum):
+    """Answer-level verification status representing the aggregation
+    of multiple claim-level verdicts."""
+    ALL_VERIFIED = "all_verified"
+    PARTIALLY_VERIFIED = "partially_verified"
+    CONTRADICTED = "contradicted"
+    CONFLICTED = "conflicted"
+    UNVERIFIED = "unverified"
+
+
+class PipelineStatus(str, Enum):
+    """Clear pipeline-level status to prevent contradictory states."""
+    RUNNING = "running"
+    VERIFIED = "verified"
+    NEEDS_CORRECTION = "needs_correction"
+    REJECTED = "rejected"
+    HUMAN_REVIEW = "human_review"
+    FAILED = "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +537,16 @@ class MemoryResult(BaseModel):
         ge=0,
         description="Number of verified facts committed to knowledge graph and vector memory.",
     )
+    duplicate_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of duplicate facts found during persistence.",
+    )
+    failed_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of facts that failed persistence.",
+    )
     fact_ids: List[str] = Field(
         default_factory=list,
         description="Unique IDs of facts stored or referenced in memory.",
@@ -444,11 +562,15 @@ __all__ = [
     "NextAction",
     "EntailmentLabel",
     "VerdictLabel",
+    "VerificationStatus",
     "JudgeDecision",
     "SeverityLevel",
     "ExecutionStatus",
     "MemoryStatus",
     "ValidationStatus",
+    "PipelineStatus",
+    "ErrorType",
+    "ContractViolation",
     "DetectorResult",
     "Evidence",
     "ClaimReport",

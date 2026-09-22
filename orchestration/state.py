@@ -12,6 +12,7 @@ from .schemas import (
     Evidence,
     JudgeResult,
     MemoryResult,
+    PipelineStatus,
     ReverificationResult,
     VerifierResult,
 )
@@ -29,6 +30,7 @@ class AgentError(TypedDict, total=False):
     message: str
     timestamp: str
     retryable: bool
+    error_type: str
 
 
 class ExecutionEvent(TypedDict, total=False):
@@ -40,6 +42,7 @@ class ExecutionEvent(TypedDict, total=False):
     latency_ms: int
     retry_count: int
     details: dict[str, Any]
+    error_type: str
 
 
 class HalluciGuardState(TypedDict, total=False):
@@ -50,7 +53,7 @@ class HalluciGuardState(TypedDict, total=False):
     user_query: str
     llm_response: str
     draft_response: str
-    generation_mode: str  # "normal" or "stress_test"
+    generation_mode: str
     conversation_history: list[dict[str, str]]
     generation: dict[str, Any]
     base_llm: dict[str, Any]
@@ -95,6 +98,7 @@ class HalluciGuardState(TypedDict, total=False):
     # Control plane
     final_response: str
     terminal_status: TerminalStatus
+    pipeline_status: PipelineStatus
     retry_count: int
     max_retries: int
     correction_attempt_count: int
@@ -133,6 +137,7 @@ def add_trace(
     status: AgentStatus,
     *,
     latency_ms: int | None = None,
+    error_type: str | None = None,
     **details: Any,
 ) -> list[ExecutionEvent]:
     """Add an execution event to the state's trace and return the updated trace list."""
@@ -145,6 +150,8 @@ def add_trace(
         "retry_count": int(state.get("retry_count", 0)),
         "details": details,
     }
+    if error_type is not None:
+        event["error_type"] = error_type
     if latency_ms is not None:
         event["latency_ms"] = latency_ms
     trace.append(event)
@@ -152,17 +159,19 @@ def add_trace(
 
 
 def add_error(
-    state: HalluciGuardState, node: str, exc: BaseException, *, retryable: bool = False
+    state: HalluciGuardState, node: str, exc: BaseException, *, retryable: bool = False, error_type: str | None = None
 ) -> list[AgentError]:
     """Add an error event to the state's error list and return the updated list."""
     errors = list(state.get("errors", []))
+    etype = error_type or type(exc).__name__
     errors.append(
         {
             "node": node,
-            "type": type(exc).__name__,
+            "type": etype,
             "message": str(exc),
             "timestamp": utc_now(),
             "retryable": retryable,
+            "error_type": etype,
         }
     )
     return errors
