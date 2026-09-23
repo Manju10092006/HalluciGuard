@@ -13,7 +13,7 @@ This document records the distinction between **implemented**, **validated**, **
 - **Corrector Agent** — independently validated under a real `pytest` + Pydantic v2 run: 437 tests pass, including the Step 6 integration suite (retry ladder, echo capture, no-silent-fallback, reconstruction fail-closed). The 6 curriculum-data checks are gated on the `contract_v4` training artifact and run whenever that dataset is present.
 - **Five-agent graph** — Verifier → Judge → Corrector → Re-verifier → Memory is wired into the active LangGraph (`orchestration/graph.py`) with `add_edge`/`add_conditional_edges` routing, and the orchestration suite (90 tests incl. canonical pipeline contracts) is green.
 - LangGraph orchestration architecture with shared state, Supervisor routing, bounded retries and structured trace/bus concepts.
-- Base LLM service abstraction and OpenRouter integration code under active development.
+- Base LLM service abstraction with a multi-provider failover router (Groq → Gemini → OpenRouter, configurable via `HALLUCIGUARD_LLM_PROVIDER_ORDER`) over the shared OpenAI-compatible chat completions contract; generation and correction both route through it.
 
 ## 🟡 Implemented but still under independent validation
 
@@ -23,7 +23,7 @@ This document records the distinction between **implemented**, **validated**, **
 
 ## 🔜 Planned product milestones
 
-1. Validate the OpenRouter model path with a real server-side key.
+1. Validate the LLM provider chain (Groq → Gemini → OpenRouter) with real server-side keys.
 2. Finish the real active LangGraph backend E2E.
 3. Connect the existing Next.js frontend through its VerificationService/HalluciGuardAdapter architecture.
 4. Containerize the Python backend.
