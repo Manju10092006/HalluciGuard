@@ -6,9 +6,10 @@
 
 @layer base {
   :root {
-    --bg: #edeef5;
+    --bg: #F6F6F4;
+    --bg-color: #F6F6F4;
     --surface: #ffffff;
-    --surface-sunken: #e5e7f0;
+    --surface-sunken: #F0EFEA;
     --surface-raised: #f6f7fb;
     --border: rgba(20, 22, 40, 0.08);
     --border-strong: rgba(20, 22, 40, 0.14);

@@ -39,6 +39,16 @@ from orchestration.schemas import (
 )
 from services.base_llm_service import BaseLLMConfig, BaseLLMService
 
+# Correction-failure diagnostic categories (surfaced on CorrectionResult and in
+# the graph's CORRECTION_FAILED bus message) so we can measure whether the true
+# root cause is provider reliability, the model echoing the original answer, or a
+# claim/span that could not be located or repaired.
+FAIL_LLM_PROVIDER = "LLM_PROVIDER_FAILURE"
+FAIL_NO_LOCATABLE_CLAIM = "NO_LOCATABLE_CLAIM"
+FAIL_MODEL_ECHO = "MODEL_ECHO"
+FAIL_NO_OP_MATCH = "NO_OP_MATCH"
+FAIL_OTHER = "OTHER"
+
 # Matching ladder thresholds for locating a contradicted claim inside the answer.
 _TOKEN_OVERLAP_THRESHOLD = 0.6
 _TOKEN_OVERLAP_MARGIN = 0.2
@@ -264,7 +274,12 @@ class CharacterRegenerator:
         )
 
     def _failed_result(
-        self, request: CorrectionRequest, reason: str, attempts: int
+        self,
+        request: CorrectionRequest,
+        reason: str,
+        attempts: int,
+        failure_category: Optional[str] = None,
+        provider_used: Optional[str] = None,
     ) -> CorrectionResult:
         """Fail closed: never raise across the agent boundary.
 
@@ -272,7 +287,8 @@ class CharacterRegenerator:
         text is emitted. ``status=FAILED`` signals the orchestration to apply the
         configured corrector fail policy (human escalation or reject) instead of
         looping the unchanged answer back through the Re-Verifier. The diagnostic
-        reason is recorded honestly, never a fabricated correction.
+        reason and ``failure_category`` are recorded honestly, never a fabricated
+        correction.
         """
         return CorrectionResult(
             original_text=request.original_response,
@@ -291,6 +307,8 @@ class CharacterRegenerator:
             validation_status=ValidationStatus.UNVALIDATED,
             attempt_count=attempts,
             status=ExecutionStatus.FAILED,
+            failure_category=failure_category,
+            provider_used=provider_used,
         )
 
     async def _repair_sentence(
@@ -299,19 +317,27 @@ class CharacterRegenerator:
         sentence: str,
         claims: Sequence,
         max_attempts: int,
-    ) -> Tuple[Optional[str], str]:
+    ) -> Tuple[Optional[str], str, bool, bool, Optional[str]]:
         """Rewrite one contradicted sentence, retrying on empty/echo/transient error.
 
-        Returns ``(corrected_sentence, reason)``. ``corrected_sentence`` is ``None``
-        when every attempt failed; ``reason`` is then the last diagnostic. A first
-        faithful attempt at low temperature escalates slightly on retry so a model
-        that merely echoed the sentence gets a genuine second try.
+        Returns ``(corrected_sentence, reason, saw_echo, saw_provider_failure,
+        provider_used)``. ``corrected_sentence`` is ``None`` when every attempt
+        failed; ``reason`` is then the last diagnostic. ``saw_echo`` /
+        ``saw_provider_failure`` let the caller classify a fail-closed result's
+        ``failure_category`` (model echoed the original vs the LLM provider never
+        produced a usable candidate). ``provider_used`` is the provider that served
+        the last observed generation, for observability. A first faithful attempt at
+        low temperature escalates slightly on retry so a model that merely echoed the
+        sentence gets a genuine second try.
         """
         prompt = self._sentence_prompt(request, sentence, claims)
         budget = self._sentence_token_budget(sentence)
         norm_original = _normalize(sentence)
         temperatures = [0.1, 0.35, 0.5]
         last_reason = "empty response"
+        saw_echo = False
+        saw_provider_failure = False
+        last_provider_used: Optional[str] = None
 
         for attempt in range(1, max_attempts + 1):
             temperature = temperatures[min(attempt - 1, len(temperatures) - 1)]
@@ -325,10 +351,16 @@ class CharacterRegenerator:
                 )
             except Exception as exc:  # noqa: BLE001 - boundary must not raise
                 last_reason = f"generation_error: {type(exc).__name__}: {exc}"
+                saw_provider_failure = True
                 continue
+
+            last_provider_used = (
+                getattr(result, "provider_used", None) or last_provider_used
+            )
 
             if result.status != "success" or not result.draft_response.strip():
                 last_reason = str(result.error or result.error_code or "empty response")
+                saw_provider_failure = True
                 continue
 
             corrected = self._clean_rewrite(result.draft_response)
@@ -337,10 +369,11 @@ class CharacterRegenerator:
                 continue
             if _normalize(corrected) == norm_original:
                 last_reason = "model returned the original contradicted sentence unchanged"
+                saw_echo = True
                 continue
-            return corrected, "regenerated"
+            return corrected, "regenerated", saw_echo, saw_provider_failure, last_provider_used
 
-        return None, last_reason
+        return None, last_reason, saw_echo, saw_provider_failure, last_provider_used
 
     async def regenerate(self, request: CorrectionRequest) -> CorrectionResult:
         """Repair only the contradicted sentences, splicing evidence-led rewrites.
@@ -374,6 +407,7 @@ class CharacterRegenerator:
                 "no_locatable_contradicted_claim: none of the contradicted claims "
                 "could be matched to a sentence in the original answer",
                 attempts=1,
+                failure_category=FAIL_NO_LOCATABLE_CLAIM,
             )
 
         # Repair each targeted span, splicing from the highest offset downward so
@@ -383,15 +417,25 @@ class CharacterRegenerator:
         repaired_any = False
         last_reason = "empty response"
         total_attempts = 0
+        saw_echo = False
+        saw_provider_failure = False
+        last_provider_used: Optional[str] = None
 
         for idx in sorted(ordered_indices, key=lambda i: spans[i][0], reverse=True):
             start, end = spans[idx]
             sentence = original[start:end]
             claims = span_claims[idx]
-            corrected_sentence, reason = await self._repair_sentence(
-                request, sentence, claims, max_attempts
-            )
+            (
+                corrected_sentence,
+                reason,
+                span_saw_echo,
+                span_saw_provider_failure,
+                span_provider_used,
+            ) = await self._repair_sentence(request, sentence, claims, max_attempts)
             total_attempts += 1
+            saw_echo = saw_echo or span_saw_echo
+            saw_provider_failure = saw_provider_failure or span_saw_provider_failure
+            last_provider_used = span_provider_used or last_provider_used
             if corrected_sentence is None:
                 last_reason = reason
                 for claim in claims:
@@ -405,10 +449,21 @@ class CharacterRegenerator:
                 outcome[claim.claim_id] = ("regenerated", corrected_sentence, None)
 
         if not repaired_any:
+            # Precedence: an echo is more informative than a raw provider failure,
+            # so classify it first; a provider failure means the LLM never produced
+            # a usable candidate at all.
+            if saw_echo:
+                category = FAIL_MODEL_ECHO
+            elif saw_provider_failure:
+                category = FAIL_LLM_PROVIDER
+            else:
+                category = FAIL_OTHER
             return self._failed_result(
                 request,
                 f"character_regeneration_failed_after_{max_attempts}_attempts: {last_reason}",
                 attempts=max_attempts,
+                failure_category=category,
+                provider_used=last_provider_used,
             )
 
         final_text = corrected_text.strip()
@@ -419,6 +474,8 @@ class CharacterRegenerator:
                 request,
                 "character_regeneration_failed: repaired answer matched the original",
                 attempts=max_attempts,
+                failure_category=FAIL_NO_OP_MATCH,
+                provider_used=last_provider_used,
             )
 
         # Emit changed_claims in the original claim order for stable, readable output.
@@ -449,6 +506,7 @@ class CharacterRegenerator:
             validation_status=ValidationStatus.UNVALIDATED,
             attempt_count=total_attempts,
             status=ExecutionStatus.COMPLETED,
+            provider_used=last_provider_used,
         )
 
 

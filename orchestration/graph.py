@@ -761,14 +761,16 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
             )
 
         provider = os.environ.get("HG_CORRECTOR_PROVIDER", "openrouter").strip().lower()
-        if provider == "openrouter":
+        if provider == "local":
+            # Local specialized Corrector (on-disk Qwen LoRA); no remote calls.
+            corr_res = await asyncio.to_thread(CorrectorAgent().correct, corr_req)
+        else:
+            # Any hosted value (openrouter/groq/gemini/hosted) routes through the
+            # multi-provider failover router (Groq -> Gemini -> OpenRouter). Its
+            # output remains untrusted until the dedicated Re-Verifier and Judge pass.
             from services.character_regenerator import CharacterRegenerator
 
-            # Whole-answer regeneration controller.  Its output remains
-            # untrusted until the dedicated Re-Verifier and Judge pass.
             corr_res = await CharacterRegenerator().regenerate(corr_req)
-        else:
-            corr_res = await asyncio.to_thread(CorrectorAgent().correct, corr_req)
         dumped_corr = _dump(corr_res)
 
         attempt_count = int(state.get("correction_attempt_count", 0)) + 1
@@ -787,6 +789,11 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
             fail_mode = os.environ.get("HG_CORRECTOR_FAIL_MODE", "escalate").strip().lower()
             fail_route = "reject" if fail_mode == "reject" else "human_escalation"
             candidate_text = original_text
+            # Surface the corrector's diagnostic failure category (and which
+            # provider was last attempted) so operators can tell whether the
+            # root cause was LLM provider reliability or claim/span matching.
+            failure_category = dumped_corr.get("failure_category") or "OTHER"
+            provider_used = dumped_corr.get("provider_used")
             bus = add_bus_message(
                 state,
                 source_agent="corrector",
@@ -797,6 +804,8 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
                     "attempt_count": attempt_count,
                     "fail_mode": fail_mode,
                     "route": fail_route,
+                    "failure_category": failure_category,
+                    "provider_used": provider_used,
                 },
             )
             return {
@@ -816,6 +825,7 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
                     validation_status=val_status,
                     attempt_count=attempt_count,
                     fail_mode=fail_mode,
+                    failure_category=failure_category,
                 ),
             }
 

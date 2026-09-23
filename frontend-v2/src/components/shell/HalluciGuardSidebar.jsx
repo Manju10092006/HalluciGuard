@@ -1,158 +1,821 @@
-"use client";
+import React, { useState } from 'react'
+import {
+  PanelLeftClose,
+  PanelLeft,
+  Plus,
+  Home,
+  ShieldCheck,
+  Database,
+  History,
+  ChevronsUpDown,
+  User,
+  Check,
+  Sparkles,
+  LogOut,
+  Layers,
+  GitBranch,
+  Cpu,
+  Boxes,
+  LogIn,
+  Gift,
+  ChevronDown,
+} from 'lucide-react'
+import { BrandMark } from '../common/BrandMark'
 
-import { useState } from "react";
-import { Plus, Search, Home, ShieldCheck, FileSearch, History, Library, PanelLeftClose, PanelLeftOpen, FolderPlus, Folder, X, MoreHorizontal, Trash2 } from "lucide-react";
-import { useChat } from "@/context/ChatContext";
-import { groupConversations } from "@/lib/format";
-import { cn } from "@/lib/utils";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { LogoMark, Wordmark } from "@/components/brand/Logo";
-import { SidebarItem } from "./SidebarItem";
-import { UserMenu } from "./UserMenu";
+export function HalluciGuardSidebar({
+  collapsed,
+  onToggleCollapse,
+  activeNav,
+  setActiveNav,
+  onNewVerification,
+  onOpenCreateFlow,
+  onOpenAuth,
+  user,
+  onLogout,
+  recentSessions,
+  activeSessionId,
+  onSelectSession,
+  isMobileOpen,
+  onCloseMobile,
+}) {
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [sidebarTab, setSidebarTab] = useState('chats') // 'chats' | 'flow-runs'
 
-const NAV = [
-  { to: "/", label: "Home", icon: Home, end: true },
-  { to: "/verify", label: "Verify", icon: ShieldCheck, action: true },
-  { to: "/evidence", label: "Evidence", icon: FileSearch },
-  { to: "/history", label: "History", icon: History },
-  { to: "/library", label: "Library", icon: Library },
-];
+  const mockFlowRuns = [
+    { id: 'fr-1', name: 'Slack #bugs to Linear Issue', status: 'Active', time: '10m ago', tone: 'supported' },
+    { id: 'fr-2', name: 'Linear Urgent to Slack #oncall', status: 'Triggered', time: '1h ago', tone: 'contradicted' },
+    { id: 'fr-3', name: 'Email Invitation Research', status: 'Completed', time: 'Yesterday', tone: 'supported' },
+  ]
 
-function NavItem({ item, collapsed, onNavigate, onAction }) {
-  const { activePath, navigate } = useChat();
-  const Icon = item.icon;
-  const isActive = !item.action && (item.end ? activePath === item.to : activePath.startsWith(item.to));
-  const base = "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13.5px] transition-[background-color,color] duration-150 hover:bg-hg-sunken hover:text-hg-text focus-visible:outline-2";
-  const inner = (
-    <>
-      <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-      {!collapsed && <span className="truncate">{item.label}</span>}
-    </>
-  );
-  const el = item.action ? (
-    <button type="button" onClick={onAction} className={cn(base, "w-full text-hg-text2")} data-testid={`nav-${item.label.toLowerCase()}`}>{inner}</button>
-  ) : (
-    <button type="button" onClick={() => { onNavigate?.(); navigate(item.to); }} data-testid={`nav-${item.label.toLowerCase()}`}
-      className={cn(base, "w-full text-left", isActive ? "bg-hg-sunken text-hg-text font-medium before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[2px] before:-translate-y-1/2 before:rounded-full before:bg-hg-accent" : "text-hg-text2")}>
-      {inner}
-    </button>
-  );
-  if (!collapsed) return el;
+  // Group recent sessions by relative time
+  const timeGroups = ['Today', 'Yesterday', '2 days ago', '3 days ago', 'Last week']
+  const groupedSessions = timeGroups.reduce((acc, group) => {
+    const items = recentSessions.filter((s) => (s.timeGroup || 'Yesterday') === group)
+    if (items.length > 0) acc[group] = items
+    return acc
+  }, {})
+
+  const handleNavClick = (navId) => {
+    setActiveNav(navId)
+    if (navId === 'home') {
+      onNewVerification()
+    } else if (navId === 'flows') {
+      onOpenCreateFlow()
+    }
+    onCloseMobile()
+  }
+
+  const handleSessionClick = (id) => {
+    onSelectSession(id)
+    onCloseMobile()
+  }
+
   return (
-    <Tooltip><TooltipTrigger asChild>{el}</TooltipTrigger><TooltipContent side="right">{item.label}</TooltipContent></Tooltip>
-  );
-}
-
-export function HalluciGuardSidebar() {
-  const { conversations, projects, collapsed, setCollapsed, mobileOpen, setMobileOpen, setModal, newVerification, createProject, deleteProject, activePath, navigate } = useChat();
-  const [projectsOpen, setProjectsOpen] = useState(true);
-  const close = () => setMobileOpen(false);
-
-  const activeId = activePath.startsWith("/c/") ? activePath.replace("/c/", "") : null;
-
-  const handleNewProject = async () => {
-    const name = window.prompt("Project name");
-    if (name?.trim()) await createProject(name.trim());
-  };
-
-  const groups = groupConversations((conversations || []).filter((c) => !c.project_id));
-
-  return (
     <>
-      <div onClick={close} aria-hidden="true"
-        className={cn("fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 md:hidden", mobileOpen ? "opacity-100" : "pointer-events-none opacity-0")} />
+      {/* Mobile Backdrop */}
+      {isMobileOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
+      )}
+
       <aside
-        data-testid="sidebar"
-        data-collapsed={collapsed}
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-full flex-col border-r border-hg-line bg-hg-bg transition-[width,transform] duration-200 ease-out md:relative md:translate-x-0",
-          collapsed ? "md:w-[72px]" : "md:w-[264px]",
-          "w-[280px]", mobileOpen ? "translate-x-0" : "-translate-x-full"
-        )}
+        className={`halluciguard-sidebar ${collapsed ? 'is-collapsed' : ''} ${
+          isMobileOpen ? 'is-mobile-open' : ''
+        }`}
+        aria-label="Application sidebar"
       >
-        <div className={cn("flex h-14 items-center px-3", collapsed ? "justify-center" : "justify-between pl-4")}>
-          <button type="button" onClick={() => { close(); navigate("/"); }} className="flex items-center gap-2.5 text-left" aria-label="HalluciGuard home" data-testid="sidebar-logo">
-            <LogoMark size={26} />
-            {!collapsed && <Wordmark className="text-[15px]" />}
-          </button>
-          {!collapsed && (
-            <div className="flex items-center gap-0.5">
-              <button type="button" onClick={close} className="hg-icon-btn md:hidden" aria-label="Close sidebar" data-testid="sidebar-close"><X className="h-4 w-4" /></button>
-              <button type="button" onClick={() => setCollapsed(true)} className="hg-icon-btn hidden md:inline-flex" aria-label="Collapse sidebar" data-testid="sidebar-collapse"><PanelLeftClose className="h-4 w-4" strokeWidth={1.75} /></button>
-            </div>
-          )}
-        </div>
-        {collapsed && (
-          <button type="button" onClick={() => setCollapsed(false)} className="hg-icon-btn mx-auto mb-1 hidden md:inline-flex" aria-label="Expand sidebar" data-testid="sidebar-expand"><PanelLeftOpen className="h-4 w-4" strokeWidth={1.75} /></button>
-        )}
-
-        <div className={cn("px-3", collapsed && "flex flex-col items-center gap-1")}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={newVerification} data-testid="new-verification-button"
-                className={cn("group flex items-center gap-2 rounded-full border border-hg-line bg-hg-sunken text-[13.5px] font-medium text-hg-text transition-[border-color,background-color,transform] duration-150 hover:border-[rgba(var(--accent-rgb),.5)] active:scale-[.99]",
-                  collapsed ? "h-9 w-9 justify-center" : "h-9 w-full justify-center px-3")}>
-                <Plus className="h-4 w-4 text-hg-accent transition-transform duration-200 group-hover:rotate-90" strokeWidth={2} />
-                {!collapsed && <span>New Verification</span>}
-              </button>
-            </TooltipTrigger>
-            {collapsed && <TooltipContent side="right">New Verification</TooltipContent>}
-          </Tooltip>
-          <button type="button" onClick={() => setModal({ type: "search" })} data-testid="sidebar-search-button"
-            className={cn("mt-2 flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13.5px] text-hg-text2 transition-colors hover:bg-hg-sunken hover:text-hg-text", collapsed ? "h-9 w-9 justify-center px-0" : "w-full")}>
-            <Search className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-            {!collapsed && <><span className="flex-1 text-left">Search</span><kbd className="font-mono text-[10px] text-hg-muted">⌘K</kbd></>}
-          </button>
-        </div>
-
-        <nav className={cn("mt-2 flex flex-col gap-0.5 px-3", collapsed && "items-center")} aria-label="Primary">
-          {NAV.map((item) => <NavItem key={item.label} item={item} collapsed={collapsed} onNavigate={close} onAction={newVerification} />)}
-        </nav>
-
-        {!collapsed && (
-          <div className="mt-3 flex-1 overflow-y-auto px-3 pb-2" data-testid="recent-verifications">
-            <div className="mb-1 flex items-center justify-between px-2.5">
-              <button type="button" onClick={() => setProjectsOpen((o) => !o)} className="text-[11px] font-medium uppercase tracking-[0.06em] text-hg-muted hover:text-hg-text2" data-testid="projects-toggle">Projects</button>
-              <button type="button" onClick={handleNewProject} className="hg-icon-btn h-6 w-6" aria-label="New project" data-testid="new-project-button"><FolderPlus className="h-3.5 w-3.5" strokeWidth={1.75} /></button>
-            </div>
-            {projectsOpen && (projects || []).map((p) => {
-              const isProjActive = activePath === `/projects/${p.id}`;
-              return (
-                <div key={p.id} className="group flex items-center">
-                  <button type="button" onClick={() => { close(); navigate(`/projects/${p.id}`); }} data-testid={`project-${p.id}`}
-                    className={cn("flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-[6px] text-left text-[13px] transition-colors hover:bg-hg-sunken", isProjActive ? "bg-hg-sunken text-hg-text" : "text-hg-text2")}>
-                    <Folder className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-                    <span className="truncate">{p.name}</span>
-                    <span className="ml-auto font-mono text-[10px] text-hg-muted">{(conversations || []).filter((c) => c.project_id === p.id).length}</span>
-                  </button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild><button type="button" className="hg-icon-btn h-6 w-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label="Project options"><MoreHorizontal className="h-3.5 w-3.5" /></button></DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="rounded-xl border-hg-line bg-hg-surface">
-                      <DropdownMenuItem onClick={() => deleteProject(p.id)} className="text-hg-contradicted focus:text-hg-contradicted"><Trash2 className="h-3.5 w-3.5" /> Delete project</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              );
-            })}
-            {projectsOpen && projects.length === 0 && <p className="px-2.5 pb-1 text-[12px] text-hg-muted">Group verifications into folders.</p>}
-
-            <div className="mb-1 mt-4 px-2.5 text-[11px] font-medium uppercase tracking-[0.06em] text-hg-muted">Recent verifications</div>
-            {groups.length === 0 && <p className="px-2.5 text-[12.5px] text-hg-muted">Nothing verified yet.</p>}
-            {groups.map(([label, items]) => (
-              <div key={label} className="mb-3">
-                <div className="px-2.5 pb-1 pt-1 text-[10.5px] font-medium uppercase tracking-[0.05em] text-hg-muted/80">{label}</div>
-                <div className="flex flex-col gap-px">
-                  {items.map((c) => <SidebarItem key={c.id} conversation={c} active={c.id === activeId} onNavigate={close} />)}
-                </div>
+        {/* Top: Workspace row matching "Cofounder ⌄" in Image 1 */}
+        <div className="sidebar-top-row">
+          <div className="workspace-selector-btn" onClick={onNewVerification} role="button" tabIndex={0}>
+            <BrandMark size={24} />
+            {!collapsed && (
+              <div className="workspace-name-cluster">
+                <span className="workspace-name">HalluciGuard</span>
+                <ChevronDown size={14} className="workspace-chevron" />
               </div>
-            ))}
+            )}
+          </div>
+
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={onToggleCollapse}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        </div>
+
+        {/* Invite Friends / Earn Credits banner (from Image 1) */}
+        {!collapsed && (
+          <div className="sidebar-invite-strip">
+            <button
+              type="button"
+              className="invite-credits-btn"
+              onClick={() => alert('Invite referral link copied: https://halluciguard.ai/join/judha')}
+            >
+              <Gift size={13} className="gift-icon" />
+              <span>Invite Friends, Earn Credits</span>
+            </button>
           </div>
         )}
-        {collapsed && <div className="flex-1" />}
 
-        <UserMenu collapsed={collapsed} />
+        {/* Primary action: + New Chat / New Verification */}
+        <div className="sidebar-primary-action-wrap">
+          <button
+            type="button"
+            className="new-verification-btn"
+            onClick={onNewVerification}
+            title="Start new chat / verification"
+          >
+            <Plus size={16} strokeWidth={2.4} />
+            {!collapsed && <span>New Chat</span>}
+          </button>
+        </div>
+
+        {/* Navigation: Flows, Memory, Integrations (as in Image 1) */}
+        <nav className="sidebar-nav-list" aria-label="Main Navigation">
+          <button
+            type="button"
+            className={`nav-item-btn ${activeNav === 'flows' ? 'is-active' : ''}`}
+            onClick={() => {
+              setActiveNav('flows')
+              onOpenCreateFlow()
+            }}
+            title={collapsed ? 'Flows' : undefined}
+          >
+            {activeNav === 'flows' && <div className="active-indicator-bar" />}
+            <Layers size={16} className="nav-item-icon" />
+            {!collapsed && (
+              <div className="nav-label-with-badge">
+                <span>Flows</span>
+                <span className="new-badge">Templates</span>
+              </div>
+            )}
+          </button>
+
+          <button
+            type="button"
+            className={`nav-item-btn ${activeNav === 'memory' ? 'is-active' : ''}`}
+            onClick={() => handleNavClick('memory')}
+            title={collapsed ? 'Memory' : undefined}
+          >
+            {activeNav === 'memory' && <div className="active-indicator-bar" />}
+            <Database size={16} className="nav-item-icon" />
+            {!collapsed && <span className="nav-item-label">Memory</span>}
+          </button>
+
+          <button
+            type="button"
+            className={`nav-item-btn ${activeNav === 'integrations' ? 'is-active' : ''}`}
+            onClick={() => handleNavClick('integrations')}
+            title={collapsed ? 'Integrations' : undefined}
+          >
+            {activeNav === 'integrations' && <div className="active-indicator-bar" />}
+            <Boxes size={16} className="nav-item-icon" />
+            {!collapsed && <span className="nav-item-label">Integrations</span>}
+          </button>
+        </nav>
+
+        {/* Sub-tabs: Chats / Flow Runs (as in Image 1) */}
+        {!collapsed && (
+          <div className="sidebar-subtabs-row">
+            <button
+              type="button"
+              className={`subtab-btn ${sidebarTab === 'chats' ? 'active' : ''}`}
+              onClick={() => setSidebarTab('chats')}
+            >
+              Chats
+            </button>
+            <button
+              type="button"
+              className={`subtab-btn ${sidebarTab === 'flow-runs' ? 'active' : ''}`}
+              onClick={() => setSidebarTab('flow-runs')}
+            >
+              Flow Runs
+            </button>
+          </div>
+        )}
+
+        {/* Sub-tab content (Chats list or Flow Runs list) */}
+        {!collapsed && (
+          <div className="recent-verifications-area">
+            {sidebarTab === 'chats' ? (
+              <div className="recent-scroll-list">
+                {Object.entries(groupedSessions).map(([group, sessions]) => (
+                  <div key={group} className="time-group-block">
+                    <div className="time-group-label">{group}</div>
+                    {sessions.map((session) => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        className={`recent-session-item ${
+                          activeSessionId === session.id ? 'is-selected' : ''
+                        }`}
+                        onClick={() => handleSessionClick(session.id)}
+                      >
+                        <span className="session-title-text truncate">{session.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="recent-scroll-list">
+                <div className="time-group-label">Recent Automated Runs</div>
+                {mockFlowRuns.map((fr) => (
+                  <div key={fr.id} className="flow-run-item">
+                    <div className="flow-run-top">
+                      <span className="flow-run-title truncate">{fr.name}</span>
+                      <span className={`flow-run-pill status-${fr.tone}`}>{fr.status}</span>
+                    </div>
+                    <span className="flow-run-time">{fr.time}</span>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="create-flow-quick-btn"
+                  onClick={onOpenCreateFlow}
+                >
+                  <Plus size={13} />
+                  <span>Create new flow</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Bottom User Area */}
+        <div className="sidebar-user-section">
+          {userMenuOpen && (
+            <div className="user-dropdown-popover">
+              <div className="popover-user-info">
+                <span className="popover-name">{user?.name || 'Judha Maygustya'}</span>
+                <span className="popover-email">{user?.email || 'judha.design@halluciguard.ai'}</span>
+              </div>
+              <div className="popover-divider" />
+              <div className="popover-plan-row">
+                <div className="plan-badge-pill">
+                  <Sparkles size={12} />
+                  <span>{user?.plan || 'HalluciGuard Pro'}</span>
+                </div>
+              </div>
+              <div className="popover-divider" />
+              <button
+                type="button"
+                className="popover-menu-item"
+                onClick={() => {
+                  setUserMenuOpen(false)
+                  onOpenAuth()
+                }}
+              >
+                <LogIn size={13} />
+                <span>Sign in / Switch account</span>
+              </button>
+              <button
+                type="button"
+                className="popover-menu-item text-danger"
+                onClick={() => {
+                  setUserMenuOpen(false)
+                  onLogout?.()
+                }}
+              >
+                <LogOut size={13} />
+                <span>Log out</span>
+              </button>
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="user-profile-btn"
+            onClick={() => setUserMenuOpen(!userMenuOpen)}
+            aria-expanded={userMenuOpen}
+            aria-label="User account and settings"
+          >
+            <div className="user-avatar-circle">
+              <User size={15} />
+            </div>
+            {!collapsed && (
+              <>
+                <div className="user-details-col">
+                  <span className="user-name-text truncate">{user?.name || 'Judha Maygustya'}</span>
+                  <span className="user-plan-label">{user?.plan || 'HalluciGuard Pro'}</span>
+                </div>
+                <ChevronsUpDown size={14} className="user-chevron" />
+              </>
+            )}
+          </button>
+        </div>
       </aside>
+
+      <style>{`
+        .halluciguard-sidebar {
+          width: var(--sidebar-width);
+          min-width: var(--sidebar-width);
+          height: 100vh;
+          background: var(--surface);
+          border-right: 1px solid var(--border);
+          display: flex;
+          flex-direction: column;
+          transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 240ms ease-out;
+          z-index: 50;
+          user-select: none;
+        }
+
+        .halluciguard-sidebar.is-collapsed {
+          width: var(--sidebar-collapsed-width);
+          min-width: var(--sidebar-collapsed-width);
+        }
+
+        /* Top Row */
+        .sidebar-top-row {
+          height: 52px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 14px;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .workspace-selector-btn {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          cursor: pointer;
+          padding: 4px;
+          border-radius: 6px;
+          transition: background-color 120ms ease;
+        }
+
+        .workspace-selector-btn:hover {
+          background-color: var(--surface-sunken);
+        }
+
+        .workspace-name-cluster {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .workspace-name {
+          font-size: 14.5px;
+          font-weight: 600;
+          letter-spacing: -0.01em;
+          color: var(--text-primary);
+        }
+
+        .workspace-chevron {
+          color: var(--text-muted);
+        }
+
+        .sidebar-collapse-btn {
+          width: 28px;
+          height: 28px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--text-muted);
+          transition: all 120ms ease;
+        }
+
+        .sidebar-collapse-btn:hover {
+          color: var(--text-primary);
+          background: var(--surface-sunken);
+        }
+
+        /* Invite banner */
+        .sidebar-invite-strip {
+          padding: 10px 12px 2px;
+        }
+
+        .invite-credits-btn {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          padding: 6px 10px;
+          border-radius: var(--radius-sm);
+          background: var(--accent-light);
+          color: var(--accent);
+          font-size: 11.5px;
+          font-weight: 600;
+          transition: background-color 140ms ease;
+        }
+
+        .invite-credits-btn:hover {
+          background: rgba(109, 94, 245, 0.16);
+        }
+
+        .gift-icon {
+          flex-shrink: 0;
+        }
+
+        /* New Chat Action */
+        .sidebar-primary-action-wrap {
+          padding: 10px 12px 6px;
+        }
+
+        .new-verification-btn {
+          width: 100%;
+          height: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          border-radius: var(--radius-pill);
+          background: var(--surface-sunken);
+          border: 1px solid var(--border);
+          color: var(--text-primary);
+          font-size: 13px;
+          font-weight: 600;
+          transition: all 140ms ease;
+        }
+
+        .new-verification-btn:hover {
+          border-color: var(--accent);
+          background: var(--accent-light);
+          color: var(--accent);
+        }
+
+        /* Nav List */
+        .sidebar-nav-list {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 6px 8px 10px;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .nav-item-btn {
+          position: relative;
+          width: 100%;
+          height: 34px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 0 10px;
+          border-radius: 8px;
+          color: var(--text-secondary);
+          font-size: 13px;
+          font-weight: 500;
+          transition: all 120ms ease;
+        }
+
+        .nav-item-btn:hover {
+          color: var(--text-primary);
+          background: var(--surface-sunken);
+        }
+
+        .nav-item-btn.is-active {
+          color: var(--text-primary);
+          background: var(--surface-sunken);
+          font-weight: 600;
+        }
+
+        .active-indicator-bar {
+          position: absolute;
+          left: 0;
+          top: 6px;
+          bottom: 6px;
+          width: 2.5px;
+          border-radius: 2px;
+          background: var(--accent);
+        }
+
+        .nav-item-icon {
+          flex-shrink: 0;
+        }
+
+        .nav-label-with-badge {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .new-badge {
+          font-size: 10px;
+          padding: 1px 6px;
+          border-radius: var(--radius-pill);
+          background: var(--accent-light);
+          color: var(--accent);
+          font-weight: 600;
+        }
+
+        .is-collapsed .nav-item-btn {
+          justify-content: center;
+          padding: 0;
+        }
+
+        /* Subtabs: Chats / Flow Runs */
+        .sidebar-subtabs-row {
+          display: flex;
+          padding: 10px 12px 4px;
+          gap: 14px;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .subtab-btn {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text-muted);
+          padding-bottom: 6px;
+          border-bottom: 2px solid transparent;
+          transition: all 120ms ease;
+        }
+
+        .subtab-btn:hover {
+          color: var(--text-primary);
+        }
+
+        .subtab-btn.active {
+          color: var(--text-primary);
+          border-bottom-color: var(--accent);
+        }
+
+        /* Recent Verifications / Flows */
+        .recent-verifications-area {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          padding: 10px 10px 8px;
+        }
+
+        .recent-scroll-list {
+          flex: 1;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .time-group-block {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .time-group-label {
+          font-size: 10.5px;
+          font-weight: 600;
+          color: var(--text-muted);
+          padding: 2px 8px;
+          letter-spacing: 0.02em;
+        }
+
+        .recent-session-item {
+          width: 100%;
+          height: 30px;
+          display: flex;
+          align-items: center;
+          padding: 0 8px;
+          border-radius: 6px;
+          color: var(--text-secondary);
+          font-size: 13px;
+          text-align: left;
+          transition: all 120ms ease;
+        }
+
+        .recent-session-item:hover {
+          background: var(--surface-sunken);
+          color: var(--text-primary);
+        }
+
+        .recent-session-item.is-selected {
+          background: var(--surface-sunken);
+          color: var(--accent);
+          font-weight: 500;
+        }
+
+        /* Flow Runs */
+        .flow-run-item {
+          padding: 8px;
+          background: var(--surface-sunken);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .flow-run-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 6px;
+        }
+
+        .flow-run-title {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .flow-run-pill {
+          font-size: 9.5px;
+          font-weight: 700;
+          padding: 1px 6px;
+          border-radius: var(--radius-pill);
+        }
+
+        .flow-run-time {
+          font-size: 10.5px;
+          color: var(--text-muted);
+        }
+
+        .create-flow-quick-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 8px;
+          border-radius: var(--radius-sm);
+          border: 1px dashed var(--border-strong);
+          color: var(--accent);
+          font-size: 12px;
+          font-weight: 500;
+          margin-top: 6px;
+          transition: background-color 140ms ease;
+        }
+
+        .create-flow-quick-btn:hover {
+          background: var(--accent-light);
+        }
+
+        /* User Area */
+        .sidebar-user-section {
+          position: relative;
+          padding: 10px;
+          border-top: 1px solid var(--border);
+        }
+
+        .user-profile-btn {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          padding: 6px 8px;
+          border-radius: 8px;
+          transition: background-color 120ms ease;
+        }
+
+        .user-profile-btn:hover {
+          background: var(--surface-sunken);
+        }
+
+        .user-avatar-circle {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          background: var(--surface-sunken);
+          border: 1px solid var(--border);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--text-secondary);
+          flex-shrink: 0;
+        }
+
+        .user-details-col {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          text-align: left;
+          min-width: 0;
+        }
+
+        .user-name-text {
+          font-size: 12.5px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .user-plan-label {
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+
+        .user-chevron {
+          color: var(--text-muted);
+        }
+
+        /* Popover */
+        .user-dropdown-popover {
+          position: absolute;
+          bottom: calc(100% + 6px);
+          left: 10px;
+          right: 10px;
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          box-shadow: var(--shadow-float);
+          padding: 10px;
+          z-index: 60;
+          animation: popover-fade 140ms ease-out;
+        }
+
+        .popover-user-info {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 4px 6px;
+        }
+
+        .popover-name {
+          font-size: 12.5px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .popover-email {
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+
+        .popover-divider {
+          height: 1px;
+          background: var(--border);
+          margin: 6px 0;
+        }
+
+        .plan-badge-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--accent);
+          background: var(--accent-light);
+          padding: 3px 8px;
+          border-radius: var(--radius-pill);
+        }
+
+        .popover-menu-item {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          padding: 6px 8px;
+          border-radius: 6px;
+          font-size: 12px;
+          color: var(--text-primary);
+          transition: background-color 120ms ease;
+        }
+
+        .popover-menu-item:hover {
+          background: var(--surface-sunken);
+        }
+
+        .popover-menu-item.text-danger {
+          color: var(--contradicted);
+        }
+
+        .popover-menu-item.text-danger:hover {
+          background: var(--contradicted-bg);
+        }
+
+        /* Mobile Drawer */
+        @media (max-width: 768px) {
+          .halluciguard-sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            transform: translateX(-100%);
+            box-shadow: var(--shadow-modal);
+          }
+
+          .halluciguard-sidebar.is-mobile-open {
+            transform: translateX(0);
+          }
+
+          .sidebar-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(2px);
+            z-index: 45;
+          }
+        }
+
+        @keyframes popover-fade {
+          from {
+            opacity: 0;
+            transform: translateY(4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
     </>
-  );
+  )
 }

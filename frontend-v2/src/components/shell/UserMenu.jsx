@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronsUpDown, Sparkles, SlidersHorizontal, Settings, Keyboard, HelpCircle, LogOut, Sun, Moon } from "lucide-react";
+import { ChevronsUpDown, Sparkles, SlidersHorizontal, Settings, Keyboard, HelpCircle, LogOut, Sun, Moon, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { useChat } from "@/context/ChatContext";
 import { USER } from "@/lib/format";
@@ -18,7 +18,9 @@ export function UserMenu({ collapsed }) {
         <DropdownMenuTrigger asChild>
           <button type="button" data-testid="user-menu-trigger" aria-label="Account menu"
             className={cn("flex w-full items-center gap-2.5 rounded-xl p-1.5 text-left transition-colors hover:bg-hg-sunken data-[state=open]:bg-hg-sunken", collapsed && "justify-center")}>
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[12px] font-semibold text-hg-accent">{USER.initials}</span>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[12px] font-semibold text-hg-accent">
+              {name.slice(0, 2).toUpperCase()}
+            </span>
             {!collapsed && (
               <>
                 <span className="min-w-0 flex-1">
@@ -36,6 +38,9 @@ export function UserMenu({ collapsed }) {
             <div className="text-[11.5px] text-hg-muted">{USER.email}</div>
           </div>
           <DropdownMenuSeparator className="bg-hg-line" />
+          <DropdownMenuItem onClick={() => setModal({ type: "auth" })} className="rounded-lg text-hg-accent font-medium">
+            <LogIn className="h-3.5 w-3.5" /> Sign in / Switch account
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => toast("You're already on HalluciGuard Pro", { description: "Unlimited deep verifications included." })} className="rounded-lg"><Sparkles className="h-3.5 w-3.5 text-hg-accent" /> Upgrade plan</DropdownMenuItem>
           <DropdownMenuItem onClick={() => setModal({ type: "settings", tab: "personalization" })} className="rounded-lg" data-testid="user-menu-personalization"><SlidersHorizontal className="h-3.5 w-3.5" /> Personalization</DropdownMenuItem>
           <DropdownMenuItem onClick={() => setModal({ type: "settings", tab: "general" })} className="rounded-lg" data-testid="user-menu-settings"><Settings className="h-3.5 w-3.5" /> Settings<DropdownMenuShortcut>⌘,</DropdownMenuShortcut></DropdownMenuItem>
@@ -43,7 +48,7 @@ export function UserMenu({ collapsed }) {
           <DropdownMenuItem onClick={() => setModal({ type: "shortcuts" })} className="rounded-lg"><Keyboard className="h-3.5 w-3.5" /> Keyboard shortcuts<DropdownMenuShortcut>⌘/</DropdownMenuShortcut></DropdownMenuItem>
           <DropdownMenuItem onClick={() => toast("Help center", { description: "Docs and support are coming soon." })} className="rounded-lg"><HelpCircle className="h-3.5 w-3.5" /> Help</DropdownMenuItem>
           <DropdownMenuSeparator className="bg-hg-line" />
-          <DropdownMenuItem onClick={() => toast("Signed out (demo)", { description: "Authentication is not wired in this build." })} className="rounded-lg"><LogOut className="h-3.5 w-3.5" /> Log out</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => toast("Signed out", { description: "Switched to guest mode." })} className="rounded-lg text-hg-contradicted"><LogOut className="h-3.5 w-3.5" /> Log out</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

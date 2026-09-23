@@ -45,6 +45,125 @@ from orchestration.schemas import (
 logger = logging.getLogger("HalluciGuard.JudgeAgent")
 
 
+class DecisionBasis:
+    """Stable machine-readable reason codes for the Judge's precedence rules.
+
+    These are the *why* behind a JudgeDecision, decoupled from the human-facing
+    ``reason``/``explanation`` prose so metrics, dashboards, and regression tests
+    can key off a stable token instead of matching free text. A basis code names
+    the rule that fired; it is never itself a factual claim about the response.
+    """
+
+    # Terminal input-integrity outcomes
+    INVALID_VERIFIER_INPUT = "INVALID_VERIFIER_INPUT_ABSTAIN"
+    VERIFIER_FAILED = "VERIFIER_FAILED_ABSTAIN"
+
+    # Contradiction (correct-first)
+    CONTRADICTION_PRESENT = "CONTRADICTION_PRESENT_CORRECT"
+
+    # Absent evidence
+    NO_EVIDENCE_RETRY = "NO_EVIDENCE_RETRY"
+    NO_EVIDENCE_ABSTAIN = "NO_EVIDENCE_ABSTAIN"
+
+    # Verified outcomes
+    ALL_CLAIMS_VERIFIED = "ALL_CLAIMS_VERIFIED_ACCEPT"
+    PERIPHERAL_UNVERIFIED_TOLERATED = "PERIPHERAL_UNVERIFIED_TOLERATED_ACCEPT"
+
+    # Core / conflicted grounding gaps
+    CORE_UNVERIFIED_RETRY = "CORE_UNVERIFIED_RETRY"
+    CORE_UNVERIFIED_ABSTAIN = "CORE_UNVERIFIED_ABSTAIN"
+    CONFLICTED_RETRY = "CONFLICTED_RETRY"
+    STRICT_GROUNDING_GAP_ABSTAIN = "STRICT_GROUNDING_GAP_ABSTAIN"
+
+    # Post-correction reverification gate
+    REVERIFICATION_PASSED = "REVERIFICATION_PASSED_ACCEPT"
+    REVERIFICATION_FAILED_RETRY = "REVERIFICATION_FAILED_RETRY_CORRECT"
+    REVERIFICATION_FAILED_REJECT = "REVERIFICATION_FAILED_REJECT"
+
+
+# Tokens that carry no discriminative signal when deciding whether a claim is
+# responsive to the user's query. Kept small and generic on purpose.
+_QUERY_STOPWORDS = frozenset({
+    "the", "a", "an", "of", "to", "in", "on", "at", "by", "for", "with", "and",
+    "or", "is", "are", "was", "were", "be", "been", "being", "who", "what",
+    "when", "where", "which", "why", "how", "does", "did", "do", "can", "could",
+    "would", "should", "will", "that", "this", "these", "those", "it", "its",
+    "as", "from", "about", "into", "than", "then", "there", "their", "them",
+    "has", "have", "had", "you", "your", "me", "my", "i", "we", "our",
+})
+
+
+def _salient_terms(text: str) -> set[str]:
+    """Extract lowercase content tokens (>2 chars, non-stopword) plus any numbers.
+
+    Deterministic and dependency-free — no model, no network. Numbers are kept
+    verbatim because dates/quantities are frequently the crux of a query
+    ("founded in 1977", "how many...").
+    """
+    import re
+
+    if not text:
+        return set()
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9\-']*", text.lower())
+    terms: set[str] = set()
+    for tok in tokens:
+        if tok.isdigit():
+            terms.add(tok)
+        elif len(tok) > 2 and tok not in _QUERY_STOPWORDS:
+            terms.add(tok)
+    return terms
+
+
+def _claim_is_core(claim_text: str, query_terms: set[str]) -> bool:
+    """Decide whether a claim is CORE (directly responsive to the query) or
+    PERIPHERAL (incidental detail the user did not ask about).
+
+    Deterministic and query-aware: a claim is CORE when its salient terms
+    intersect the query's salient terms. This is the criticality gate the ACCEPT
+    path depends on — a CORE claim that is UNVERIFIED must never be silently
+    accepted, whereas a PERIPHERAL unverified fragment (e.g. a decomposition
+    artifact or an incidental bio detail) may be tolerated.
+
+    Fail-closed: when the query yields no salient anchors (degenerate/empty
+    query) criticality cannot be established, so every claim is treated as CORE.
+    Absence of a signal is never read as "safe to accept".
+    """
+    if not query_terms:
+        return True
+    return bool(_salient_terms(claim_text) & query_terms)
+
+
+def _claim_leaves_core_gap(
+    claim_text: str,
+    query_terms: set[str],
+    grounded_anchors: set[str],
+) -> bool:
+    """Decide whether an UNVERIFIED / CONFLICTED claim leaves a CORE grounding gap.
+
+    A claim only leaves a core gap when it touches a query anchor that is *not
+    already grounded by a verified claim*. This is stricter than bare overlap:
+    an unverified fragment that merely re-mentions the query subject already
+    proven elsewhere (e.g. "designed by Gustave Eiffel, completed 1889" when the
+    Eiffel Tower's location is verified) adds incidental detail the user did not
+    ask about — peripheral, not a core gap.
+
+    Fail-closed exactly like `_claim_is_core`:
+      * empty/degenerate query  -> every ungrounded claim is a core gap (True);
+      * no verified claims       -> `grounded_anchors` is empty, so any claim
+        sharing a query anchor is a core gap (all-unverified answers still
+        ABSTAIN);
+      * a claim sharing NO query anchor is always peripheral (False).
+    Absence of a grounding signal is never read as "safe to accept".
+    """
+    if not query_terms:
+        return True
+    shared = _salient_terms(claim_text) & query_terms
+    if not shared:
+        return False
+    # CORE gap only if the claim introduces a query anchor no verified claim covers.
+    return bool(shared - grounded_anchors)
+
+
 def _verdict_value(value: Any) -> str:
     """Robustly extract a verdict as a lowercase value string.
 
@@ -109,6 +228,7 @@ class JudgeAgent:
                 explanation="Grounding evidence was absent or failed schema validation. Unsafe to proceed.",
                 confidence=0.0,
                 correction_request=None,
+                decision_basis=DecisionBasis.INVALID_VERIFIER_INPUT,
                 status=ExecutionStatus.FAILED
             )
 
@@ -125,6 +245,7 @@ class JudgeAgent:
                 explanation="Grounding investigation failed to execute. Unsafe to proceed.",
                 confidence=0.0,
                 correction_request=None,
+                decision_basis=DecisionBasis.VERIFIER_FAILED,
                 status=ExecutionStatus.FAILED
             )
 
@@ -183,10 +304,28 @@ class JudgeAgent:
         has_conflicted = len(conflicted_claims) > 0
         total_claims = len(claim_reports)
 
+        # Criticality gate (deterministic, query-aware). A CORE claim is one the
+        # user actually asked about; a PERIPHERAL claim is incidental detail. The
+        # ACCEPT path may tolerate a PERIPHERAL unverified fragment but must never
+        # accept while a CORE claim is unverified or conflicted. This — not a claim
+        # count — is what separates "substantively grounded" from "ungrounded".
+        query_terms = _salient_terms(user_query)
+        # Query anchors already grounded by a VERIFIED claim. An unverified claim
+        # that only touches these anchors is peripheral elaboration, not a core
+        # gap — the thing the user asked about is already proven elsewhere.
+        grounded_anchors: set[str] = set()
+        for c in claims_to_preserve:
+            grounded_anchors |= (_salient_terms(c.claim_text) & query_terms)
+        core_unverified = [c for c in unverified_claims if _claim_leaves_core_gap(c.claim_text, query_terms, grounded_anchors)]
+        core_conflicted = [c for c in conflicted_claims if _claim_leaves_core_gap(c.claim_text, query_terms, grounded_anchors)]
+        core_preserved = [c for c in claims_to_preserve if _claim_is_core(c.claim_text, query_terms)]
+        has_core_grounding_gap = bool(core_unverified) or bool(core_conflicted)
+
         decision: JudgeDecision = JudgeDecision.ABSTAIN
         severity: SeverityLevel = SeverityLevel.LOW
         reason: str = ""
         explanation: str = ""
+        decision_basis: str = ""
         correction_req: Optional[CorrectionRequest] = None
 
         # Rule A: Contradicted Claims -> CORRECT (correct-first policy)
@@ -206,6 +345,7 @@ class JudgeAgent:
 
             decision = JudgeDecision.CORRECT
             severity = SeverityLevel.HIGH if (is_critical_domain and is_high_contradiction) else SeverityLevel.MEDIUM
+            decision_basis = DecisionBasis.CONTRADICTION_PRESENT
             reason = f"Identified {len(claims_to_correct)} contradicted claim(s) requiring evidence-grounded repair."
             explanation = (
                 f"Response contains fixable factual errors. Directing Corrector to repair flagged claims "
@@ -237,105 +377,114 @@ class JudgeAgent:
 
         # Rule B: Absent evidence (0 claims evaluated).
         #
-        # The Detector probability is a TRIAGE prior, not evidence, and this model
-        # emits a near-constant high value on contextless production requests. Auto-
-        # rejecting on it would block almost every zero-evidence answer on a false
-        # signal (the very "human review / reject again and again" failure we are
-        # removing). Fail SAFE: request another retrieval pass while the budget
-        # lasts, then ABSTAIN to human review. The Verifier — not the Detector — is
-        # the sole factual arbiter; absence of evidence is UNKNOWN, never confirmed.
+        # A high Detector probability is a TRIAGE PRIOR, never a factual verdict
+        # (spec: detector-risk != factual-verdict) and the absence of evidence is
+        # UNKNOWN, never falsehood (absence != proof of falsehood). So zero claims
+        # must NOT be rejected on the detector's say-so. With retries available we
+        # request another retrieval pass; otherwise we ABSTAIN (withhold), letting
+        # the detector prior only raise the reported severity.
         elif total_claims == 0:
             if retry_count < self.config.max_verification_retries:
                 decision = JudgeDecision.VERIFY_AGAIN
                 severity = SeverityLevel.MEDIUM
+                decision_basis = DecisionBasis.NO_EVIDENCE_RETRY
                 reason = "No verification claims/evidence provided. Requesting retrieval pass."
                 explanation = "Verifier produced an empty evidence set. Retrying verification."
             else:
                 decision = JudgeDecision.ABSTAIN
                 severity = SeverityLevel.HIGH
+                decision_basis = DecisionBasis.NO_EVIDENCE_ABSTAIN
                 reason = f"Insufficient grounding evidence in {policy.domain_name} domain."
                 explanation = (
-                    "Grounding evidence was absent and retries were exhausted. Withheld "
-                    "for human review; absence of evidence is not a confirmed error."
+                    "Grounding evidence was absent and retries exhausted. "
+                    + (
+                        f"Detector risk is elevated ({det_prob:.2f}), but detector risk "
+                        f"is a triage prior, not proof of falsehood, so the response is "
+                        f"withheld (ABSTAIN) rather than rejected."
+                        if det_prob >= 0.70
+                        else "Withheld pending grounding rather than accepted."
+                    )
                 )
 
         # Rule C: All evaluated claims verified -> ACCEPT
         elif not has_contradictions and has_preservations and not has_unverified and not has_conflicted:
             decision = JudgeDecision.ACCEPT
             severity = SeverityLevel.LOW
+            decision_basis = DecisionBasis.ALL_CLAIMS_VERIFIED
             reason = "All claims verified against authoritative ground-truth evidence."
             explanation = f"Response is fully grounded in {policy.domain_name} sources with overall confidence {normalized_verifier.overall_confidence:.2f}."
 
-        # Rule C2: Verified-dominant with only MINOR unverified detail -> ACCEPT.
+        # Rule C2: Verified core with only PERIPHERAL unverified detail -> ACCEPT.
         #
-        # Atomic-claim decomposition is noisy: a correct answer is routinely split
-        # into several sub-claims where one is malformed or ungroundable (e.g. a
-        # dangling fragment from the dependency parse). The old tree forced such an
-        # answer through VERIFY_AGAIN on every pass, and because decomposition is
-        # deterministic the same fragment stayed unverified — burning the entire
-        # retry budget on passes whose outcome was predetermined, only to ACCEPT at
-        # the end anyway (relaxed branch below). When there are NO contradictions,
-        # NO genuine conflicts, at least one verified claim, and the verified claims
-        # dominate the unverified remainder, a MODERATE/RELAXED domain accepts now
-        # instead of thrashing. Conflicts and STRICT/VERY_STRICT domains still fall
-        # through to the conservative retry/abstain path.
+        # This replaces the former count-majority rule (verified >= unverified),
+        # which could ACCEPT an answer whose CORE claim was unverified merely
+        # because incidental sub-claims outnumbered it. The corrected model is
+        # criticality-driven: ACCEPT only when
+        #   * there are no contradictions,
+        #   * NO CORE claim is unverified and NO CORE claim is conflicted
+        #     (peripheral unverified detail — decomposition noise or an incidental
+        #     fact the user did not ask about — may be tolerated),
+        #   * at least one CORE claim is verified (the answer actually grounds what
+        #     was asked), and
+        #   * the domain is MODERATE/RELAXED (STRICT/VERY_STRICT never tolerate any
+        #     grounding gap and fall through to the conservative path).
+        # This eliminates the entire false-ACCEPT class, not just one example.
         elif (
             not has_contradictions
-            and not has_conflicted
-            and has_preservations
+            and not has_core_grounding_gap
+            and core_preserved
             and has_unverified
             and policy.strictness_level in ("MODERATE", "RELAXED")
-            and len(claims_to_preserve) >= len(unverified_claims)
         ):
             decision = JudgeDecision.ACCEPT
             severity = SeverityLevel.LOW
+            decision_basis = DecisionBasis.PERIPHERAL_UNVERIFIED_TOLERATED
             reason = (
-                f"Verified claims dominate ({len(claims_to_preserve)} verified vs "
-                f"{len(unverified_claims)} unverified) with no contradictions; minor "
-                f"unverified detail tolerated under {policy.domain_name} policy."
+                f"All core claims verified; {len(unverified_claims)} peripheral "
+                f"unverified detail(s) tolerated under {policy.domain_name} policy."
             )
             explanation = (
-                f"{len(claims_to_preserve)} of {total_claims} claim(s) are grounded and "
-                f"none are contradicted or conflicted. The unverified remainder is minor "
-                f"(likely a decomposition artifact) and does not warrant blocking a "
-                f"substantively grounded response in a {policy.strictness_level.lower()} domain."
+                f"Every claim responsive to the query is grounded ({len(core_preserved)} "
+                f"core verified) with no contradictions or conflicts. The unverified "
+                f"remainder is peripheral to the question and does not warrant blocking "
+                f"a substantively grounded response in a {policy.strictness_level.lower()} domain."
             )
 
-        # Rule D: Unverified or Conflicted claims (Task 6, 7 & 9)
+        # Rule D: Unverified or Conflicted claims remain (including any CORE gap).
         elif has_unverified or has_conflicted:
             if retry_count < self.config.max_verification_retries:
                 decision = JudgeDecision.VERIFY_AGAIN
                 severity = SeverityLevel.MEDIUM
+                decision_basis = (
+                    DecisionBasis.CORE_UNVERIFIED_RETRY if core_unverified
+                    else DecisionBasis.CONFLICTED_RETRY
+                )
                 reason = f"Unverified or conflicted claims present. Triggering verification retry pass {retry_count + 1}."
                 explanation = f"Evidence was insufficient or conflicted for {len(unverified_claims) + len(conflicted_claims)} claim(s). Requesting expanded retrieval."
             elif policy.strictness_level in ["VERY_STRICT", "STRICT"]:
                 decision = JudgeDecision.ABSTAIN
                 severity = SeverityLevel.HIGH
+                decision_basis = DecisionBasis.STRICT_GROUNDING_GAP_ABSTAIN
                 reason = f"Insufficient grounding evidence under strict {policy.domain_name} policy."
                 explanation = "Verification retries exhausted without sufficient authoritative grounding."
             else:
-                # Relaxed / moderate domain, retries exhausted, NO contradictions —
-                # only an unverified (no-evidence) remainder. Absence of evidence is
-                # UNKNOWN, never a confirmed error (spec §49-50), so we do NOT reject.
-                # In a non-safety-critical domain, escalating every ungroundable
-                # remainder to a human is precisely the "human review again and again"
-                # failure this pipeline must avoid; the strict/very-strict branch above
-                # already withholds where the stakes justify it. Here we accept the
-                # verified-anchored answer as the domain-aware terminal decision. This
-                # branch is only reached AFTER the retry budget is spent and after
-                # Rule C2 has handled the verified-dominant case.
-                decision = JudgeDecision.ACCEPT
-                severity = SeverityLevel.LOW
+                # FAIL-CLOSED: absence of a contradiction is NOT evidence of
+                # correctness. A CORE claim remains unverified after the retry
+                # budget is exhausted (Rule C2 already released verified-core
+                # answers with only peripheral gaps), so we must NOT silently
+                # deliver ungrounded content. Withhold for human review.
+                decision = JudgeDecision.ABSTAIN
+                severity = SeverityLevel.MEDIUM
+                decision_basis = DecisionBasis.CORE_UNVERIFIED_ABSTAIN
                 reason = (
-                    f"Unverified remainder accepted under relaxed {policy.domain_name} "
-                    f"policy after retries were exhausted; no contradictions present."
+                    f"Core claim(s) could not be grounded after retries were "
+                    f"exhausted; withheld for human review rather than accepted."
                 )
                 explanation = (
-                    f"{len(unverified_claims)} claim(s) remain unverified (no evidence "
-                    f"retrieved) with zero contradictions after the retry budget was "
-                    f"exhausted. Under {policy.strictness_level.lower()} domain policy an "
-                    f"ungroundable remainder is tolerated rather than escalated, since "
-                    f"absence of evidence is not a confirmed error."
+                    f"{len(core_unverified) or len(unverified_claims)} core claim(s) remain "
+                    f"unverified with no supporting evidence under {policy.domain_name} "
+                    f"policy. Absence of contradicting evidence is not confirmation, so "
+                    f"the response is not auto-accepted."
                 )
 
         # Detector probability is a triage prior, not evidence. Once retrieval and
@@ -345,6 +494,25 @@ class JudgeAgent:
         # emitting a misleading 0.00 on an otherwise-confident ACCEPT.
         confidence = self._confidence_from_verifier(normalized_verifier)
 
+        # Observability: a decision that RELEASES content (ACCEPT) while any core
+        # grounding gap slipped through would be a false-accept — surface it as a
+        # distinct, greppable signal. By construction the tree cannot ACCEPT with a
+        # core gap; this guard makes a regression loud instead of silent.
+        decision_value = getattr(decision, "value", decision)
+        if decision_value == JudgeDecision.ACCEPT.value and has_core_grounding_gap:
+            logger.error(
+                "false_accept_suspect: ACCEPT emitted with core grounding gap "
+                "(core_unverified=%d core_conflicted=%d basis=%s)",
+                len(core_unverified), len(core_conflicted), decision_basis,
+            )
+        logger.info(
+            "Judge decision=%s basis=%s (verified=%d unverified=%d[core=%d] "
+            "conflicted=%d[core=%d] contradicted=%d)",
+            decision_value, decision_basis, len(claims_to_preserve),
+            len(unverified_claims), len(core_unverified), len(conflicted_claims),
+            len(core_conflicted), len(claims_to_correct),
+        )
+
         return JudgeResult(
             decision=decision,
             severity=severity,
@@ -352,6 +520,7 @@ class JudgeAgent:
             explanation=explanation,
             confidence=confidence,
             correction_request=correction_req,
+            decision_basis=decision_basis,
             status=ExecutionStatus.COMPLETED
         )
 
@@ -468,8 +637,12 @@ class JudgeAgent:
                 status=ExecutionStatus.FAILED,
             )
 
-        # ---- No remaining contradiction -> ACCEPT (normal success path) -------
-        if rem_count == 0:
+        # ---- Re-verification cleared the gate -> ACCEPT (success path) --------
+        # The gate requires BOTH conditions: the re-verification explicitly PASSED
+        # and there are zero remaining contradictions. A malformed payload that
+        # reports remaining==0 while passed is False must NOT be swept into ACCEPT
+        # (absence of a counted contradiction is not confirmation of success).
+        if passed and rem_count == 0:
             return JudgeResult(
                 decision=JudgeDecision.ACCEPT,
                 severity=SeverityLevel.LOW,
@@ -481,7 +654,8 @@ class JudgeAgent:
                 ),
                 confidence=confidence,
                 correction_request=None,
-                status=ExecutionStatus.COMPLETED,
+                decision_basis=DecisionBasis.REVERIFICATION_PASSED,
+                status=ExecutionStatus.COMPLETED
             )
 
         # ---- Contradiction persists: repair again if budget remains -----------
@@ -503,6 +677,7 @@ class JudgeAgent:
                     ),
                     confidence=confidence,
                     correction_request=corr_req,
+                    decision_basis=DecisionBasis.REVERIFICATION_FAILED_RETRY,
                     status=ExecutionStatus.COMPLETED,
                 )
 
@@ -520,6 +695,7 @@ class JudgeAgent:
             ),
             confidence=confidence,
             correction_request=None,
+            decision_basis=DecisionBasis.REVERIFICATION_FAILED_REJECT,
             status=ExecutionStatus.COMPLETED,
         )
 
