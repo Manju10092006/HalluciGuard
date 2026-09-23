@@ -38,9 +38,12 @@ class RoutedService(BaseLLMService):
         # provider name -> list of httpx.Response | Exception, consumed in order
         self._queues = {k: list(v) for k, v in queues.items()}
         self.calls: dict[str, int] = {k: 0 for k in queues}
+        # provider name -> list of payloads actually sent (for assertions)
+        self.payloads: dict[str, list] = {}
 
     async def _post_chat_completions_to(self, spec, payload):
         self.calls[spec.name] = self.calls.get(spec.name, 0) + 1
+        self.payloads.setdefault(spec.name, []).append(dict(payload))
         queue = self._queues.get(spec.name) or []
         if not queue:
             raise AssertionError(f"unexpected extra call to provider {spec.name}")
@@ -172,3 +175,48 @@ async def test_missing_key_provider_is_skipped(monkeypatch):
     assert result.status == "success"
     assert result.provider_used == "gemini"
     assert svc.calls["groq"] == 0  # skipped, no network
+
+
+@pytest.mark.asyncio
+async def test_openrouter_cap_does_not_throttle_groq(all_keys, monkeypatch):
+    """OPENROUTER_MAX_TOKENS must scope to OpenRouter only, never Groq/Gemini."""
+    # A tiny OpenRouter credit cap that previously leaked onto every provider.
+    monkeypatch.setenv("OPENROUTER_MAX_TOKENS", "120")
+    monkeypatch.delenv("GROQ_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("GEMINI_MAX_TOKENS", raising=False)
+    # Force groq -> gemini -> openrouter so every provider's payload is captured.
+    svc = RoutedService(
+        {
+            "groq": [_status(500)],
+            "gemini": [_status(500)],
+            "openrouter": [_ok("qwen/qwen3-14b")],
+        }
+    )
+    result = await svc.generate("hi")  # no explicit per-call max_tokens
+    assert result.status == "success"
+    # Groq/Gemini keep their sane default budget; the 120 cap does not reach them.
+    assert svc.payloads["groq"][0]["max_tokens"] == 1024
+    assert svc.payloads["gemini"][0]["max_tokens"] == 1024
+    # Only OpenRouter carries the credit cap.
+    assert svc.payloads["openrouter"][0]["max_tokens"] == 120
+
+
+@pytest.mark.asyncio
+async def test_explicit_max_tokens_overrides_every_provider(all_keys, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_MAX_TOKENS", "120")
+    svc = RoutedService({"groq": [_ok("llama")], "gemini": [], "openrouter": []})
+    result = await svc.generate("hi", max_tokens=42)
+    assert result.status == "success"
+    assert svc.payloads["groq"][0]["max_tokens"] == 42
+
+
+@pytest.mark.asyncio
+async def test_openrouter_uncapped_when_env_unset(all_keys, monkeypatch):
+    """With no OPENROUTER_MAX_TOKENS, OpenRouter sends no max_tokens field."""
+    monkeypatch.delenv("OPENROUTER_MAX_TOKENS", raising=False)
+    svc = RoutedService(
+        {"groq": [_status(500)], "gemini": [_status(500)], "openrouter": [_ok("qwen/qwen3-14b")]}
+    )
+    result = await svc.generate("hi")
+    assert result.status == "success"
+    assert "max_tokens" not in svc.payloads["openrouter"][0]

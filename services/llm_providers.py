@@ -38,6 +38,15 @@ DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-14b"
 
+# Default output-token budget for the credit-unconstrained hosted providers.
+# Groq's default (openai/gpt-oss-*) is a *reasoning* model that spends tokens on
+# hidden reasoning before emitting visible content, so a tiny budget yields empty
+# content. OpenRouter is intentionally left uncapped-by-default here and instead
+# reads OPENROUTER_MAX_TOKENS, which exists to protect a credit-limited account;
+# that cap must never leak onto Groq/Gemini.
+DEFAULT_GROQ_MAX_TOKENS = 1024
+DEFAULT_GEMINI_MAX_TOKENS = 1024
+
 
 class ProviderConfigError(ValueError):
     """Raised when the configured provider order contains an unknown provider."""
@@ -60,6 +69,10 @@ class ProviderSpec:
     api_key: str | None
     model: str
     extra_headers: Mapping[str, str] = field(default_factory=dict)
+    # Per-provider output-token cap. ``None`` means "send no max_tokens" (let the
+    # provider use its own default). Resolved per provider so a credit cap for
+    # one provider never throttles another.
+    max_tokens: int | None = None
 
     @property
     def has_key(self) -> bool:
@@ -73,12 +86,24 @@ class ProviderSpec:
             "model": self.model,
             "key_configured": self.has_key,
             "base_url": self.base_url,
+            "max_tokens": self.max_tokens,
         }
 
 
 def _env(name: str) -> str | None:
     val = os.getenv(name)
     return val.strip() if val and val.strip() else None
+
+
+def _env_int(name: str) -> int | None:
+    """Parse an integer env var, returning ``None`` when unset/empty/invalid."""
+    val = _env(name)
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except ValueError:
+        return None
 
 
 def resolve_provider_order(raw: str | None = None) -> list[str]:
@@ -154,6 +179,7 @@ def build_provider_specs(
             base_url=_env("GROQ_BASE_URL") or "https://api.groq.com/openai/v1",
             api_key=_env("GROQ_API_KEY"),
             model=overrides.get(GROQ) or _env("GROQ_MODEL") or DEFAULT_GROQ_MODEL,
+            max_tokens=_env_int("GROQ_MAX_TOKENS") or DEFAULT_GROQ_MAX_TOKENS,
         ),
         GEMINI: ProviderSpec(
             name=GEMINI,
@@ -163,6 +189,7 @@ def build_provider_specs(
             ),
             api_key=_env("GEMINI_API_KEY"),
             model=overrides.get(GEMINI) or _env("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL,
+            max_tokens=_env_int("GEMINI_MAX_TOKENS") or DEFAULT_GEMINI_MAX_TOKENS,
         ),
         OPENROUTER: ProviderSpec(
             name=OPENROUTER,
@@ -175,6 +202,9 @@ def build_provider_specs(
                 or DEFAULT_OPENROUTER_MODEL
             ),
             extra_headers=openrouter_headers,
+            # OpenRouter is the only provider the OPENROUTER_MAX_TOKENS cap
+            # applies to; unset -> None (no cap sent).
+            max_tokens=_env_int("OPENROUTER_MAX_TOKENS"),
         ),
     }
     return specs

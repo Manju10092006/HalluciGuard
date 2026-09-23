@@ -344,6 +344,16 @@ class JudgeResult(BaseModel):
         default=None,
         description="Targeted correction payload if decision == CORRECT, else None.",
     )
+    decision_basis: str = Field(
+        default="",
+        description=(
+            "Machine-readable reason code identifying the precedence rule that "
+            "produced this decision (e.g. CONTRADICTION_PRESENT, "
+            "ALL_CLAIMS_VERIFIED, PERIPHERAL_UNVERIFIED_TOLERATED, "
+            "CORE_UNVERIFIED_RETRY, CORE_UNVERIFIED_ABSTAIN). Stable for metrics "
+            "and audit; never a factual claim about the response."
+        ),
+    )
     status: ExecutionStatus = Field(
         default=ExecutionStatus.COMPLETED,
         description="Status of the judge agent evaluation.",

@@ -54,23 +54,119 @@ def _vr(domain, claims, confidence=0.9):
 
 
 def test_verified_dominant_with_minor_unverified_accepts_immediately():
-    """The main-defect scenario: 2 verified + 1 noisy unverified, general domain.
-    Must ACCEPT on the FIRST pass (retry_count=0), not burn VERIFY_AGAIN retries."""
+    """Verified CORE claims + one PERIPHERAL unverified detail, general domain.
+    The unverified claim is incidental to the query (an aside about a birth year
+    when the user asked who founded a company), so it must be tolerated and the
+    answer ACCEPTed on the FIRST pass, not thrash through VERIFY_AGAIN.
+
+    Criticality — not a claim count — is what makes this safe: the claims that
+    actually answer the query are grounded.
+    """
     vr = _vr(
         "General Knowledge",
         [
-            _cr("c1", VerdictLabel.VERIFIED, 0.95, 0.02, 0.95),
-            _cr("c2", VerdictLabel.VERIFIED, 0.92, 0.03, 0.92),
-            _cr("c3-garbage", VerdictLabel.UNVERIFIED, 0.30, 0.05, 0.30),
+            _cr("Oracle was founded in 1977", VerdictLabel.VERIFIED, 0.95, 0.02, 0.95),
+            _cr("Oracle was founded by Larry Ellison", VerdictLabel.VERIFIED, 0.92, 0.03, 0.92),
+            # Peripheral aside: the query never asked about the ocean's depth.
+            _cr("The Pacific ocean is very deep", VerdictLabel.UNVERIFIED, 0.30, 0.05, 0.30),
         ],
     )
     r = JudgeAgent().evaluate(
-        verifier_result=vr, user_query="q", original_response="resp",
+        verifier_result=vr,
+        user_query="Who founded Oracle and in what year?",
+        original_response="resp",
         domain="General Knowledge", retry_count=0,
     )
     assert _str(r.decision) == "ACCEPT", f"got {_str(r.decision)} ({r.reason})"
+    assert r.decision_basis == "PERIPHERAL_UNVERIFIED_TOLERATED_ACCEPT"
     # confidence still tracks the verifier, not discounted
     assert abs(r.confidence - 0.9) < 1e-4
+
+
+def test_core_unverified_is_not_accepted():
+    """The Lamborghini class: the claim that ANSWERS the query is unverified.
+    Even though a peripheral verified claim is present, a CORE unverified claim
+    must never be swept into an ACCEPT — route to VERIFY_AGAIN (then ABSTAIN)."""
+    vr = _vr(
+        "General Knowledge",
+        [
+            # Core to the query but ungrounded -> the whole answer is suspect.
+            _cr("Lamborghini was founded in 1948", VerdictLabel.UNVERIFIED, 0.30, 0.05, 0.30),
+            # A peripheral verified aside cannot rescue it.
+            _cr("Italy is in Europe", VerdictLabel.VERIFIED, 0.95, 0.02, 0.95),
+        ],
+    )
+    r = JudgeAgent().evaluate(
+        verifier_result=vr,
+        user_query="When was Lamborghini founded?",
+        original_response="resp",
+        domain="General Knowledge", retry_count=0,
+    )
+    assert _str(r.decision) != "ACCEPT", f"got {_str(r.decision)} ({r.reason})"
+    assert _str(r.decision) == "VERIFY_AGAIN"
+    assert r.decision_basis == "CORE_UNVERIFIED_RETRY"
+
+
+def test_lamborghini_all_unverified_exhausted_abstains_never_accepts():
+    """Regression fixture: Lamborghini answer, ALL claims unverified, retries
+    exhausted. Must ABSTAIN — never ACCEPT on absence of contradiction."""
+    vr = _vr(
+        "General Knowledge",
+        [
+            _cr("Lamborghini was founded in 1948", VerdictLabel.UNVERIFIED, 0.3, 0.05, 0.3),
+            _cr("Lamborghini was founded by Ferruccio", VerdictLabel.UNVERIFIED, 0.3, 0.05, 0.3),
+        ],
+    )
+    r = JudgeAgent().evaluate(
+        verifier_result=vr,
+        user_query="Who founded Lamborghini and when?",
+        original_response="resp",
+        domain="General Knowledge", retry_count=99,
+    )
+    assert _str(r.decision) == "ABSTAIN", f"got {_str(r.decision)} ({r.reason})"
+    assert r.decision_basis == "CORE_UNVERIFIED_ABSTAIN"
+
+
+def test_empty_verifier_abstains_never_rejects_on_detector():
+    """Zero-claim verifier + high detector prob, retries exhausted. Detector risk
+    is a triage prior, not a factual verdict, so the outcome is ABSTAIN — never
+    REJECT."""
+    vr = _vr("General Knowledge", [])
+    r = JudgeAgent().evaluate(
+        verifier_result=vr,
+        detector_result={"hallucination_probability": 0.95, "confidence_score": 0.9},
+        user_query="q", original_response="resp",
+        domain="General Knowledge", retry_count=99,
+    )
+    assert _str(r.decision) == "ABSTAIN", f"got {_str(r.decision)} ({r.reason})"
+    assert _str(r.decision) != "REJECT"
+    assert r.decision_basis == "NO_EVIDENCE_ABSTAIN"
+
+
+def test_reverification_failed_with_remaining_contradictions_never_accepts():
+    """Vietnam class: reverification passed=False (or remaining>0) must NOT ACCEPT
+    even if remaining count is read as 0 in a malformed payload — the gate needs
+    BOTH passed AND remaining==0."""
+    r = JudgeAgent().evaluate(
+        verifier_result=_vr("General Knowledge", []),
+        reverification_result={"passed": False, "remaining_contradictions": 0},
+        user_query="q", original_response="resp",
+        domain="General Knowledge", retry_count=99,
+    )
+    assert _str(r.decision) != "ACCEPT", f"got {_str(r.decision)} ({r.reason})"
+    assert _str(r.decision) == "REJECT"
+
+
+def test_reverification_passed_accepts():
+    """The passing gate: passed AND remaining==0 -> ACCEPT with the stable basis."""
+    r = JudgeAgent().evaluate(
+        verifier_result=_vr("General Knowledge", []),
+        reverification_result={"passed": True, "remaining_contradictions": 0},
+        user_query="q", original_response="resp",
+        domain="General Knowledge", retry_count=0,
+    )
+    assert _str(r.decision) == "ACCEPT"
+    assert r.decision_basis == "REVERIFICATION_PASSED_ACCEPT"
 
 
 def test_unverified_majority_is_not_accepted():
@@ -166,3 +262,25 @@ def test_verdict_value_helper_handles_enum_and_string():
     assert _verdict_value(VerdictLabel.CONTRADICTED) == "contradicted"
     assert _verdict_value("contradicted") == "contradicted"
     assert _verdict_value("VERIFIED") == "verified"
+
+
+def test_russia_count_tie_does_not_auto_accept():
+    """Russia class: verified count == unverified count (a tie). The former
+    count-majority rule (verified >= unverified) would ACCEPT on the tie. The
+    corrected criticality model must NOT — the unverified claim is core to the
+    query, so a real grounding gap remains."""
+    vr = _vr(
+        "General Knowledge",
+        [
+            _cr("Russia is the largest country by area", VerdictLabel.VERIFIED, 0.95, 0.02, 0.95),
+            _cr("Russia has a population of 900 million", VerdictLabel.UNVERIFIED, 0.30, 0.05, 0.30),
+        ],
+    )
+    r = JudgeAgent().evaluate(
+        verifier_result=vr,
+        user_query="What is Russia's area and population?",
+        original_response="resp",
+        domain="General Knowledge", retry_count=0,
+    )
+    assert _str(r.decision) != "ACCEPT", f"got {_str(r.decision)} ({r.reason})"
+    assert _str(r.decision) == "VERIFY_AGAIN"

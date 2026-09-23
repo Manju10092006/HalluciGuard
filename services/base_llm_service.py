@@ -468,7 +468,10 @@ class BaseLLMService:
             *list(conversation_history or []),
             {"role": "user", "content": user_query},
         ]
-        token_limit = max_tokens if max_tokens is not None else self.config.max_tokens
+        # NOTE: do not collapse to a single global token limit here. An explicit
+        # per-call ``max_tokens`` wins everywhere; otherwise each provider uses
+        # its own ``spec.max_tokens`` (resolved in build_provider_specs), so the
+        # OpenRouter credit cap never throttles Groq/Gemini.
         attempts_trail: list[dict[str, Any]] = []
         any_key = False
         last_code = GenerationErrorCode.MISSING_API_KEY
@@ -485,7 +488,7 @@ class BaseLLMService:
             any_key = True
             logger.info("LLM generation started provider=%s model=%s", name, spec.model)
             outcome = await self._run_provider(
-                spec, messages, temp, token_limit, user_query, request_id, mode, started
+                spec, messages, temp, max_tokens, user_query, request_id, mode, started
             )
             if isinstance(outcome, GenerationResult):
                 attempts_trail.append(
@@ -533,7 +536,7 @@ class BaseLLMService:
         spec: ProviderSpec,
         messages: list[dict[str, str]],
         temp: float,
-        token_limit: int | None,
+        max_tokens: int | None,
         user_query: str,
         request_id: str,
         mode: str,
@@ -544,7 +547,13 @@ class BaseLLMService:
         Returns a successful :class:`GenerationResult`, or a ``(code, message)``
         tuple describing why this provider was exhausted so the caller can fail
         over to the next provider.
+
+        Token budget precedence: an explicit per-call ``max_tokens`` overrides
+        everything; otherwise the provider's own ``spec.max_tokens`` is used
+        (``None`` -> no ``max_tokens`` field sent). This keeps the credit-driven
+        OpenRouter cap from starving reasoning models on Groq/Gemini.
         """
+        token_limit = max_tokens if max_tokens is not None else spec.max_tokens
         payload: dict[str, Any] = {
             "model": spec.model,
             "temperature": temp,
