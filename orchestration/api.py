@@ -96,6 +96,34 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def _log_llm_provider_config() -> None:
+    """Log the multi-provider LLM router config at startup (secret-free).
+
+    Emits the failover order and, per provider, the model, base URL, and whether
+    a key is configured. API keys themselves are never read into the log.
+    """
+    try:
+        status = BaseLLMService().provider_status()
+    except Exception as exc:  # pragma: no cover - defensive; never block startup
+        logger.warning("LLM provider config unavailable at startup: %s", exc)
+        return
+    if status.get("mode") != "multi":
+        logger.info("LLM router in legacy single-provider mode.")
+        return
+    order = ",".join(status.get("order", []))
+    logger.info("LLM router ready. Failover order: %s", order)
+    for name in status.get("order", []):
+        p = status.get("providers", {}).get(name, {})
+        logger.info(
+            "  provider=%s model=%s key_configured=%s base_url=%s",
+            name,
+            p.get("model"),
+            p.get("key_configured"),
+            p.get("base_url"),
+        )
+
+
 def _get_auth_user(authorization: Optional[str] = Header(None)) -> Optional[Dict[str, Any]]:
     """
     Extract and validate the authenticated user from the Authorization header.
