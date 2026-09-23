@@ -44,4 +44,7 @@ prometheus-client>=0.17.0
 # Claim decomposition. Runtime degrades explicitly to regex decomposition if
 # the language model cannot be loaded.
 spacy>=3.8.0
-en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whltavily-python>=0.3.0
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+# Web evidence retrieval
+tavily-python>=0.3.0
