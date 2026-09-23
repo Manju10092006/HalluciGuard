@@ -1,0 +1,38 @@
+﻿model:
+  name: "deberta-v3-base"
+  checkpoint_path: "halluciguard_detector/data/checkpoints/deberta-v3-base"
+  max_length: 384
+  batch_size: 16
+
+calibration:
+  # Method is SELECTED on dev only (lowest ECE). "auto" runs select_best_calibrator.
+  method: "auto"          # one of: auto | temperature | platt | isotonic | none
+  version: "cal-001"
+  fitted_on: "none"       # set to the dev split name once fitted
+  n_bins: 10
+
+thresholds:
+  # Selected on DEV calibrated probabilities only, then frozen (spec §21-23).
+  t_low: 0.25
+  t_high: 0.65
+  provisional: true
+  low_miss_target: 0.10       # among LOW_RISK claims, <=10% may actually be positive
+  low_coverage_min: 0.20      # LOW band should cover >=20% to be useful
+  high_precision_target: 0.60 # among HIGH_RISK claims, >=60% should be positive
+
+extraction:
+  max_claims: 40
+  min_claim_length: 10
+  timeout_s: 15
+
+routing:
+  always_verify: true
+
+llm_judge:
+  # Optional UNCERTAIN-band verification-risk re-rater. Disabled in v1.
+  enabled: false
+  provider: "openrouter"
+  model: "qwen/qwen3-14b"
+  temperature: 0.0
+  timeout_seconds: 20.0
+  max_calls_per_request: 5

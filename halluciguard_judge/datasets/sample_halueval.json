@@ -1,0 +1,122 @@
+﻿[
+  {
+    "question": "Who created the Java programming language?",
+    "answer": "Java was created by Dennis Ritchie at Bell Labs in 1972.",
+    "hallucination": "yes",
+    "note": "Dennis Ritchie created C, not Java. Java was created by James Gosling."
+  },
+  {
+    "question": "Who created the Java programming language?",
+    "answer": "Java was created by James Gosling and his team at Sun Microsystems in 1995.",
+    "hallucination": "no",
+    "note": "Correct."
+  },
+  {
+    "question": "What is the capital of France?",
+    "answer": "The capital of France is Berlin.",
+    "hallucination": "yes",
+    "note": "Berlin is the capital of Germany, not France."
+  },
+  {
+    "question": "What is the capital of France?",
+    "answer": "The capital of France is Paris.",
+    "hallucination": "no",
+    "note": "Correct."
+  },
+  {
+    "question": "Who invented the telephone?",
+    "answer": "The telephone was invented by Thomas Edison in 1876.",
+    "hallucination": "yes",
+    "note": "Alexander Graham Bell is credited with inventing the telephone."
+  },
+  {
+    "question": "Who invented the telephone?",
+    "answer": "The telephone was invented by Alexander Graham Bell, who received the first patent in 1876.",
+    "hallucination": "no",
+    "note": "Correct."
+  },
+  {
+    "question": "What year did World War II end?",
+    "answer": "World War II ended in 1942 with the fall of Berlin.",
+    "hallucination": "yes",
+    "note": "WWII ended in 1945, not 1942."
+  },
+  {
+    "question": "What year did World War II end?",
+    "answer": "World War II ended in 1945 when Germany and Japan surrendered.",
+    "hallucination": "no",
+    "note": "Correct."
+  },
+  {
+    "question": "Who wrote the theory of relativity?",
+    "answer": "The theory of relativity was developed by Isaac Newton in 1915.",
+    "hallucination": "yes",
+    "note": "Einstein developed relativity. Newton is known for classical mechanics."
+  },
+  {
+    "question": "Who wrote the theory of relativity?",
+    "answer": "The theory of relativity was developed by Albert Einstein. He published the special theory in 1905 and the general theory in 1915.",
+    "hallucination": "no",
+    "note": "Correct."
+  },
+  {
+    "question": "What programming language is Python?",
+    "answer": "Python is a compiled, statically typed language designed primarily for systems programming.",
+    "hallucination": "yes",
+    "note": "Python is interpreted and dynamically typed, not compiled/statically typed."
+  },
+  {
+    "question": "What programming language is Python?",
+    "answer": "Python is an interpreted, dynamically typed, high-level programming language known for its readability.",
+    "hallucination": "no",
+    "note": "Correct."
+  },
+  {
+    "question": "Where is the Eiffel Tower located?",
+    "answer": "The Eiffel Tower is located in Rome, Italy, and was built in 1889.",
+    "hallucination": "yes",
+    "note": "The Eiffel Tower is in Paris, France."
+  },
+  {
+    "question": "Where is the Eiffel Tower located?",
+    "answer": "The Eiffel Tower is located in Paris, France. It was built in 1889 for the World's Fair.",
+    "hallucination": "no",
+    "note": "Correct."
+  },
+  {
+    "question": "What is the speed of light?",
+    "answer": "The speed of light in a vacuum is approximately 300,000 kilometers per second.",
+    "hallucination": "no",
+    "note": "Correct (299,792 km/s)."
+  },
+  {
+    "question": "What is the speed of light?",
+    "answer": "The speed of light is approximately 150,000 kilometers per second.",
+    "hallucination": "yes",
+    "note": "The actual speed is ~300,000 km/s."
+  },
+  {
+    "question": "Who founded Microsoft?",
+    "answer": "Microsoft was founded by Bill Gates and Paul Allen in 1975.",
+    "hallucination": "no",
+    "note": "Correct."
+  },
+  {
+    "question": "Who founded Microsoft?",
+    "answer": "Microsoft was founded by Steve Jobs and Bill Gates in 1976.",
+    "hallucination": "yes",
+    "note": "Steve Jobs founded Apple. Microsoft was founded by Gates and Paul Allen in 1975."
+  },
+  {
+    "question": "What is the largest planet in the solar system?",
+    "answer": "Saturn is the largest planet in the solar system.",
+    "hallucination": "yes",
+    "note": "Jupiter is the largest planet."
+  },
+  {
+    "question": "What is the largest planet in the solar system?",
+    "answer": "Jupiter is the largest planet in the solar system, with a mass more than twice that of all other planets combined.",
+    "hallucination": "no",
+    "note": "Correct."
+  }
+]

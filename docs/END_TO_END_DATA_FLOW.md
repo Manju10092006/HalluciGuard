@@ -61,7 +61,7 @@ Set these values in a local backend environment or local `.env` file. Do not com
 ```bash
 OPENROUTER_API_KEY=<server-side secret>
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_MODEL=qwen/qwen3-4b
+OPENROUTER_MODEL=qwen/qwen3-14b
 OPENROUTER_TEMPERATURE=0.7
 OPENROUTER_STRESS_TEMPERATURE=0.9
 OPENROUTER_TIMEOUT_SECONDS=30

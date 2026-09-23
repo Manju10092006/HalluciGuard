@@ -351,7 +351,7 @@ def build_document():
     meta_rows = [
         ["System Name", "HalluciGuard Enterprise Verifier & Risk Gating Framework"],
         ["Production Version", "v2.0.0-rc2 (Benchmark V1.7 Hardened)"],
-        ["Base Generation LLM", "OpenRouter / qwen/qwen3-4b (Candidate Generator)"],
+        ["Base Generation LLM", "OpenRouter / qwen/qwen3-14b (Candidate Generator)"],
         ["Detector Classifier", "Manjunath2000006/halluciguard-detector (Fine-Tuned HaluEval DistilBERT)"],
         ["Semantic Reranker", "BAAI/bge-reranker-large (Cross-Encoder Scoring ∈ [0.0, 1.0])"],
         ["NLI Engine", "cross-encoder/nli-deberta-v3-base (Premise-Hypothesis Entailment)"],
@@ -683,11 +683,11 @@ CERTIFICATION_MODE=false
 
 # LLM & Cloud APIs
 OPENROUTER_API_KEY=sk-or-v1-********************************
-OPENROUTER_MODEL=qwen/qwen3-4b
+OPENROUTER_MODEL=qwen/qwen3-14b
 TAVILY_API_KEY=tvly-********************************
 
 # n8n Retrieval Webhook V2
-N8N_WEBHOOK_URL=https://manjusogala.app.n8n.cloud/webhook/halluciguard-verify-v2
+N8N_WEBHOOK_URL=https://guru-siesta-excusable.ngrok-free.dev/webhook/halluciguard-verify-v2
 N8N_API_KEY=hg_live_********************************
 
 # Local Model Paths & Thresholds

@@ -197,7 +197,7 @@ class NLIEngine:
                 claim[:100],
             )
 
-            result = self.pipeline({"text": evidence, "text_pair": claim})
+            result = self.pipeline({"text": (evidence or "")[:1500], "text_pair": (claim or "")[:500]}, truncation=True, max_length=512)
             if result and isinstance(result[0], list):
                 result = result[0]
 
@@ -283,9 +283,14 @@ class NLIEngine:
             return [self.classify(claim, ev) for ev in evidences]
 
         try:
-            batch = [{"text": ev, "text_pair": claim} for ev in evidences]
+            # Truncate long evidence/claim pairs so DeBERTa's 512-token limit is
+            # not exceeded (long Tavily/Wikipedia passages would otherwise error).
+            batch = [
+                {"text": (ev or "")[:1500], "text_pair": (claim or "")[:500]}
+                for ev in evidences
+            ]
             _t0 = time.perf_counter()
-            raw_results = self.pipeline(batch)
+            raw_results = self.pipeline(batch, truncation=True, max_length=512)
             self.last_latency_ms = int((time.perf_counter() - _t0) * 1000)
             id2label = self._get_id2label()
 

@@ -13,7 +13,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-__all__ = ["CorrectorConfig"]
+__all__ = ["CorrectorConfig", "DEFAULT_CORRECTOR_OPENROUTER_MODEL"]
+
+# Cheap non-reasoning model for the OpenRouter-backed corrector path. Matches the
+# Base LLM's fallback model and the n8n "Analyze Claim" node, so the whole stack
+# stays on one credit-friendly model. Override with HG_CORRECTOR_OPENROUTER_MODEL.
+DEFAULT_CORRECTOR_OPENROUTER_MODEL: str = "qwen/qwen-2.5-7b-instruct"
 
 
 def _env_str(name: str, default: str) -> str:
@@ -97,6 +102,9 @@ class CorrectorConfig:
     allow_base_model_fallback: bool = False
     deterministic: bool = True
 
+    # OpenRouter model for the LLM-backed corrector path (env-tunable for credit control).
+    openrouter_model: str = DEFAULT_CORRECTOR_OPENROUTER_MODEL
+
     @classmethod
     def from_env(cls) -> "CorrectorConfig":
         """Build a config from ``HG_CORRECTOR_*`` environment overrides."""
@@ -143,4 +151,7 @@ class CorrectorConfig:
                 "HG_CORRECTOR_ALLOW_BASE_MODEL_FALLBACK", cls.allow_base_model_fallback
             ),
             deterministic=_env_bool("HG_CORRECTOR_DETERMINISTIC", cls.deterministic),
+            openrouter_model=_env_str(
+                "HG_CORRECTOR_OPENROUTER_MODEL", cls.openrouter_model
+            ),
         )

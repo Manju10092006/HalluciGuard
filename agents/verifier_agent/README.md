@@ -638,7 +638,7 @@ DEBUG=false
 CERTIFICATION_MODE=false
 
 # n8n Retrieval Webhook V2
-N8N_WEBHOOK_URL=https://manjusogala.app.n8n.cloud/webhook/halluciguard-verify-v2
+N8N_WEBHOOK_URL=https://guru-siesta-excusable.ngrok-free.dev/webhook/halluciguard-verify-v2
 N8N_API_KEY=your_n8n_webhook_key_here
 
 # Cloud APIs

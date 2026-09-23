@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import random
 import socket
@@ -128,8 +129,8 @@ class BaseLLMConfig:
     )
     model: str = field(
         default_factory=lambda: _env_str("HALLUCIGUARD_LLM_MODEL")
-        or _env_str("OPENROUTER_MODEL", "qwen/qwen3-4b")
-        or "qwen/qwen3-4b"
+        or _env_str("OPENROUTER_MODEL", "qwen/qwen3-14b")
+        or "qwen/qwen3-14b"
     )
     temperature: float = field(
         default_factory=lambda: _env_float("HALLUCIGUARD_LLM_TEMPERATURE", os.getenv("OPENROUTER_TEMPERATURE", "0.7"))
@@ -323,6 +324,11 @@ class BaseLLMService:
                 response = await self._post_chat_completions(payload)
                 if response.status_code >= 400:
                     if response.status_code == 404 and payload.get("model") != "qwen/qwen-2.5-7b-instruct":
+                        logging.getLogger("services.base_llm_service").warning(
+                            "OpenRouter model '%s' returned HTTP 404; falling back to "
+                            "'qwen/qwen-2.5-7b-instruct' and retrying.",
+                            payload.get("model"),
+                        )
                         payload["model"] = "qwen/qwen-2.5-7b-instruct"
                         continue
                     code = self._classify_http_status(

@@ -27,7 +27,7 @@ class ComponentCheckResult:
 def validate_openrouter_configuration() -> ComponentCheckResult:
     """Validate OpenRouter API key and model configuration."""
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    model = os.environ.get("OPENROUTER_MODEL", "qwen/qwen-2.5-7b-instruct")
+    model = os.environ.get("OPENROUTER_MODEL", "qwen/qwen3-14b")
     base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
     if not api_key:

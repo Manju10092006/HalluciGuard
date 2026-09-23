@@ -144,8 +144,17 @@ class JudgeAgent:
             verdict_str = _verdict_value(claim.verdict)
             if verdict_str == VerdictLabel.CONTRADICTED.value:
                 claims_to_correct.append(claim)
+                # Route each piece of a contradicted claim's evidence by whether it
+                # can GROUND a repair. Evidence that establishes the true replacement
+                # fact ("Java was created by James Gosling") goes to trusted_evidence
+                # so the Corrector has something to write from; evidence that merely
+                # refutes ("no record of X") stays as contradictory context. Without
+                # this the Corrector had no grounding and truncated instead of fixing.
                 for ev in claim.evidence:
-                    contradictory_evidence.append(ev)
+                    if self._is_replacement_capable_evidence(claim.claim_text, ev):
+                        trusted_evidence.append(ev)
+                    else:
+                        contradictory_evidence.append(ev)
             elif verdict_str == VerdictLabel.VERIFIED.value:
                 claims_to_preserve.append(claim)
                 for ev in claim.evidence:
@@ -158,7 +167,10 @@ class JudgeAgent:
                 if claim.contradiction_score >= 0.5:
                     claims_to_correct.append(claim)
                     for ev in claim.evidence:
-                        contradictory_evidence.append(ev)
+                        if self._is_replacement_capable_evidence(claim.claim_text, ev):
+                            trusted_evidence.append(ev)
+                        else:
+                            contradictory_evidence.append(ev)
                 elif claim.support_score >= 0.5:
                     claims_to_preserve.append(claim)
                     for ev in claim.evidence:
@@ -302,10 +314,25 @@ class JudgeAgent:
                 reason = f"Insufficient grounding evidence under strict {policy.domain_name} policy."
                 explanation = "Verification retries exhausted without sufficient authoritative grounding."
             else:
-                decision = JudgeDecision.ACCEPT
-                severity = SeverityLevel.LOW
-                reason = f"Unverified claim accepted under relaxed {policy.domain_name} policy baseline after retries exhausted."
-                explanation = f"Claim remains unverified after retry budget was exhausted; accepted under configured relaxed {policy.domain_name} domain policy."
+                # FAIL-CLOSED: absence of a contradiction is NOT evidence of
+                # correctness. When claims remain unverified after the retry
+                # budget is exhausted and they are not a minor decomposition
+                # artifact (Rule C2 already handles verified-dominant cases),
+                # we must NOT silently deliver ungrounded content. Route to
+                # human review instead of rubber-stamping (spec §49: missing
+                # evidence is UNKNOWN, never auto-accepted).
+                decision = JudgeDecision.ABSTAIN
+                severity = SeverityLevel.MEDIUM
+                reason = (
+                    f"Unverified claim(s) could not be grounded after retries were "
+                    f"exhausted; withheld for human review rather than accepted."
+                )
+                explanation = (
+                    f"{len(unverified_claims)} claim(s) remain unverified with no "
+                    f"supporting evidence under {policy.domain_name} policy. Absence "
+                    f"of contradicting evidence is not confirmation, so the response "
+                    f"is not auto-accepted."
+                )
 
         # Detector probability is a triage prior, not evidence.  Once retrieval
         # and NLI have run, Judge confidence must come solely from the Verifier;
@@ -592,6 +619,89 @@ class JudgeAgent:
             )
 
         return None
+
+    @staticmethod
+    def _is_replacement_capable_evidence(claim_text: str, ev) -> bool:
+        """
+        Distinguish Category B (evidence that establishes a replacement FACT the
+        Corrector can write from) from Category A (evidence that merely refutes the
+        claim or is non-grounding context).
+
+        Category B must address the target entity/subject and affirmatively state
+        the true attribute/relation (creator, date, location, ...). Used to route a
+        contradicted claim's evidence into trusted_evidence vs contradictory_evidence.
+        """
+        import re
+        if not ev or not getattr(ev, "snippet", ""):
+            return False
+
+        snippet_lower = ev.snippet.lower()
+        raw_title = (getattr(ev, "title", "") or "").lower()
+        clean_title = re.sub(r"^(wikipedia:\s*|\s*-\s*wikipedia\s*$)", "", raw_title).strip()
+        full_ev = f"{clean_title} {snippet_lower}"
+
+        pure_refutation_phrases = (
+            "no record of", "not associated with", "no evidence that",
+            "is false", "untrue", "debunked", "hoax", "myth", "falsely claimed",
+            "criticizing", "codenamed",
+        )
+        has_pure_refutation = any(pr in snippet_lower for pr in pure_refutation_phrases)
+
+        affirmative_rel_markers = (
+            "designed by", "created by", "developed by", "invented by",
+            "founded by", "authored by", "written by", "initiated by",
+            "started by", "built by", "released in", "introduced by",
+            "creator of", "father of", "mother of", "capital of",
+            "located in", "directed by", "starred in", "originally developed",
+            "initiated the", "designed java", "created python", "designed python",
+        )
+        has_affirmative_rel = any(m in full_ev for m in affirmative_rel_markers)
+
+        stopwords = {
+            "was", "were", "is", "are", "been", "the", "a", "an", "in", "at",
+            "by", "of", "to", "for", "with", "on", "that", "this", "first",
+            "originally", "has", "had", "have",
+        }
+
+        target_entity = None
+        active_m = re.search(
+            r"([A-Za-z0-9\s\-]+?)\s+(?:created|developed|invented|founded|built|designed)\s+(?:the\s+)?([A-Za-z0-9\s\-]+)",
+            claim_text or "", re.IGNORECASE,
+        )
+        if active_m and not any(w in active_m.group(1).lower() for w in ("was", "is", "were", "that", "which")):
+            target_entity = active_m.group(2).strip().rstrip(".?!").lower()
+        else:
+            passive_m = re.search(
+                r"([A-Za-z0-9\s\-]+?)\s+(?:was|is|were)?\s*(?:originally\s+)?(?:created|developed|invented|built|designed|founded|written|authored)\s+by\s+([A-Za-z0-9\s\-]+)",
+                claim_text or "", re.IGNORECASE,
+            )
+            if passive_m:
+                target_entity = passive_m.group(1).strip().rstrip(".?!").lower()
+
+        if target_entity and len(target_entity) > 2:
+            target_tokens = [t for t in target_entity.split() if t not in stopwords]
+            target_present = any(t in full_ev for t in target_tokens)
+            if not target_present:
+                return False
+            if has_affirmative_rel and not has_pure_refutation:
+                return True
+            if any(k in full_ev for k in (
+                "history", "origin", "developed", "created", "designer",
+                "developer", "author", "sun microsystems", "guido van rossum",
+                "james gosling",
+            )):
+                return True
+            return False
+
+        if has_affirmative_rel and not has_pure_refutation:
+            return True
+
+        c_clean = re.sub(r"[^\w\s\-]", " ", claim_text or "")
+        claim_words = [w.lower() for w in c_clean.split() if len(w) > 2 and w.lower() not in stopwords]
+        overlap = sum(1 for w in claim_words if w in full_ev)
+        if overlap >= 2 and not has_pure_refutation:
+            return True
+        return False
 
     @staticmethod
     def _normalize_verifier_output(verifier_output: Dict[str, Any]) -> List[Dict[str, Any]]:

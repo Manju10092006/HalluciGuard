@@ -50,7 +50,7 @@ The slice is wiring over components that already existed; nothing was reimplemen
 ## 4. N8N integration point (STATIC-VERIFIED)
 
 - Client: `services/n8n_retrieval_client.py`, method `retrieve_evidence(...)`.
-- Endpoint (frozen): `https://manjusogala.app.n8n.cloud/webhook/halluciguard-verify-v2`.
+- Endpoint (frozen): `https://guru-siesta-excusable.ngrok-free.dev/webhook/halluciguard-verify-v2`.
 - Auth: header mode, `X-API-Key: <secret>`; secret read from `N8N_WEBHOOK_SECRET` (never hard-coded; boundary test prints only `YES (masked)`).
 - Called from the pipeline exactly once per claim at `api/pipeline.py:317` (`n8n_res = await self.n8n_client.retrieve_evidence(...)`). n8n performs **retrieval only**; there is no verdict field on `N8NRetrievalResult`.
 
