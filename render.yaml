@@ -20,7 +20,7 @@ services:
       - key: OPENROUTER_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: OPENROUTER_MODEL
-        value: qwen/qwen3-4b
+        value: qwen/qwen3-14b
       - key: OPENROUTER_TEMPERATURE
         value: "0.7"
       - key: OPENROUTER_STRESS_TEMPERATURE

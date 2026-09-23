@@ -18,5 +18,5 @@ def _use_dummy_n8n_url() -> None:
     )
     os.environ.setdefault(
         "N8N_HEALTH_WEBHOOK_URL",
-        "https://test.n8n.cloud/webhook/halluciguard-health",
+        "https://guru-siesta-excusable.ngrok-free.dev/healthz",
     )

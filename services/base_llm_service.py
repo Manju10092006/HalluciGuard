@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import random
+import re
 import socket
 import time
 import uuid
@@ -22,6 +24,13 @@ import httpx
 
 GenerationMode = Literal["normal", "stress_test"]
 GenerationStatus = Literal["success", "failed"]
+
+# Credit-adaptive 402 handling. On a low/zero balance OpenRouter reports the
+# token ceiling the remaining credit can pay for; we retry once under it, minus a
+# small margin so rounding on their side cannot re-trip the 402, and never below a
+# floor that could still produce a usable short answer.
+_CREDIT_TOKEN_MARGIN = 8
+_CREDIT_MIN_TOKENS = 16
 
 
 class GenerationErrorCode(StrEnum):
@@ -128,8 +137,8 @@ class BaseLLMConfig:
     )
     model: str = field(
         default_factory=lambda: _env_str("HALLUCIGUARD_LLM_MODEL")
-        or _env_str("OPENROUTER_MODEL", "qwen/qwen3-4b")
-        or "qwen/qwen3-4b"
+        or _env_str("OPENROUTER_MODEL", "qwen/qwen3-14b")
+        or "qwen/qwen3-14b"
     )
     temperature: float = field(
         default_factory=lambda: _env_float("HALLUCIGUARD_LLM_TEMPERATURE", os.getenv("OPENROUTER_TEMPERATURE", "0.7"))
@@ -318,13 +327,42 @@ class BaseLLMService:
         last_code = GenerationErrorCode.UNKNOWN_ERROR
         last_error = "Unknown OpenRouter generation failure"
         attempts = max(1, self.config.max_retries + 1)
+        credit_adapted = False
         for attempt in range(attempts):
             try:
                 response = await self._post_chat_completions(payload)
                 if response.status_code >= 400:
                     if response.status_code == 404 and payload.get("model") != "qwen/qwen-2.5-7b-instruct":
+                        logging.getLogger("services.base_llm_service").warning(
+                            "OpenRouter model '%s' returned HTTP 404; falling back to "
+                            "'qwen/qwen-2.5-7b-instruct' and retrying.",
+                            payload.get("model"),
+                        )
                         payload["model"] = "qwen/qwen-2.5-7b-instruct"
                         continue
+                    # Credit-adaptive retry: on a low/zero balance OpenRouter 402s any
+                    # request whose max_tokens exceeds what the remaining credit can pay
+                    # for, and states the affordable ceiling in the error body ("...can
+                    # only afford 142"). Rather than hard-failing (which silently killed
+                    # generation whenever the cap was a hair too high), shrink max_tokens
+                    # to the affordable amount once and retry. This keeps the pipeline
+                    # generating on a near-empty balance instead of escalating to a human.
+                    if response.status_code == 402 and not credit_adapted:
+                        affordable = self._affordable_tokens_from_402(response.text)
+                        if affordable and affordable > 0:
+                            capped = max(_CREDIT_MIN_TOKENS, affordable - _CREDIT_TOKEN_MARGIN)
+                            current = payload.get("max_tokens")
+                            if current is None or capped < current:
+                                logging.getLogger("services.base_llm_service").warning(
+                                    "OpenRouter HTTP 402 (insufficient credits); retrying "
+                                    "once with max_tokens=%d (affordable ceiling reported "
+                                    "as %d).",
+                                    capped,
+                                    affordable,
+                                )
+                                payload["max_tokens"] = capped
+                                credit_adapted = True
+                                continue
                     code = self._classify_http_status(
                         response.status_code, response.text
                     )
@@ -526,6 +564,22 @@ class BaseLLMService:
             True if the status code indicates a transient error that should be retried.
         """
         return status_code in self.RETRYABLE_HTTP_STATUS
+
+    def _affordable_tokens_from_402(self, body: str) -> int | None:
+        """Extract the affordable max_tokens ceiling from an OpenRouter 402 body.
+
+        OpenRouter phrases the credit ceiling as "...can only afford N" (older
+        wording: "afford up to N tokens"). Returns the integer N, or None when the
+        body carries no parseable ceiling (in which case the 402 stays a hard fail).
+        """
+        text = body or ""
+        match = re.search(r"afford\s+(?:up\s+to\s+)?(\d+)", text, re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1))
+            except (TypeError, ValueError):
+                return None
+        return None
 
     def _classify_http_status(self, status_code: int, body: str) -> GenerationErrorCode:
         """

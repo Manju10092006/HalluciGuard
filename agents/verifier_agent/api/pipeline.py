@@ -371,10 +371,12 @@ class VerificationPipeline:
                     self.metrics.record_cache_miss()
 
                 with tracker.track(PipelineStage.CLAIM_DECOMPOSITION):
-                    normalized_text = self.claim_normalizer.normalize(claim.text)
-                    sub_claims = self.claim_decomposer.decompose(
-                        normalized_text or claim.text
-                    )
+                    # Feed RAW-CASE text to the decomposer. claim_normalizer lowercases,
+                    # but the decomposer's subject/pronoun detection is case-sensitive
+                    # (matches ^[A-Z]... and proper-noun POS), so passing normalized
+                    # (lowercased) text silently broke subject extraction. The decomposer
+                    # does its own internal cleaning.
+                    sub_claims = self.claim_decomposer.decompose(claim.text)
 
                 claim_evidence_items: List[EvidenceItem] = []
                 sub_reports: List[Dict[str, Any]] = []

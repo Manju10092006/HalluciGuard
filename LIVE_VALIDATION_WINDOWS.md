@@ -45,11 +45,11 @@ Create/verify a `.env` file in the repository root. Both runner scripts call
 ```ini
 # --- Base LLM (OpenRouter / Qwen) ---
 OPENROUTER_API_KEY=<your-openrouter-key>
-OPENROUTER_MODEL=qwen/qwen3-4b
+OPENROUTER_MODEL=qwen/qwen3-14b
 
 # --- n8n Retrieval Service V2 (FROZEN endpoint — do not change the URL) ---
 N8N_RETRIEVAL_ENABLED=true
-N8N_RETRIEVAL_WEBHOOK_URL=https://manjusogala.app.n8n.cloud/webhook/halluciguard-verify-v2
+N8N_RETRIEVAL_WEBHOOK_URL=https://guru-siesta-excusable.ngrok-free.dev/webhook/halluciguard-verify-v2
 N8N_AUTH_MODE=header
 N8N_HEADER_NAME=X-API-Key
 N8N_WEBHOOK_SECRET=<your-n8n-webhook-secret>

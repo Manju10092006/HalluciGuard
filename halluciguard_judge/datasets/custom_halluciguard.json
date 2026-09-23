@@ -1,0 +1,72 @@
+﻿[
+  {
+    "query": "Who invented the light bulb?",
+    "claim": "Thomas Edison invented the practical incandescent light bulb around 1879.",
+    "label": 0,
+    "source": "halluciguard_prod",
+    "note": "Correct."
+  },
+  {
+    "query": "Who invented the light bulb?",
+    "claim": "Nikola Tesla invented the light bulb and received the Nobel Prize for it in 1915.",
+    "label": 1,
+    "source": "halluciguard_prod",
+    "note": "Edison is credited. Tesla did not win Nobel for this."
+  },
+  {
+    "query": "What does Python's GIL stand for?",
+    "claim": "GIL stands for Global Interpreter Lock, which prevents multiple threads from executing Python bytecode simultaneously.",
+    "label": 0,
+    "source": "halluciguard_prod",
+    "note": "Correct."
+  },
+  {
+    "query": "What does Python's GIL stand for?",
+    "claim": "GIL stands for Global Instance Library, a Python standard for managing database connections.",
+    "label": 1,
+    "source": "halluciguard_prod",
+    "note": "Completely wrong definition."
+  },
+  {
+    "query": "How does transformer attention work?",
+    "claim": "Transformer attention computes scaled dot-product attention over queries, keys and values: softmax(QK^T / sqrt(d_k)) * V.",
+    "label": 0,
+    "source": "halluciguard_prod",
+    "note": "Correct Vaswani et al. formulation."
+  },
+  {
+    "query": "How does transformer attention work?",
+    "claim": "Transformer attention uses recurrent neural networks to process tokens one at a time, with LSTM gates controlling information flow.",
+    "label": 1,
+    "source": "halluciguard_prod",
+    "note": "Describes LSTM, not transformers."
+  },
+  {
+    "query": "What is hallucination in LLMs?",
+    "claim": "Hallucination in LLMs refers to the generation of plausible-sounding but factually incorrect or unsupported information.",
+    "label": 0,
+    "source": "halluciguard_prod",
+    "note": "Correct definition."
+  },
+  {
+    "query": "What is hallucination in LLMs?",
+    "claim": "Hallucination in LLMs refers to when the model refuses to answer a question because it does not have enough information.",
+    "label": 1,
+    "source": "halluciguard_prod",
+    "note": "Refusal is not hallucination — it is the opposite."
+  },
+  {
+    "query": "When was the first iPhone released?",
+    "claim": "The first iPhone was released in June 2007 by Apple.",
+    "label": 0,
+    "source": "halluciguard_prod",
+    "note": "Correct."
+  },
+  {
+    "query": "When was the first iPhone released?",
+    "claim": "The first iPhone was released in 2010, after the iPad.",
+    "label": 1,
+    "source": "halluciguard_prod",
+    "note": "iPhone launched 2007, well before iPad (2010)."
+  }
+]

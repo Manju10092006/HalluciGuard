@@ -99,3 +99,15 @@ experiments/
 benchmark_results_certified.json
 
 cloudflared.exe
+
+# Standalone detector: heavy/regenerable artifacts and vendored third-party repos (nested .git)
+halluciguard_detector/third_party/
+halluciguard_detector/*.log
+halluciguard_detector/verification_cache.db
+halluciguard_detector/data/
+
+# Standalone judge: caches
+halluciguard_judge/__pycache__/
+
+# n8n workflow scratch dump
+wf_dump/

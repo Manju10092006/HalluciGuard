@@ -954,15 +954,18 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             1 for r in canonical_v_res.claim_reports
             if str(getattr(r, "verdict", "")).lower() in ("contradicted", "verdictlabel.contradicted")
         )
-        all_claims_verified = bool(canonical_v_res.claim_reports) and all(
-            str(getattr(r, "verdict", "")).lower()
-            in ("verified", "verdictlabel.verified")
-            for r in canonical_v_res.claim_reports
-        )
+        # The Re-Verifier is a SAFETY gate on the correction, not a demand that
+        # every re-extracted atomic claim be positively re-proven. Post-correction
+        # re-extraction routinely yields UNVERIFIED sub-claims (retrieval returns 0
+        # evidence for a fragment) even when the repaired answer is sound and the
+        # offending contradiction is gone. Requiring "all claims verified" therefore
+        # made a *successful* correction fail the gate forever -> the pipeline bounced
+        # to human review again and again. The correct property is: the re-verified
+        # candidate must carry NO remaining contradiction, on a verifier run that
+        # actually completed. Missing evidence is UNKNOWN, never a failure (spec §49-50).
         passed = (
             canonical_v_res.status == ExecutionStatus.COMPLETED
             and remaining_contradictions == 0
-            and all_claims_verified
         )
 
         rev_result = ReverificationResult(
@@ -989,7 +992,11 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
         return {
             "reverification_result": dumped_rev,
             "reverification_attempt_count": rev_attempts,
-            "route": "judge" if passed else "human_escalation",
+            # A completed re-verification ALWAYS returns to the Judge, which is the
+            # sole arbiter of the post-correction outcome (accept / re-correct /
+            # reject) via _evaluate_reverification. Only a crashed or failed verifier
+            # run escalates (handled by _reverifier_route reading the FAILED status).
+            "route": "judge",
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
             "trace": add_trace(

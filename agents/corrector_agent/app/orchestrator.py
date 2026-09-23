@@ -7,6 +7,7 @@ from app.planner import CorrectionPlanner
 from app.prompt_builder import PromptBuilder
 from app.merger import ResponseMerger, ResponseValidator
 from app.judge import JudgeVerificationEngine
+from app.reverifier import ReVerifier
 from app.model_client import QwenCorrectorClient
 from app.memory_agent import MemoryAgent
 
@@ -17,6 +18,7 @@ class CorrectorOrchestrator:
         self.merger = ResponseMerger()
         self.validator = ResponseValidator()
         self.judge = JudgeVerificationEngine()
+        self.reverifier = ReVerifier()
         self.model_client = QwenCorrectorClient()
         self.memory = MemoryAgent()
 
@@ -136,8 +138,48 @@ class CorrectorOrchestrator:
             )
 
             if judge_result.isApproved:
-                is_approved = True
-                final_processed_text = processed_text
+                # SEPARATE verification event: re-extract claims from the CORRECTED
+                # text and verify them independently. A correction can pass the
+                # Judge (the flagged wording is gone, evidence echoed) yet have
+                # introduced a NEW hallucination (e.g. a wrong year). This event
+                # does NOT overwrite judge_result or payload.claims — both verdicts
+                # are kept.
+                reverify_start = time.time() * 1000
+                reverification = self.reverifier.reverify(
+                    payload, plan, processed_text, judge_result
+                )
+                reverify_duration = (time.time() * 1000) - reverify_start
+
+                if reverification.is_verified:
+                    logTrace(
+                        "REVERIFY",
+                        f"ReVerification #{current_attempt}: VERIFIED",
+                        f"Re-extracted {len(reverification.claims)} claim(s) from the corrected answer; all supported or unknown, none contradicted.",
+                        detailJson=f"Overall confidence: {reverification.overall_confidence}",
+                        durationMs=reverify_duration
+                    )
+                    is_approved = True
+                    final_processed_text = processed_text
+                else:
+                    failed_texts = "; ".join(
+                        f"'{c.text}' ({c.rationale})" for c in reverification.failed_claims
+                    )
+                    reverify_feedback = (
+                        "ReVerification FAILED: the corrected answer introduced "
+                        f"contradicted claim(s): {failed_texts}"
+                    )
+                    logTrace(
+                        "REVERIFY",
+                        f"ReVerification #{current_attempt}: FAILED",
+                        reverify_feedback,
+                        detailJson=f"Failed claims: {len(reverification.failed_claims)}",
+                        durationMs=reverify_duration
+                    )
+                    # Route back to correction: the Judge-approved text is NOT
+                    # emitted because reverification caught a secondary hallucination.
+                    last_judge_feedback = reverify_feedback
+                    last_rejection_reasons = [c.text for c in reverification.failed_claims]
+                    current_attempt += 1
             else:
                 last_judge_feedback = judge_result.feedback
                 last_rejection_reasons = judge_result.rejectionReasons

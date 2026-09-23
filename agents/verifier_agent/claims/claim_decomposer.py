@@ -61,7 +61,46 @@ _FILLER_EXACT = {
     "of course", "indeed", "right", "you're right", "you are right",
     "exactly", "i agree", "good question", "great question",
     "that's a good question", "well", "ok", "okay", "certainly",
+    # negated acknowledgements — assert nothing internet-checkable on their own
+    "that's not correct", "that is not correct", "that's incorrect",
+    "that is incorrect", "that's wrong", "that is wrong", "no that's not correct",
 }
+
+# Punctuation-insensitive form of the filler set, so "No, that's not correct"
+# (with comma/apostrophe) matches "that's not correct".
+_FILLER_STRIPPED = {
+    re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", "", f.lower())).strip()
+    for f in _FILLER_EXACT
+}
+
+# Non-factual / non-checkable sentence patterns. These are grammatically valid
+# (subject + predicate) so _is_valid() lets them through, but they assert nothing
+# a search engine can confirm or refute — they are conversational meta, offers to
+# help, or direct address. Sending them to retrieval wastes Tavily/n8n calls and
+# credits, so they are filtered BEFORE verification.
+_NONFACTUAL_RE = re.compile(
+    r"^\s*(?:"
+    r"if\s+you\b|feel\s+free\b|let\s+me\s+know\b|please\s+(?:let|feel|note|check)\b|"
+    r"for\s+the\s+most\b|for\s+more\s+(?:accurate|information|details)\b|"
+    r"i\s+hope\s+this\b|hope\s+(?:this|that)\s+helps\b|"
+    r"i(?:'m| am)\s+(?:sorry|not\s+sure|happy\s+to|unable)\b|"
+    r"i\s+(?:can(?:not|'t)?|could\s+not|do\s+not|don't)\b|"
+    r"you\s+(?:can|could|should|may|might|will|would)\b|"
+    r"as\s+an\s+ai\b|note\s+that\b|keep\s+in\s+mind\b|"
+    r"checking\b.*\bwould\s+be\s+best\b|"
+    r".*\bwould\s+be\s+(?:best|advisable|recommended)\s*\.?\s*$|"
+    r".*\bfeel\s+free\s+to\b|.*\bclarify\b\s*!?\s*$"
+    r")",
+    re.IGNORECASE,
+)
+
+# Markdown constructs stripped before decomposition (drafts are markdown; without
+# this the decomposer treats "**bold**", "# Heading", "- bullet" as claim text).
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((?:[^)]*)\)")   # [text](url) -> text
+_MD_HEADER_RE = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)  # # Heading
+_MD_BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+", re.MULTILINE)  # - / 1. bullets
+_MD_EMPHASIS_RE = re.compile(r"(\*\*|__|\*|_|`)")        # **bold** _italic_ `code`
+_MD_LABEL_RE = re.compile(r"^\s*[A-Z][A-Za-z /]{1,40}:\s+(?=\S)")  # "Key points: ..."
 
 # Leading conversational framing stripped from the front of a sentence.
 _PREFIX_RE = re.compile(
@@ -112,18 +151,67 @@ class ClaimDecomposer:
         if not text or not text.strip():
             return []
 
+        # Strip markdown so headers/bullets/bold/links don't become claim text.
+        text = self._clean_markdown(text)
+        if not text.strip():
+            return []
+
         nlp = _load_nlp()
         if nlp is None:
             claims = self._decompose_regex(text)
         else:
             claims = self._decompose_spacy(nlp, text)
 
+        # Drop non-factual / non-checkable sentences (offers, meta, questions) so
+        # retrieval isn't wasted on them. Applied to every path's output.
+        claims = [c for c in claims if self._is_checkable(c)]
+
         if not claims:
-            # Never lose the original assertion if nothing survived extraction.
-            return [text.strip()]
+            # Nothing survived. Only fall back to the raw text if it is itself a
+            # checkable factual sentence; otherwise emit nothing (don't send junk
+            # like "feel free to clarify!" to the verifier).
+            raw = text.strip()
+            return [raw] if self._is_checkable(raw) else []
 
         logger.debug("Decomposed '%s' into %d sub-claims", text[:80], len(claims))
         return claims[:_MAX_CLAIMS]
+
+    # ------------------------------------------------------------------
+    # Pre-processing / filtering helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _clean_markdown(text: str) -> str:
+        """Strip markdown formatting so it isn't parsed as claim content."""
+        text = _MD_LINK_RE.sub(r"\1", text)      # [label](url) -> label
+        text = _MD_HEADER_RE.sub("", text)       # drop "# " heading markers
+        text = _MD_BULLET_RE.sub("", text)       # drop "- " / "1. " bullet markers
+        text = _MD_EMPHASIS_RE.sub("", text)     # drop **, __, *, _, `
+        text = _MD_LABEL_RE.sub("", text)        # drop lead-in "Key points: " labels
+        return text
+
+    @classmethod
+    def _is_checkable(cls, text: str) -> bool:
+        """True if ``text`` is a factual sentence worth sending to retrieval.
+
+        Rejects questions, conversational meta, offers to help and direct address
+        — grammatically valid but not confirmable/refutable by evidence.
+        """
+        s = text.strip()
+        if not s:
+            return False
+        if s.endswith("?"):
+            return False
+        # Punctuation-insensitive filler match ("No, that's not correct" -> "no thats not correct").
+        filler_key = re.sub(r"[^a-z0-9\s]", "", s.lower())
+        filler_key = re.sub(r"\s+", " ", filler_key).strip()
+        if filler_key in _FILLER_STRIPPED or cls._normalize_key(s) in _FILLER_EXACT:
+            return False
+        if _NONFACTUAL_RE.match(s):
+            return False
+        # Require at least 3 word-tokens of substance.
+        if len(re.findall(r"[A-Za-z0-9]+", s)) < 3:
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # spaCy-powered path
