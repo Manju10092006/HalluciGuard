@@ -1,0 +1,211 @@
+/* ==========================================================================
+   HALLUCIGUARD CHAT DESIGN TOKENS & SYSTEM
+   ========================================================================== */
+
+:root {
+  /* Light mode (default) — Manus / Watermelon editorial neutral palette.
+     Cotton off-white ground, Night ink, Smokey/Platinum grays, near-black primary. */
+  --bg: #F6F5F1;              /* Cotton — warm off-white ground */
+  --bg-atmosphere: none;
+  --surface: #FFFFFF;
+  --surface-sunken: #F0EFEA;
+  --surface-hover: #EAE9E3;
+  --border: rgba(26, 26, 24, 0.09);
+  --border-strong: rgba(26, 26, 24, 0.16);
+  --text-primary: #1A1A18;    /* Night */
+  --text-secondary: #6B6B64;  /* Smokey Gray */
+  --text-muted: #9C9C93;      /* Platinum Silver (text) */
+
+  /* Accent = restrained near-black "ink" (Manus black primary actions).
+     Warm taupe tint stands in for the old purple highlight. */
+  --accent: #1A1A18;
+  --accent-hover: #000000;
+  --accent-light: rgba(26, 26, 24, 0.05);
+  --accent-glow: rgba(26, 26, 24, 0.16);
+  --accent-tint: #8A7E6B;     /* warm editorial highlight for eyebrows/links */
+
+  /* Semantic verification colors — muted editorial tones */
+  --supported: #3E8E5A;
+  --supported-bg: #ECF3ED;
+  --supported-border: rgba(62, 142, 90, 0.24);
+
+  --contradicted: #C2564A;
+  --contradicted-bg: #F6EAE7;
+  --contradicted-border: rgba(194, 86, 74, 0.24);
+
+  --insufficient: #B5862E;
+  --insufficient-bg: #F6F0DF;
+  --insufficient-border: rgba(181, 134, 46, 0.24);
+
+  --uncertain: #6E6E85;
+  --uncertain-bg: #EFEFF2;
+  --uncertain-border: rgba(110, 110, 133, 0.24);
+
+  /* Dimensions & Radius */
+  --sidebar-width: 264px;
+  --sidebar-collapsed-width: 72px;
+  --composer-max-width: 760px;
+  --conversation-max-width: 720px;
+  --radius-card: 18px;
+  --radius-pill: 999px;
+  --radius-inline: 12px;
+  --radius-sm: 8px;
+
+  /* Shadows — softer, warmer, editorial */
+  --shadow-subtle: 0 1px 2px rgba(26, 26, 24, 0.03), 0 10px 28px rgba(26, 26, 24, 0.05);
+  --shadow-float: 0 14px 40px rgba(26, 26, 24, 0.09), 0 2px 8px rgba(26, 26, 24, 0.04);
+  --shadow-modal: 0 30px 60px -18px rgba(26, 26, 24, 0.28);
+
+  /* Font */
+  --font-sans: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: 'Instrument Serif', 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --transition-smooth: 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Dark mode overrides — warm charcoal neutral (no violet cast) */
+[data-theme='dark'] {
+  --bg: #14130F;
+  --bg-atmosphere: radial-gradient(circle at 50% 18%, rgba(255, 250, 240, 0.05), transparent 60%);
+  --surface: #1D1C18;
+  --surface-sunken: #26251F;
+  --surface-hover: #302E27;
+  --border: rgba(255, 253, 245, 0.09);
+  --border-strong: rgba(255, 253, 245, 0.17);
+  --text-primary: #F4F2EA;
+  --text-secondary: #A8A69B;
+  --text-muted: #6F6D62;
+  --accent: #F4F2EA;
+  --accent-hover: #FFFFFF;
+  --accent-light: rgba(244, 242, 234, 0.09);
+  --accent-glow: rgba(244, 242, 234, 0.14);
+  --accent-tint: #C9B79A;
+
+  --supported: #5FBE82;
+  --supported-bg: rgba(95, 190, 130, 0.12);
+  --supported-border: rgba(95, 190, 130, 0.28);
+
+  --contradicted: #E27A6E;
+  --contradicted-bg: rgba(226, 122, 110, 0.12);
+  --contradicted-border: rgba(226, 122, 110, 0.28);
+
+  --insufficient: #D6A94A;
+  --insufficient-bg: rgba(214, 169, 74, 0.12);
+  --insufficient-border: rgba(214, 169, 74, 0.28);
+
+  --uncertain: #9A9AB0;
+  --uncertain-bg: rgba(154, 154, 176, 0.12);
+  --uncertain-border: rgba(154, 154, 176, 0.28);
+
+  --shadow-subtle: 0 1px 3px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-float: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-modal: 0 30px 66px -16px rgba(0, 0, 0, 0.72);
+}
+
+/* Atmospheric wallpaper background options */
+body.wallpaper-mesh {
+  background-image:
+    radial-gradient(at 18% 12%, rgba(138, 126, 107, 0.07) 0px, transparent 52%),
+    radial-gradient(at 84% 18%, rgba(62, 142, 90, 0.035) 0px, transparent 50%),
+    radial-gradient(at 50% 88%, rgba(26, 26, 24, 0.04) 0px, transparent 60%);
+}
+
+[data-theme='dark'] body.wallpaper-mesh {
+  background-image:
+    radial-gradient(at 20% 15%, rgba(201, 183, 154, 0.08) 0px, transparent 55%),
+    radial-gradient(at 80% 22%, rgba(95, 190, 130, 0.05) 0px, transparent 50%),
+    radial-gradient(at 50% 82%, rgba(0, 0, 0, 0.4) 0px, transparent 65%);
+}
+
+/* Base resets */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  font-family: var(--font-sans);
+  background-color: var(--bg);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color var(--transition-smooth), color var(--transition-smooth);
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  display: flex;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: inherit;
+  transition: all var(--transition-smooth);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input, textarea {
+  font-family: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+}
+
+textarea {
+  resize: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Custom minimal scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Utilities */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

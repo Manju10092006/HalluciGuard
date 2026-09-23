@@ -1,35 +1,66 @@
 "use client";
 
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, ArrowRight, Sparkles, Crown } from "lucide-react";
 import { useChat } from "@/context/ChatContext";
 import { CONV_STATUS, USER, greeting, relativeTime } from "@/lib/format";
-import { Orb } from "@/components/brand/Logo";
 import { VerificationComposer } from "./VerificationComposer";
 import { QuickActions } from "./QuickActions";
 import { StatusPill } from "./StatusPill";
 
 export function EmptyVerificationState({ onSend, busy, draft }) {
-  const { conversations, settings, navigate } = useChat();
+  const { conversations, settings, navigate, setModal } = useChat();
   const recent = (conversations || []).slice(0, 3);
   const first = (settings.nickname || USER.name).split(" ")[0];
 
   return (
-    <div className="flex flex-1 flex-col items-center overflow-y-auto px-4 pb-10 pt-[6vh] md:pt-[9vh]" data-testid="empty-state">
-      <div className="hg-stagger flex w-full flex-col items-center">
-        <Orb className="mb-7" />
-        <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-hg-muted">{greeting()}, {first}</p>
-        <h1 className="text-center text-[30px] font-semibold leading-[1.1] tracking-[-0.025em] text-hg-text sm:text-[38px] md:text-[44px]" data-testid="empty-headline">
-          Don&rsquo;t trust the answer.
-          <br />
-          <span className="font-serif font-normal italic tracking-[-0.01em] text-hg-accent">Trace the evidence.</span>
+    <div className="flex flex-1 flex-col items-center overflow-y-auto px-4 pb-10 pt-[7vh] md:pt-[10vh]" data-testid="empty-state">
+      <div className="hg-stagger flex w-full max-w-[820px] flex-col items-center">
+        {/* Upgrade pill */}
+        <button
+          type="button"
+          onClick={() => setModal({ type: "settings", tab: "general" })}
+          className="mb-8 inline-flex items-center gap-1.5 rounded-full border border-[rgba(230,170,60,0.4)] bg-[rgba(230,170,60,0.12)] px-3.5 py-1.5 text-[12px] font-semibold text-amber-500 shadow-hg transition-colors hover:bg-[rgba(230,170,60,0.2)] dark:text-amber-300"
+          data-testid="upgrade-pill"
+        >
+          <Crown className="h-3.5 w-3.5" strokeWidth={2} /> Upgrade Plan
+        </button>
+
+        {/* Greeting */}
+        <h1
+          className="text-center text-[34px] font-semibold leading-[1.08] tracking-[-0.03em] text-hg-text sm:text-[46px] md:text-[56px]"
+          data-testid="empty-headline"
+        >
+          {greeting()}, {first}
         </h1>
-        <p className="mt-4 max-w-md text-center text-[15px] leading-relaxed text-hg-text2">Verify AI-generated claims against evidence you can inspect.</p>
-        <div className="mt-9 flex w-full justify-center">
+        <p className="mt-4 max-w-lg text-center text-[15px] leading-relaxed text-hg-text2">
+          Welcome to HalluciGuard — verify AI-generated claims against evidence you can inspect.
+        </p>
+
+        {/* Composer */}
+        <div className="mt-10 flex w-full justify-center">
           <VerificationComposer onSend={onSend} busy={busy} variant="hero" initialText={draft} />
         </div>
-        <div className="mt-5 w-full max-w-[760px]"><QuickActions onPick={(p) => onSend(p, { mode: "standard", fromQuick: true })} /></div>
+
+        {/* Template cards */}
+        <div className="mt-6 w-full">
+          <QuickActions onPick={(p) => onSend(p, { mode: "standard", fromQuick: true })} />
+        </div>
+
+        {/* Workflow templates hint */}
+        <div className="mt-5 flex items-center justify-center">
+          <button
+            type="button"
+            onClick={() => setModal({ type: "create-flow" })}
+            className="group inline-flex items-center gap-2 rounded-full border border-dashed border-hg-line bg-hg-sunken/40 px-3.5 py-1.5 text-[12px] font-medium text-hg-text2 transition hover:border-[rgba(var(--accent-rgb),0.6)] hover:text-hg-accent"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-hg-accent transition-transform group-hover:scale-110" />
+            <span>Need automated verification? Explore workflow templates</span>
+            <ArrowRight className="h-3 w-3 text-hg-muted transition-transform group-hover:translate-x-0.5 group-hover:text-hg-accent" />
+          </button>
+        </div>
+
         {recent.length > 0 && (
-          <section className="mt-12 w-full max-w-[640px]" aria-label="Recent verifications" data-testid="recent-strip">
+          <section className="mt-12 w-full max-w-[680px]" aria-label="Recent verifications" data-testid="recent-strip">
             <div className="mb-2 flex items-center justify-between px-1">
               <h2 className="font-mono text-[11px] uppercase tracking-[0.12em] text-hg-muted">Recent verifications</h2>
               <button type="button" onClick={() => navigate("/history")} className="inline-flex items-center gap-1 text-[12px] text-hg-text2 transition-colors hover:text-hg-accent" data-testid="recent-view-all">View all <ArrowUpRight className="h-3 w-3" /></button>

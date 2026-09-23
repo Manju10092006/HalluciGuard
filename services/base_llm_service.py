@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -20,6 +21,15 @@ except ImportError:
 from typing import Any, Literal
 
 import httpx
+
+from services.llm_providers import (
+    ProviderConfigError,
+    ProviderSpec,
+    build_provider_specs,
+    resolve_provider_order,
+)
+
+logger = logging.getLogger("services.base_llm_service")
 
 GenerationMode = Literal["normal", "stress_test"]
 GenerationStatus = Literal["success", "failed"]
@@ -172,6 +182,12 @@ class GenerationResult:
     error: str | None = None
     error_code: str | None = None
     usage: dict[str, Any] = field(default_factory=dict)
+    # Which provider actually served the request (Groq/Gemini/OpenRouter), or
+    # None when generation failed across every provider. Additive + defaulted
+    # so existing construction sites remain valid.
+    provider_used: str | None = None
+    # Ordered, secret-free record of each provider attempt for observability.
+    provider_attempts: list[dict[str, Any]] = field(default_factory=list)
 
     def model_dump(self) -> dict[str, Any]:
         """Convert the generation result to a dictionary."""
@@ -196,19 +212,71 @@ class BaseLLMHealth:
 
 
 class BaseLLMService:
-    """Generate draft responses through OpenRouter without exposing secrets."""
+    """Generate draft responses through a multi-provider failover router.
+
+    Two construction modes are supported for full backward compatibility:
+
+    * **Multi-provider (default)** — ``BaseLLMService()`` with no explicit
+      config routes generation through the configured provider order
+      (Groq -> Gemini -> OpenRouter by default). Each provider gets its own
+      retry budget; providers without a configured key are skipped. This is the
+      path every live consumer (``BaseLLMService()``) now takes automatically.
+    * **Legacy single-provider** — ``BaseLLMService(BaseLLMConfig(...))`` with an
+      explicit config preserves the original single-endpoint behavior exactly,
+      including the ``_post_chat_completions`` override seam used by tests.
+    """
 
     RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
     NON_RETRYABLE_HTTP_STATUS = {400, 401, 402, 403, 404}
+    # Cap Retry-After honoring so a hostile/misconfigured header cannot stall
+    # the request pipeline for minutes.
+    MAX_RETRY_AFTER_SECONDS = 10.0
 
-    def __init__(self, config: BaseLLMConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: BaseLLMConfig | None = None,
+        *,
+        model_overrides: dict[str, str] | None = None,
+    ) -> None:
         """
-        Initialize the Base LLM service with optional configuration.
+        Initialize the Base LLM service.
 
         Args:
-            config: Optional configuration instance. If not provided, uses default environment-based config.
+            config: Optional legacy single-provider configuration. When provided,
+                the service operates in single-provider mode (no failover) for
+                backward compatibility. When omitted, the service builds the
+                multi-provider failover router from the environment.
+            model_overrides: Optional ``provider -> model`` overrides applied in
+                multi-provider mode (e.g. the Corrector pinning a model).
         """
         self.config = config or BaseLLMConfig()
+        self._multi = config is None
+        # Shared generation settings (sourced from BaseLLMConfig so env tuning of
+        # timeouts/retries/tokens continues to apply in multi-provider mode too).
+        self._provider_order: list[str] = []
+        self._provider_specs: dict[str, ProviderSpec] = {}
+        if self._multi:
+            self._provider_order = resolve_provider_order()
+            self._provider_specs = build_provider_specs(model_overrides)
+
+    def provider_status(self) -> dict[str, Any]:
+        """Return a secret-free snapshot of provider configuration for startup logs."""
+        if not self._multi:
+            return {
+                "mode": "single",
+                "provider": self.config.provider,
+                "model": self.config.model,
+                "key_configured": bool(self.config.api_key),
+            }
+        return {
+            "mode": "multi",
+            "order": list(self._provider_order),
+            "providers": {
+                name: self._provider_specs[name].safe_summary()
+                for name in self._provider_order
+            },
+        }
+
 
     async def health(self, check_network: bool = True) -> BaseLLMHealth:
         """
@@ -281,6 +349,17 @@ class BaseLLMService:
                 self.config.stress_temperature
                 if mode == "stress_test"
                 else self.config.temperature
+            )
+
+        if self._multi:
+            return await self._generate_multi(
+                user_query,
+                conversation_history,
+                mode,
+                temp,
+                max_tokens,
+                request_id,
+                started,
             )
 
         if self.config.provider.lower() != "openrouter":
@@ -364,6 +443,212 @@ class BaseLLMService:
             await asyncio.sleep(self._retry_delay_seconds(attempt))
         return self._failed(user_query, request_id, mode, temp, started, last_code, last_error)
 
+    # ------------------------------------------------------------------
+    # Multi-provider failover engine (Groq -> Gemini -> OpenRouter)
+    # ------------------------------------------------------------------
+    async def _generate_multi(
+        self,
+        user_query: str,
+        conversation_history: list[dict[str, str]] | None,
+        mode: str,
+        temp: float,
+        max_tokens: int | None,
+        request_id: str,
+        started: float,
+    ) -> GenerationResult:
+        """Attempt each configured provider in order, each with its own retry budget.
+
+        Providers without a configured API key are skipped (no network, no wasted
+        retry). The first provider to return usable content wins and its name is
+        recorded in ``provider_used``. If every keyed provider is exhausted the
+        result fails closed; if no provider had a key at all, the classic
+        MISSING_API_KEY semantics are preserved.
+        """
+        messages = [
+            *list(conversation_history or []),
+            {"role": "user", "content": user_query},
+        ]
+        token_limit = max_tokens if max_tokens is not None else self.config.max_tokens
+        attempts_trail: list[dict[str, Any]] = []
+        any_key = False
+        last_code = GenerationErrorCode.MISSING_API_KEY
+        last_error = "No LLM provider has a configured API key"
+
+        for name in self._provider_order:
+            spec = self._provider_specs[name]
+            if not spec.has_key:
+                logger.info("LLM provider skipped (no key) provider=%s", name)
+                attempts_trail.append(
+                    {"provider": name, "outcome": "skipped_no_key"}
+                )
+                continue
+            any_key = True
+            logger.info("LLM generation started provider=%s model=%s", name, spec.model)
+            outcome = await self._run_provider(
+                spec, messages, temp, token_limit, user_query, request_id, mode, started
+            )
+            if isinstance(outcome, GenerationResult):
+                attempts_trail.append(
+                    {"provider": name, "outcome": "success", "model": outcome.model}
+                )
+                logger.info("LLM generation succeeded provider=%s", name)
+                # Re-emit the full attempt trail on the successful result.
+                return dataclasses.replace(outcome, provider_attempts=attempts_trail)
+            code, message = outcome
+            last_code, last_error = code, message
+            attempts_trail.append(
+                {"provider": name, "outcome": "exhausted", "error_code": code.value}
+            )
+            logger.warning(
+                "LLM provider exhausted provider=%s error=%s", name, code.value
+            )
+
+        if not any_key:
+            logger.error("LLM generation failed: no provider key configured")
+            return self._failed(
+                user_query,
+                request_id,
+                mode,
+                temp,
+                started,
+                GenerationErrorCode.MISSING_API_KEY,
+                last_error,
+                provider_attempts=attempts_trail,
+            )
+
+        logger.error("LLM generation failed across all providers last=%s", last_code.value)
+        return self._failed(
+            user_query,
+            request_id,
+            mode,
+            temp,
+            started,
+            last_code,
+            last_error,
+            provider_attempts=attempts_trail,
+        )
+
+    async def _run_provider(
+        self,
+        spec: ProviderSpec,
+        messages: list[dict[str, str]],
+        temp: float,
+        token_limit: int | None,
+        user_query: str,
+        request_id: str,
+        mode: str,
+        started: float,
+    ) -> GenerationResult | tuple[GenerationErrorCode, str]:
+        """Run one provider with its own bounded retry budget.
+
+        Returns a successful :class:`GenerationResult`, or a ``(code, message)``
+        tuple describing why this provider was exhausted so the caller can fail
+        over to the next provider.
+        """
+        payload: dict[str, Any] = {
+            "model": spec.model,
+            "temperature": temp,
+            "messages": messages,
+        }
+        if token_limit is not None:
+            payload["max_tokens"] = token_limit
+
+        last_code = GenerationErrorCode.UNKNOWN_ERROR
+        last_error = f"{spec.name} generation failure"
+        attempts = max(1, self.config.max_retries + 1)
+        for attempt in range(attempts):
+            try:
+                response = await self._post_chat_completions_to(spec, payload)
+            except Exception as exc:  # noqa: BLE001 - classified below
+                code = self._classify_exception(exc)
+                last_code = code
+                last_error = f"{code.value}: {type(exc).__name__}"
+                transient = code in {
+                    GenerationErrorCode.TIMEOUT,
+                    GenerationErrorCode.CONNECTION_ERROR,
+                    GenerationErrorCode.DNS_ERROR,
+                }
+                if not transient or attempt == attempts - 1:
+                    return last_code, last_error
+                await asyncio.sleep(self._retry_delay_seconds(attempt))
+                continue
+
+            if response.status_code < 400:
+                parsed = self._parse_success(
+                    user_query,
+                    response,
+                    request_id,
+                    mode,
+                    temp,
+                    started,
+                    provider=spec.name,
+                    model_fallback=spec.model,
+                )
+                if parsed.status == "success":
+                    return parsed
+                # A 2xx that produced no usable content is not retryable here.
+                try:
+                    empty_code = GenerationErrorCode(parsed.error_code or "")
+                except ValueError:
+                    empty_code = GenerationErrorCode.EMPTY_CONTENT
+                return empty_code, parsed.error or "empty content"
+
+            # OpenRouter-specific: a 404 on the configured model falls back once
+            # to a widely-available model before giving up on the provider.
+            if (
+                spec.name == "openrouter"
+                and response.status_code == 404
+                and payload.get("model") != "qwen/qwen-2.5-7b-instruct"
+            ):
+                logger.warning(
+                    "OpenRouter model '%s' returned 404; falling back to "
+                    "'qwen/qwen-2.5-7b-instruct'.",
+                    payload.get("model"),
+                )
+                payload["model"] = "qwen/qwen-2.5-7b-instruct"
+                continue
+
+            code = self._classify_http_status(response.status_code, response.text)
+            message = self._safe_http_error(response.status_code, response.text, spec)
+            last_code, last_error = code, message
+            if (
+                not self._should_retry_status(response.status_code)
+                or attempt == attempts - 1
+            ):
+                return last_code, last_error
+            await asyncio.sleep(
+                self._retry_after_or_backoff(response, attempt)
+            )
+        return last_code, last_error
+
+    async def _post_chat_completions_to(
+        self, spec: ProviderSpec, payload: dict[str, Any]
+    ) -> httpx.Response:
+        """Send a chat completion request to a specific provider endpoint."""
+        headers = {
+            "Authorization": f"Bearer {spec.api_key}",
+            "Content-Type": "application/json",
+            **dict(spec.extra_headers),
+        }
+        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
+            return await client.post(
+                f"{spec.base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+
+    def _retry_after_or_backoff(self, response: httpx.Response, attempt: int) -> float:
+        """Honor a sane Retry-After header, else fall back to jittered backoff."""
+        raw = response.headers.get("Retry-After") or response.headers.get("retry-after")
+        if raw:
+            try:
+                seconds = float(raw.strip())
+                if seconds >= 0:
+                    return min(seconds, self.MAX_RETRY_AFTER_SECONDS)
+            except (TypeError, ValueError):
+                pass
+        return self._retry_delay_seconds(attempt)
+
     async def _post_chat_completions(self, payload: dict[str, Any]) -> httpx.Response:
         """
         Send a chat completion request to the OpenRouter API.
@@ -397,21 +682,28 @@ class BaseLLMService:
         mode: str,
         temperature: float,
         started: float,
+        provider: str = "openrouter",
+        model_fallback: str | None = None,
+        provider_attempts: list[dict[str, Any]] | None = None,
     ) -> GenerationResult:
         """
-        Parse a successful HTTP response from OpenRouter into a GenerationResult.
+        Parse a successful HTTP response into a GenerationResult.
 
         Args:
             user_query: The original user query.
-            response: The HTTP response from OpenRouter.
+            response: The HTTP response from the provider.
             request_id: The unique request identifier.
             mode: The generation mode ("normal" or "stress_test").
             temperature: The temperature used for generation.
             started: The start time of the request (from perf_counter).
+            provider: The provider that served the request.
+            model_fallback: Model id to record when the response omits one.
+            provider_attempts: Secret-free per-provider attempt trail.
 
         Returns:
             A GenerationResult with status "success" or "failed" if parsing fails.
         """
+        model_fallback = model_fallback or self.config.model
         if not response.content:
             return self._failed(
                 user_query,
@@ -420,7 +712,7 @@ class BaseLLMService:
                 temperature,
                 started,
                 GenerationErrorCode.EMPTY_RESPONSE,
-                "OpenRouter returned an empty HTTP response",
+                f"{provider} returned an empty HTTP response",
             )
         try:
             data = response.json()
@@ -432,7 +724,7 @@ class BaseLLMService:
                 temperature,
                 started,
                 GenerationErrorCode.MALFORMED_JSON,
-                "OpenRouter returned malformed JSON",
+                f"{provider} returned malformed JSON",
             )
         choices = data.get("choices") or []
         content = ""
@@ -450,13 +742,13 @@ class BaseLLMService:
                 temperature,
                 started,
                 GenerationErrorCode.EMPTY_CONTENT,
-                "OpenRouter returned no assistant content",
+                f"{provider} returned no assistant content",
             )
         return GenerationResult(
             user_query=user_query,
             draft_response=content,
-            model=str(data.get("model") or self.config.model),
-            provider="openrouter",
+            model=str(data.get("model") or model_fallback),
+            provider=provider,
             generation_mode=mode,
             mode=mode,
             temperature=temperature,
@@ -465,6 +757,8 @@ class BaseLLMService:
             request_id=request_id,
             status="success",
             usage=data.get("usage") or {},
+            provider_used=provider,
+            provider_attempts=provider_attempts or [],
         )
 
     def _failed(
@@ -476,6 +770,7 @@ class BaseLLMService:
         started: float,
         error_code: GenerationErrorCode,
         error: str,
+        provider_attempts: list[dict[str, Any]] | None = None,
     ) -> GenerationResult:
         """
         Create a failed GenerationResult with error details.
@@ -488,6 +783,7 @@ class BaseLLMService:
             started: The start time of the request.
             error_code: The error code enum value.
             error: The error message.
+            provider_attempts: Secret-free per-provider attempt trail.
 
         Returns:
             A GenerationResult with status "failed" and error information.
@@ -506,6 +802,8 @@ class BaseLLMService:
             status="failed",
             error=error,
             error_code=error_code.value,
+            provider_used=None,
+            provider_attempts=provider_attempts or [],
         )
 
     def _retry_delay_seconds(self, attempt: int) -> float:
@@ -572,18 +870,24 @@ class BaseLLMService:
             return GenerationErrorCode.CONNECTION_ERROR
         return GenerationErrorCode.UNKNOWN_ERROR
 
-    def _safe_http_error(self, status_code: int, body: str) -> str:
+    def _safe_http_error(
+        self, status_code: int, body: str, spec: ProviderSpec | None = None
+    ) -> str:
         """
         Create a safe error message from an HTTP response, redacting sensitive credentials.
 
         Args:
             status_code: The HTTP status code.
             body: The response body text.
+            spec: The provider whose key should also be redacted (multi mode).
 
         Returns:
             A formatted error message with API keys redacted and long messages truncated.
         """
         redacted = (body or "").replace(self.config.api_key or "", "[REDACTED]")
+        if spec is not None and spec.api_key:
+            redacted = redacted.replace(spec.api_key, "[REDACTED]")
         if len(redacted) > 500:
             redacted = f"{redacted[:500]}..."
-        return f"HTTP_{status_code}: {redacted or 'OpenRouter request failed'}"
+        label = spec.name if spec is not None else "provider"
+        return f"HTTP_{status_code}: {redacted or f'{label} request failed'}"

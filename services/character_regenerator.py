@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import replace
 
 from orchestration.schemas import (
     CorrectionRequest,
@@ -19,7 +18,17 @@ from orchestration.schemas import (
     ExecutionStatus,
     ValidationStatus,
 )
-from services.base_llm_service import BaseLLMConfig, BaseLLMService
+from services.base_llm_service import BaseLLMService
+
+
+# Correction-failure diagnostic categories (surfaced on CorrectionResult and in
+# the graph's CORRECTION_FAILED bus message) so we can measure whether the true
+# root cause is provider reliability or claim/span matching.
+FAIL_LLM_PROVIDER = "LLM_PROVIDER_FAILURE"
+FAIL_NO_LOCATABLE_CLAIM = "NO_LOCATABLE_CLAIM"
+FAIL_MODEL_ECHO = "MODEL_ECHO"
+FAIL_NO_OP_MATCH = "NO_OP_MATCH"
+FAIL_OTHER = "OTHER"
 
 
 class CharacterRegenerator:
@@ -28,19 +37,28 @@ class CharacterRegenerator:
     def __init__(self, service: BaseLLMService | None = None) -> None:
         if service is not None:
             self._service = service
-            return
-
-        model = os.environ.get("HG_CORRECTOR_OPENROUTER_MODEL", "").strip()
-        max_tokens_raw = os.environ.get("HG_CORRECTOR_MAX_NEW_TOKENS", "").strip()
-        base = BaseLLMConfig()
-        self._service = BaseLLMService(
-            replace(
-                base,
-                model=model or base.model,
-                temperature=0.1,
-                max_tokens=(int(max_tokens_raw) if max_tokens_raw else base.max_tokens),
+        else:
+            # Route the Corrector through the SAME multi-provider failover router
+            # (Groq -> Gemini -> OpenRouter) as the rest of the app. A specific
+            # correction model may be pinned per provider without touching global
+            # config. HG_CORRECTOR_OPENROUTER_MODEL is preserved for compatibility.
+            overrides: dict[str, str] = {}
+            openrouter_model = (
+                os.environ.get("HG_CORRECTOR_OPENROUTER_MODEL", "").strip()
             )
-        )
+            if openrouter_model:
+                overrides["openrouter"] = openrouter_model
+            for env_name, provider in (
+                ("HG_CORRECTOR_GROQ_MODEL", "groq"),
+                ("HG_CORRECTOR_GEMINI_MODEL", "gemini"),
+            ):
+                val = os.environ.get(env_name, "").strip()
+                if val:
+                    overrides[provider] = val
+            self._service = BaseLLMService(model_overrides=overrides or None)
+
+        max_tokens_raw = os.environ.get("HG_CORRECTOR_MAX_NEW_TOKENS", "").strip()
+        self._max_new_tokens = int(max_tokens_raw) if max_tokens_raw else None
 
     @staticmethod
     def _claim_payload(request: CorrectionRequest) -> list[dict]:
@@ -120,7 +138,12 @@ class CharacterRegenerator:
             return 2
 
     def _failed_result(
-        self, request: CorrectionRequest, reason: str, attempts: int
+        self,
+        request: CorrectionRequest,
+        reason: str,
+        attempts: int,
+        failure_category: str = FAIL_OTHER,
+        provider_used: str | None = None,
     ) -> CorrectionResult:
         """Fail closed: never raise across the agent boundary.
 
@@ -128,7 +151,8 @@ class CharacterRegenerator:
         text is emitted. ``status=FAILED`` signals the orchestration to apply the
         configured corrector fail policy (human escalation or reject) instead of
         sending the unchanged answer back through the Re-Verifier on a doomed loop.
-        The diagnostic reason is recorded honestly, never a fabricated correction.
+        The diagnostic reason and ``failure_category`` are recorded honestly, never
+        a fabricated correction.
         """
         return CorrectionResult(
             original_text=request.original_response,
@@ -147,6 +171,8 @@ class CharacterRegenerator:
             validation_status=ValidationStatus.UNVALIDATED,
             attempt_count=attempts,
             status=ExecutionStatus.FAILED,
+            failure_category=failure_category,
+            provider_used=provider_used,
         )
 
     async def regenerate(self, request: CorrectionRequest) -> CorrectionResult:
@@ -165,6 +191,9 @@ class CharacterRegenerator:
         max_attempts = self._max_attempts()
         temperatures = [0.1, 0.35, 0.5]
         last_reason = "empty response"
+        saw_provider_failure = False
+        saw_echo = False
+        last_provider_used: str | None = None
 
         for attempt in range(1, max_attempts + 1):
             temperature = temperatures[min(attempt - 1, len(temperatures) - 1)]
@@ -174,20 +203,26 @@ class CharacterRegenerator:
                     conversation_history=[],
                     generation_mode="normal",
                     temperature=temperature,
+                    max_tokens=self._max_new_tokens,
                 )
             except Exception as exc:  # noqa: BLE001 - boundary must not raise
                 last_reason = f"generation_error: {type(exc).__name__}: {exc}"
+                saw_provider_failure = True
                 continue
+
+            last_provider_used = getattr(result, "provider_used", None) or last_provider_used
 
             if result.status != "success" or not result.draft_response.strip():
                 last_reason = str(
                     result.error or result.error_code or "empty response"
                 )
+                saw_provider_failure = True
                 continue
 
             corrected = result.draft_response.strip()
             if corrected == original:
                 last_reason = "model returned the original contradicted answer unchanged"
+                saw_echo = True
                 continue
 
             changed = [
@@ -206,12 +241,25 @@ class CharacterRegenerator:
                 validation_status=ValidationStatus.UNVALIDATED,
                 attempt_count=attempt,
                 status=ExecutionStatus.COMPLETED,
+                provider_used=result.provider_used,
             )
+
+        # Precedence: an echo is more informative than a raw provider failure,
+        # so classify it first; a provider failure means the LLM never produced
+        # a usable candidate at all.
+        if saw_echo:
+            category = FAIL_MODEL_ECHO
+        elif saw_provider_failure:
+            category = FAIL_LLM_PROVIDER
+        else:
+            category = FAIL_OTHER
 
         return self._failed_result(
             request,
             f"character_regeneration_failed_after_{max_attempts}_attempts: {last_reason}",
             attempts=max_attempts,
+            failure_category=category,
+            provider_used=last_provider_used,
         )
 
 

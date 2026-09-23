@@ -788,6 +788,11 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
             fail_mode = os.environ.get("HG_CORRECTOR_FAIL_MODE", "escalate").strip().lower()
             fail_route = "reject" if fail_mode == "reject" else "human_escalation"
             candidate_text = original_text
+            # Surface the corrector's diagnostic failure category (and which
+            # provider was last attempted) so operators can tell whether the
+            # root cause was LLM provider reliability or claim/span matching.
+            failure_category = dumped_corr.get("failure_category") or "OTHER"
+            provider_used = dumped_corr.get("provider_used")
             bus = add_bus_message(
                 state,
                 source_agent="corrector",
@@ -798,6 +803,8 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
                     "attempt_count": attempt_count,
                     "fail_mode": fail_mode,
                     "route": fail_route,
+                    "failure_category": failure_category,
+                    "provider_used": provider_used,
                 },
             )
             return {
@@ -817,6 +824,7 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
                     validation_status=val_status,
                     attempt_count=attempt_count,
                     fail_mode=fail_mode,
+                    failure_category=failure_category,
                 ),
             }
 

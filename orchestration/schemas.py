@@ -383,6 +383,18 @@ class CorrectionResult(BaseModel):
         default=ExecutionStatus.COMPLETED,
         description="Overall execution status of the corrector.",
     )
+    failure_category: Optional[str] = Field(
+        default=None,
+        description=(
+            "When status=FAILED, the diagnostic class of the failure: "
+            "LLM_PROVIDER_FAILURE, NO_LOCATABLE_CLAIM, MODEL_ECHO, NO_OP_MATCH, "
+            "or OTHER. None on success."
+        ),
+    )
+    provider_used: Optional[str] = Field(
+        default=None,
+        description="Hosted LLM provider that served the correction, if any.",
+    )
 
 
 # ---------------------------------------------------------------------------
