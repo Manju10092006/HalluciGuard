@@ -17,6 +17,17 @@ services:
         value: production
       - key: AUTH_DB_PATH
         value: /var/data/halluciguard_users.db
+      # ---- Multi-provider LLM router (Groq primary -> Gemini -> OpenRouter) ----
+      - key: HALLUCIGUARD_LLM_PROVIDER_ORDER
+        value: groq,gemini,openrouter
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GROQ_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
+      - key: GEMINI_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
       - key: OPENROUTER_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: OPENROUTER_MODEL
@@ -33,6 +44,8 @@ services:
         value: "true"
       - key: ALLOW_DETECTOR_FAST_PATH
         value: "false"
+      # Corrector: "openrouter" (or any non-"local" value) uses the hosted
+      # multi-provider router above; "local" uses the on-disk Qwen LoRA corrector.
       - key: HG_CORRECTOR_PROVIDER
         value: openrouter
       - key: N8N_RETRIEVAL_ENABLED
@@ -44,6 +57,10 @@ services:
       - key: CORS_ORIGINS
         value: "http://localhost:3000,http://127.0.0.1:3000,https://halluciguard-ai.vercel.app"
       - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
         sync: false
       - key: JWT_SECRET
         sync: false

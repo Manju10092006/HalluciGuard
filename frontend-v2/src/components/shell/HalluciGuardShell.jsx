@@ -305,6 +305,17 @@ export function HalluciGuardShell() {
               recentSessions={recentSessions}
               onSelectSession={handleSelectSession}
               disabled={isLoading}
+              onToggleSidebar={() => {
+                if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+                  setIsMobileSidebarOpen(!isMobileSidebarOpen)
+                } else {
+                  setSidebarCollapsed(!sidebarCollapsed)
+                }
+              }}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenCreateFlow={() => setIsCreateFlowOpen(true)}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              user={user}
             />
           ) : (
             <div className="active-conversation-layout">

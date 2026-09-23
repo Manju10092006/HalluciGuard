@@ -241,7 +241,7 @@ class CharacterRegenerator:
                 validation_status=ValidationStatus.UNVALIDATED,
                 attempt_count=attempt,
                 status=ExecutionStatus.COMPLETED,
-                provider_used=result.provider_used,
+                provider_used=getattr(result, "provider_used", None),
             )
 
         # Precedence: an echo is more informative than a raw provider failure,

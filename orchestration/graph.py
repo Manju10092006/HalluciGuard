@@ -762,14 +762,16 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
             )
 
         provider = os.environ.get("HG_CORRECTOR_PROVIDER", "openrouter").strip().lower()
-        if provider == "openrouter":
+        if provider == "local":
+            # Local specialized Corrector (on-disk Qwen LoRA); no remote calls.
+            corr_res = await asyncio.to_thread(CorrectorAgent().correct, corr_req)
+        else:
+            # Any hosted value (openrouter/groq/gemini/hosted) routes through the
+            # multi-provider failover router (Groq -> Gemini -> OpenRouter). Its
+            # output remains untrusted until the dedicated Re-Verifier and Judge pass.
             from services.character_regenerator import CharacterRegenerator
 
-            # Whole-answer regeneration controller.  Its output remains
-            # untrusted until the dedicated Re-Verifier and Judge pass.
             corr_res = await CharacterRegenerator().regenerate(corr_req)
-        else:
-            corr_res = await asyncio.to_thread(CorrectorAgent().correct, corr_req)
         dumped_corr = _dump(corr_res)
 
         attempt_count = int(state.get("correction_attempt_count", 0)) + 1
