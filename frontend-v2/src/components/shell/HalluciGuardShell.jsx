@@ -35,7 +35,7 @@ export function HalluciGuardShell() {
   const [isSourceDrawerOpen, setIsSourceDrawerOpen] = useState(false)
 
   // Sidebar Layout State
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
   const [activeNav, setActiveNav] = useState('home')
 
@@ -276,26 +276,28 @@ export function HalluciGuardShell() {
 
       {/* Main Chat Workspace */}
       <div className="chat-workspace-area">
-        {/* Minimal Top Bar */}
-        <ChatHeader
-          title={activeSession?.title}
-          statusBadge={activeSession?.statusBadge}
-          statusTone={activeSession?.statusBadgeTone}
-          onToggleSidebar={() => {
-            if (window.innerWidth <= 768) {
-              setIsMobileSidebarOpen(true)
-            } else {
-              setSidebarCollapsed(!sidebarCollapsed)
-            }
-          }}
-          sidebarCollapsed={sidebarCollapsed}
-          onOpenAppearance={() => setIsAppearanceOpen(true)}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onOpenCreateFlow={() => setIsCreateFlowOpen(true)}
-          onOpenAuth={() => setIsAuthOpen(true)}
-          user={user}
-          isHome={isHome}
-        />
+        {/* Minimal Top Bar (Active Conversation Only) */}
+        {!isHome && (
+          <ChatHeader
+            title={activeSession?.title}
+            statusBadge={activeSession?.statusBadge}
+            statusTone={activeSession?.statusBadgeTone}
+            onToggleSidebar={() => {
+              if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+                setIsMobileSidebarOpen(true)
+              } else {
+                setSidebarCollapsed(!sidebarCollapsed)
+              }
+            }}
+            sidebarCollapsed={sidebarCollapsed}
+            onOpenAppearance={() => setIsAppearanceOpen(true)}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenCreateFlow={() => setIsCreateFlowOpen(true)}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            user={user}
+            isHome={isHome}
+          />
+        )}
 
         {/* Workspace Central Stage */}
         <main className="chat-main-viewport">
@@ -398,7 +400,7 @@ export function HalluciGuardShell() {
           flex: 1;
           display: flex;
           flex-direction: column;
-          height: calc(100vh - 48px);
+          height: 100vh;
           overflow: hidden;
           position: relative;
         }
