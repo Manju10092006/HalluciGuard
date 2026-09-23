@@ -34,8 +34,8 @@ DEFAULT_PROVIDER_ORDER: tuple[str, ...] = (GROQ, GEMINI, OPENROUTER)
 # Default models are configurable via *_MODEL env vars. These defaults target
 # currently-supported, low-latency, general-purpose chat models for each
 # provider. Override per deployment; never hardcode a model at a call site.
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-14b"
 
 
