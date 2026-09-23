@@ -13,12 +13,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-__all__ = ["CorrectorConfig", "DEFAULT_CORRECTOR_OPENROUTER_MODEL"]
+__all__ = ["CorrectorConfig", "DEFAULT_CORRECTOR_OPENROUTER_MODEL", "DEFAULT_CORRECTOR_GROQ_MODEL"]
 
 # Cheap non-reasoning model for the OpenRouter-backed corrector path. Matches the
 # Base LLM's fallback model and the n8n "Analyze Claim" node, so the whole stack
 # stays on one credit-friendly model. Override with HG_CORRECTOR_OPENROUTER_MODEL.
 DEFAULT_CORRECTOR_OPENROUTER_MODEL: str = "qwen/qwen-2.5-7b-instruct"
+DEFAULT_CORRECTOR_GROQ_MODEL: str = "openai/gpt-oss-120b"
 
 
 def _env_str(name: str, default: str) -> str:
