@@ -44,7 +44,7 @@ export function EmptyVerificationState({
     <div className="empty-verification-viewport">
       {/* Architectural Sunlight & Window Blinds Motion Blur Atmosphere */}
       <div className="shadow-atmosphere">
-        <svg className="sunlight-svg" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <svg className="sunlight-svg" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
           <defs>
             <filter id="directionalMotionBlur" x="-30%" y="-30%" width="160%" height="160%" filterUnits="objectBoundingBox">
               <feGaussianBlur stdDeviation="55 18" />
@@ -52,11 +52,18 @@ export function EmptyVerificationState({
             <filter id="softFoliageMotionBlur" x="-40%" y="-40%" width="180%" height="180%" filterUnits="objectBoundingBox">
               <feGaussianBlur stdDeviation="35 12" />
             </filter>
+            <radialGradient id="ambientSunlight" cx="50%" cy="40%" r="85%">
+              <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.9" />
+              <stop offset="50%" stopColor="#FFFFFF" stopOpacity="0.6" />
+              <stop offset="100%" stopColor="#F6F6F4" stopOpacity="0.2" />
+            </radialGradient>
           </defs>
 
-          <ellipse cx="950" cy="220" rx="700" ry="480" fill="#FFFFFF" opacity="0.5" filter="url(#directionalMotionBlur)" />
-          
-          <g opacity="0.08" filter="url(#directionalMotionBlur)">
+          {/* Full Viewport Ambient Sunlight Pool */}
+          <rect width="1440" height="900" fill="url(#ambientSunlight)" filter="url(#directionalMotionBlur)" />
+
+          {/* Architectural Window Blind Shadows (Directional Motion Blur Slats) */}
+          <g opacity="0.07" filter="url(#directionalMotionBlur)">
             <rect x="420" y="-120" width="85" height="1300" transform="rotate(34 420 -120)" fill="#111111" />
             <rect x="570" y="-120" width="80" height="1300" transform="rotate(34 570 -120)" fill="#111111" />
             <rect x="720" y="-120" width="90" height="1300" transform="rotate(34 720 -120)" fill="#111111" />
@@ -66,7 +73,8 @@ export function EmptyVerificationState({
             <rect x="1320" y="-120" width="105" height="1300" transform="rotate(34 1320 -120)" fill="#111111" />
           </g>
 
-          <g opacity="0.09" filter="url(#softFoliageMotionBlur)">
+          {/* Organic Tree & Window Structure Motion Blurred Shadows */}
+          <g opacity="0.08" filter="url(#softFoliageMotionBlur)">
             <path d="M1080,40 Q1240,110 1420,70 Q1310,260 1460,420 Q1190,320 1080,40 Z" fill="#050505" />
             <path d="M1220,-60 Q1340,140 1490,190 Q1370,360 1495,570 Q1240,420 1220,-60 Z" fill="#050505" />
             <ellipse cx="1340" cy="190" rx="110" ry="80" transform="rotate(-15 1340 190)" fill="#050505" />
@@ -258,12 +266,12 @@ export function EmptyVerificationState({
           position: relative;
           width: 100%;
           height: 100%;
-          min-height: calc(100vh - 48px);
+          min-height: 100vh;
           display: flex;
           flex-direction: column;
-          background-color: #F6F6F4;
+          background: #F6F6F4 !important;
           color: #181818;
-          overflow-x: hidden;
+          overflow: hidden;
         }
 
         .shadow-atmosphere {
@@ -275,15 +283,14 @@ export function EmptyVerificationState({
           pointer-events: none;
           z-index: 0;
           overflow: hidden;
+          background: #F6F6F4 !important;
           filter: blur(8px);
         }
 
         .sunlight-svg {
-          width: 110%;
-          height: 110%;
-          margin-top: -5%;
-          margin-left: -5%;
-          opacity: 0.9;
+          width: 100%;
+          height: 100%;
+          opacity: 0.95;
           animation: motionBlurDrift 28s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
           will-change: transform, filter;
         }
@@ -312,6 +319,7 @@ export function EmptyVerificationState({
           justify-content: space-between;
           align-items: center;
           padding: 24px 20px 16px 20px;
+          background: transparent !important;
         }
 
         .top-controls {
@@ -356,6 +364,7 @@ export function EmptyVerificationState({
           margin-top: auto;
           margin-bottom: auto;
           transform: translateY(-12px);
+          background: transparent !important;
         }
 
         .upgrade-pill {
@@ -551,6 +560,7 @@ export function EmptyVerificationState({
           gap: 12px;
           margin-top: auto;
           padding-bottom: 4px;
+          background: transparent !important;
         }
 
         .template-rail-wrapper {
@@ -560,6 +570,7 @@ export function EmptyVerificationState({
           display: flex;
           justify-content: center;
           scrollbar-width: none;
+          background: transparent !important;
         }
 
         .template-rail-wrapper::-webkit-scrollbar {
@@ -570,6 +581,7 @@ export function EmptyVerificationState({
           display: flex;
           gap: 12px;
           max-width: 1240px;
+          background: transparent !important;
         }
 
         .template-card {
