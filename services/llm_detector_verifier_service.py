@@ -8,7 +8,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
-from agents.detector_agent import DetectionResult, DetectorAgent
+from detector_v2 import DetectorAgent
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 
 logger = logging.getLogger(__name__)
@@ -143,28 +143,36 @@ class BaseLLMDetectorVerifierService:
                 verifier=None,
             )
 
-        # Step 2: Detector Agent Execution
+        # Step 2: Detector Agent Execution (DetV2 sole detector — returns the
+        # extended dict: canonical six fields + claims/diagnostics).
         try:
-            detection_result: DetectionResult = self.detector_agent.detect(
+            detection_result: dict[str, Any] = self.detector_agent.detect(
                 user_query=user_query,
                 llm_response=draft_response,
             )
 
-            risk_tier = str(detection_result.risk_level.value).upper()
-            next_act_str = str(detection_result.next_action.value).upper()
+            status = str(detection_result.get("status", "completed")).lower()
+            completed = status == "completed"
+            risk_tier = str(detection_result.get("risk_level", "HIGH")).upper()
+            next_act_str = str(detection_result.get("next_action", "Verify")).upper()
             decision = "VERIFY" if next_act_str == "VERIFY" else "ACCEPT"
+            model_source = str(detection_result.get("model_source", "detector_v2"))
+            # DetV2 signals a non-real (degraded/failed) run via `status`; a completed
+            # run means the calibrated model executed. Prefer an explicit degraded flag
+            # if the seam set one, else derive it from status.
+            degraded = bool(detection_result.get("detector_degraded", not completed))
 
             detector_dict: dict[str, Any] = {
-                "confidence_score": detection_result.confidence_score,
-                "hallucination_probability": detection_result.hallucination_probability,
+                "confidence_score": detection_result.get("confidence_score"),
+                "hallucination_probability": detection_result.get("hallucination_probability"),
                 "risk_tier": risk_tier,
                 "decision": decision,
-                "model_source": detection_result.model_source,
-                # §6 execution diagnostics — prove real inference vs. baseline
-                "detector_model_loaded": bool(getattr(detection_result, "detector_model_loaded", False)),
-                "detector_inference_executed": bool(getattr(detection_result, "detector_inference_executed", False)),
-                "detector_degraded": bool(getattr(detection_result, "detector_degraded", False)),
-                "detector_model_source": str(getattr(detection_result, "detector_model_source", "")),
+                "model_source": model_source,
+                # §6 execution diagnostics — prove real inference vs. degraded fallback.
+                "detector_model_loaded": completed,
+                "detector_inference_executed": completed,
+                "detector_degraded": degraded,
+                "detector_model_source": model_source,
             }
         except Exception as exc:
             logger.error(

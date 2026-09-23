@@ -9,35 +9,57 @@ VERIFIER_DIR = Path(__file__).resolve().parents[2] / "agents" / "verifier_agent"
 if str(VERIFIER_DIR) not in sys.path:
     sys.path.insert(0, str(VERIFIER_DIR))
 
-from agents.detector_agent.halueval_inference import validate_halueval_model_reference
+from orchestration.runtime_validation import validate_detector_model_reference
 from agents.verifier_agent.nli.entailment import NLIEngine
 from agents.verifier_agent.api.pipeline import VerificationPipeline
 from agents.verifier_agent.schemas.models import Passage
 
 
-def test_detector_model_validation_rejects_missing_local_path(tmp_path):
-    missing = tmp_path / "missing-detector"
-    with pytest.raises(
-        FileNotFoundError, match="HaluEval detector model directory not found"
-    ):
-        validate_halueval_model_reference(str(missing))
+def test_detector_model_validation_ok_when_calibrator_present():
+    """DetV2 is the sole detector: the check passes when the vendored Stage-7
+    calibrator is present and the ``detector_v2`` package imports, and it reports
+    the pinned Hugging Face encoder source in its metadata."""
+    result = validate_detector_model_reference()
+    assert result.ok is True
+    assert result.component == "detector"
+    md = result.metadata
+    assert md["detector"] == "detector_v2"
+    assert md["calibrator_present"] is True
+    # Encoder provenance is reported honestly (HF pinned revision or local override).
+    assert md["encoder_source"] in {"huggingface", "local_override"}
+    assert isinstance(md["hf_repo_id"], str) and md["hf_repo_id"]
+    assert isinstance(md["hf_revision"], str) and md["hf_revision"]
 
 
-def test_detector_model_validation_rejects_incomplete_local_path(tmp_path):
-    model_dir = tmp_path / "detector"
-    model_dir.mkdir()
-    (model_dir / "config.json").write_text("{}")
-    with pytest.raises(
-        FileNotFoundError, match="Missing required Hugging Face artifact"
-    ):
-        validate_halueval_model_reference(str(model_dir))
-
-
-def test_detector_model_validation_accepts_huggingface_identifier():
-    assert (
-        validate_halueval_model_reference("hf://org/halluciguard-detector")
-        == "org/halluciguard-detector"
+def test_detector_model_validation_fails_closed_when_calibrator_missing(tmp_path, monkeypatch):
+    """A missing Stage-7 calibrator must fail closed (ok=False), never silently pass."""
+    monkeypatch.setattr(
+        "detector_v2.agent._CALIBRATOR", str(tmp_path / "does-not-exist.joblib")
     )
+    result = validate_detector_model_reference()
+    assert result.ok is False
+    assert result.component == "detector"
+    assert "calibrator" in result.detail.lower()
+    assert result.metadata["calibrator_present"] is False
+
+
+def test_detector_model_validation_fails_closed_when_package_unimportable(monkeypatch):
+    """If the vendored ``detector_v2`` package cannot be imported, the detector
+    cannot run, so the check fails closed rather than reporting a healthy detector."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kwargs):
+        if name == "detector_v2" or name.startswith("detector_v2."):
+            raise ImportError("simulated missing detector_v2 package")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    result = validate_detector_model_reference()
+    assert result.ok is False
+    assert result.component == "detector"
+    assert "not importable" in result.detail.lower()
 
 
 def test_nli_unavailable_is_degraded_not_uniform_success(monkeypatch):

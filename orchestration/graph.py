@@ -182,7 +182,8 @@ def _generate_route(state: HalluciGuardState) -> str:
 
 
 async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
-    from agents.detector_agent.detector import DetectorAgent
+    # Detector integration seam: defaults to DetV2 Stage-7, falls back to V1.
+    from .detector_bridge import run_detection
 
     node_start = start_timer()
     try:
@@ -191,7 +192,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             raise ValueError("No LLM response available for detection.")
 
         def _run_detect():
-            return DetectorAgent().detect(state["user_query"], llm_resp)
+            return run_detection(state["user_query"], llm_resp)
 
         detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))

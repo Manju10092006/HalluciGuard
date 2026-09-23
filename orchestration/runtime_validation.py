@@ -56,31 +56,62 @@ def validate_openrouter_configuration() -> ComponentCheckResult:
 
 
 def validate_detector_model_reference() -> ComponentCheckResult:
-    """Validate that Detector configuration points to a loadable model artifact."""
-    try:
-        from agents.detector_agent.config import DetectorConfig
-        from agents.detector_agent.halueval_inference import (
-            validate_halueval_model_reference,
-        )
+    """Validate that the DetV2 detector's artifacts are resolvable and loadable.
 
-        cfg = DetectorConfig()
-        resolved = validate_halueval_model_reference(cfg.halueval_model_path)
-        return ComponentCheckResult(
-            ok=True,
-            component="detector",
-            detail="Detector model reference is valid.",
-            metadata={
-                "configured_model_path": cfg.halueval_model_path,
-                "resolved_model_reference": resolved,
-            },
+    DetV2 is the sole production detector. Its trained Stage-2 encoder is fetched
+    from a pinned Hugging Face revision (or a local ``DETECTORV2_ENCODER_DIR``
+    override for offline use), and its Stage-7 probability calibrator is vendored
+    on disk. This check fails closed: if the ``detector_v2`` package is not
+    importable, or the calibrator artifact is missing, the calibrated Stage-7 path
+    cannot run, so the check reports ``ok=False``.
+    """
+    try:
+        import detector_v2  # noqa: F401 - import proves the vendored package resolves
+        from detector_v2.agent import (
+            _CALIBRATOR,
+            _ENCODER_DIR_OVERRIDE,
+            _HF_REPO_ID,
+            _HF_REVISION,
         )
     except Exception as exc:
         return ComponentCheckResult(
             ok=False,
             component="detector",
-            detail=f"{type(exc).__name__}: {exc}",
-            metadata={"configured_model_path": os.environ.get("HALUEVAL_MODEL_PATH", "")},
+            detail=f"DetV2 detector package is not importable: {type(exc).__name__}: {exc}",
+            metadata={"detector": "detector_v2"},
         )
+
+    calibrator_present = os.path.isfile(_CALIBRATOR)
+    encoder_source = (
+        "local_override"
+        if _ENCODER_DIR_OVERRIDE and os.path.isdir(_ENCODER_DIR_OVERRIDE)
+        else "huggingface"
+    )
+    metadata: Dict[str, Any] = {
+        "detector": "detector_v2",
+        "calibrator_path": _CALIBRATOR,
+        "calibrator_present": calibrator_present,
+        "encoder_source": encoder_source,
+        "hf_repo_id": _HF_REPO_ID,
+        "hf_revision": _HF_REVISION,
+        "encoder_dir_override": _ENCODER_DIR_OVERRIDE or None,
+    }
+    if not calibrator_present:
+        return ComponentCheckResult(
+            ok=False,
+            component="detector",
+            detail=(
+                f"DetV2 Stage-7 calibrator is missing at {_CALIBRATOR}; "
+                "calibrated detection cannot run."
+            ),
+            metadata=metadata,
+        )
+    return ComponentCheckResult(
+        ok=True,
+        component="detector",
+        detail="DetV2 detector artifacts are resolvable (Stage-7 calibrator present).",
+        metadata=metadata,
+    )
 
 
 def validate_verifier_configuration() -> ComponentCheckResult:

@@ -4,9 +4,29 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 
-from agents.detector_agent import DetectionResult, DetectorAgent, NextAction, RiskLevel
+from detector_v2.adapter import to_extended_dict
+from detector_v2.schemas import DetectorV2Output, NextAction, RiskLevel
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 from services.llm_detector_verifier_service import BaseLLMDetectorVerifierService
+
+
+def _det(
+    confidence_score: float,
+    hallucination_probability: float,
+    risk_level: RiskLevel,
+    next_action: NextAction,
+    model_source: str = "detector_v2_stage7_calibrated",
+) -> dict:
+    """Build the DetV2 extended-dict a real ``DetectorAgent.detect()`` returns."""
+    return to_extended_dict(
+        DetectorV2Output(
+            confidence_score=confidence_score,
+            hallucination_probability=hallucination_probability,
+            risk_level=risk_level,
+            next_action=next_action,
+            model_source=model_source,
+        )
+    )
 
 
 class StubBaseLLMService(BaseLLMService):
@@ -20,12 +40,14 @@ class StubBaseLLMService(BaseLLMService):
         return self._stub_result
 
 
-class DummyDetectorAgent(DetectorAgent):
-    def __init__(self, detection_result: DetectionResult | Exception):
+class DummyDetectorAgent:
+    """Plain stub matching the DetV2 ``detect()`` surface (dict), or raises."""
+
+    def __init__(self, detection_result):
         self._stub_result = detection_result
         self.detect_calls = 0
 
-    def detect(self, user_query: str, llm_response: str) -> DetectionResult:
+    def detect(self, user_query: str, llm_response: str):
         self.detect_calls += 1
         if isinstance(self._stub_result, Exception):
             raise self._stub_result
@@ -82,12 +104,11 @@ async def test_low_detector_result_skips_verifier():
         request_id="req-low",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.98,
         hallucination_probability=0.02,
         risk_level=RiskLevel.LOW,
         next_action=NextAction.ACCEPT,
-        model_source="halueval-distilbert",
     )
 
     mock_verifier_pipeline = AsyncMock()
@@ -125,12 +146,11 @@ async def test_medium_detector_result_invokes_verifier():
         request_id="req-med",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.60,
         hallucination_probability=0.40,
         risk_level=RiskLevel.MEDIUM,
         next_action=NextAction.ACCEPT,
-        model_source="halueval-distilbert",
     )
 
     mock_verifier_pipeline = AsyncMock()
@@ -167,12 +187,11 @@ async def test_high_detector_result_invokes_verifier():
         request_id="req-high",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.20,
         hallucination_probability=0.80,
         risk_level=RiskLevel.HIGH,
         next_action=NextAction.VERIFY,
-        model_source="halueval-distilbert",
     )
 
     mock_verifier_pipeline = AsyncMock()
@@ -249,7 +268,7 @@ async def test_empty_draft_does_not_invoke_verifier():
 
     llm_stub = StubBaseLLMService(gen_result)
     det_stub = DummyDetectorAgent(
-        DetectionResult(
+        _det(
             confidence_score=0.9,
             hallucination_probability=0.1,
             risk_level=RiskLevel.LOW,
@@ -284,7 +303,7 @@ async def test_verifier_failure_handled_cleanly():
         request_id="req-ver-fail",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.10,
         hallucination_probability=0.90,
         risk_level=RiskLevel.HIGH,
@@ -325,7 +344,7 @@ async def test_existing_verifier_output_preserved():
         request_id="req-pres",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.30,
         hallucination_probability=0.70,
         risk_level=RiskLevel.HIGH,
@@ -374,7 +393,7 @@ async def test_step3_result_is_json_serializable():
         request_id="req-json",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.40,
         hallucination_probability=0.60,
         risk_level=RiskLevel.HIGH,

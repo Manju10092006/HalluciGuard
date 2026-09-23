@@ -5,8 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from agents.detector_agent.detector import DetectorAgent
-from agents.detector_agent.halueval_inference import InferenceResult
 from orchestration.graph import _memory_node, _reverifier_node, _verifier_node
 from orchestration.schemas import ClaimReport, CorrectionRequest, Evidence, VerdictLabel
 from services.character_regenerator import CharacterRegenerator

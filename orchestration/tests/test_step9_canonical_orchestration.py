@@ -150,12 +150,12 @@ async def test_detector_low_risk_routes_to_accept(monkeypatch):
                 "confidence_score": 0.92,
                 "risk_level": "LOW",
                 "next_action": "Accept",
-                "model_source": "halueval-distilbert",
+                "model_source": "detector_v2_stage7_calibrated",
             }
 
     monkeypatch.setattr(
-        "agents.detector_agent.detector.DetectorAgent",
-        lambda *a, **k: StubDetector(),
+        "orchestration.detector_bridge._get_v2_agent",
+        lambda: StubDetector(),
     )
     monkeypatch.setenv("ALWAYS_VERIFY", "false")
     monkeypatch.setenv("ALLOW_DETECTOR_FAST_PATH", "true")
@@ -179,13 +179,13 @@ async def test_detector_low_risk_verifies_by_default(monkeypatch):
                 "confidence_score": 0.92,
                 "risk_level": "LOW",
                 "next_action": "Accept",
-                "model_source": "halueval-distilbert",
+                "model_source": "detector_v2_stage7_calibrated",
                 "status": "completed",
             }
 
     monkeypatch.setattr(
-        "agents.detector_agent.detector.DetectorAgent",
-        lambda *a, **k: StubDetector(),
+        "orchestration.detector_bridge._get_v2_agent",
+        lambda: StubDetector(),
     )
     monkeypatch.delenv("ALLOW_DETECTOR_FAST_PATH", raising=False)
     monkeypatch.delenv("ALWAYS_VERIFY", raising=False)
@@ -211,12 +211,12 @@ async def test_detector_high_risk_routes_to_verifier(monkeypatch):
                 "confidence_score": 0.90,
                 "risk_level": "HIGH",
                 "next_action": "Verify",
-                "model_source": "halueval-distilbert",
+                "model_source": "detector_v2_stage7_calibrated",
             }
 
     monkeypatch.setattr(
-        "agents.detector_agent.detector.DetectorAgent",
-        lambda *a, **k: StubDetector(),
+        "orchestration.detector_bridge._get_v2_agent",
+        lambda: StubDetector(),
     )
     monkeypatch.setenv("ALWAYS_VERIFY", "false")
 
@@ -242,12 +242,12 @@ async def test_detector_always_verify_override(monkeypatch):
                 "confidence_score": 0.95,
                 "risk_level": "LOW",
                 "next_action": "Accept",
-                "model_source": "halueval-distilbert",
+                "model_source": "detector_v2_stage7_calibrated",
             }
 
     monkeypatch.setattr(
-        "agents.detector_agent.detector.DetectorAgent",
-        lambda *a, **k: StubDetector(),
+        "orchestration.detector_bridge._get_v2_agent",
+        lambda: StubDetector(),
     )
     monkeypatch.setenv("ALWAYS_VERIFY", "true")
 

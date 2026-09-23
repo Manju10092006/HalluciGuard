@@ -4,7 +4,7 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
-from agents.detector_agent import DetectionResult, DetectorAgent
+from detector_v2 import DetectorAgent
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 
 logger = logging.getLogger(__name__)
@@ -94,21 +94,22 @@ class BaseLLMDetectorService:
                 detector=None,
             )
 
-        # Step 2: Detector Agent Execution
-        detection_result: DetectionResult = self.detector_agent.detect(
+        # Step 2: Detector Agent Execution (DetV2 sole detector — returns the
+        # extended dict: canonical six fields + claims/diagnostics).
+        detection_result: dict[str, Any] = self.detector_agent.detect(
             user_query=user_query,
             llm_response=draft_response,
         )
 
-        next_act_str = str(detection_result.next_action.value).upper()
+        next_act_str = str(detection_result.get("next_action", "Verify")).upper()
         decision = "VERIFY" if next_act_str == "VERIFY" else "ACCEPT"
 
         detector_dict: dict[str, Any] = {
-            "confidence_score": detection_result.confidence_score,
-            "hallucination_probability": detection_result.hallucination_probability,
-            "risk_tier": str(detection_result.risk_level.value),
+            "confidence_score": detection_result.get("confidence_score"),
+            "hallucination_probability": detection_result.get("hallucination_probability"),
+            "risk_tier": str(detection_result.get("risk_level", "HIGH")).upper(),
             "decision": decision,
-            "model_source": detection_result.model_source,
+            "model_source": detection_result.get("model_source", "detector_v2"),
         }
 
         return LLMDetectorSliceResult(
