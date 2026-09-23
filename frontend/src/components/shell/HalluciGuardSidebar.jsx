@@ -318,11 +318,12 @@ export function HalluciGuardSidebar({
           width: var(--sidebar-width);
           min-width: var(--sidebar-width);
           height: 100vh;
-          background: var(--surface);
+          background: rgba(250, 249, 244, 0.94);
+          backdrop-filter: blur(24px) saturate(1.08);
           border-right: 1px solid var(--border);
           display: flex;
           flex-direction: column;
-          transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 240ms ease-out;
+          transition: width 280ms cubic-bezier(0.16, 1, 0.3, 1), min-width 280ms cubic-bezier(0.16, 1, 0.3, 1), transform 240ms ease-out, opacity 180ms ease;
           z-index: 50;
           user-select: none;
         }
@@ -330,16 +331,20 @@ export function HalluciGuardSidebar({
         .halluciguard-sidebar.is-collapsed {
           width: var(--sidebar-collapsed-width);
           min-width: var(--sidebar-collapsed-width);
+          overflow: hidden;
+          opacity: 0;
+          border-right-color: transparent;
+          pointer-events: none;
         }
 
         /* Top Row */
         .sidebar-top-row {
-          height: 52px;
+          height: 60px;
           display: flex;
           align-items: center;
           justify-content: space-between;
           padding: 0 14px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid rgba(26, 32, 26, 0.07);
         }
 
         .workspace-selector-btn {
@@ -348,7 +353,7 @@ export function HalluciGuardSidebar({
           gap: 9px;
           cursor: pointer;
           padding: 4px;
-          border-radius: 6px;
+          border-radius: 10px;
           transition: background-color 120ms ease;
         }
 
@@ -364,7 +369,7 @@ export function HalluciGuardSidebar({
 
         .workspace-name {
           font-size: 14.5px;
-          font-weight: 600;
+          font-weight: 500;
           letter-spacing: -0.01em;
           color: var(--text-primary);
         }
@@ -376,7 +381,7 @@ export function HalluciGuardSidebar({
         .sidebar-collapse-btn {
           width: 28px;
           height: 28px;
-          border-radius: 6px;
+          border-radius: 999px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -400,16 +405,16 @@ export function HalluciGuardSidebar({
           align-items: center;
           gap: 7px;
           padding: 6px 10px;
-          border-radius: var(--radius-sm);
+          border-radius: 999px;
           background: var(--accent-light);
           color: var(--accent);
           font-size: 11.5px;
-          font-weight: 600;
+          font-weight: 500;
           transition: background-color 140ms ease;
         }
 
         .invite-credits-btn:hover {
-          background: rgba(109, 94, 245, 0.16);
+          background: rgba(34, 124, 104, 0.12);
         }
 
         .gift-icon {
@@ -433,7 +438,7 @@ export function HalluciGuardSidebar({
           border: 1px solid var(--border);
           color: var(--text-primary);
           font-size: 13px;
-          font-weight: 600;
+          font-weight: 500;
           transition: all 140ms ease;
         }
 
@@ -460,7 +465,7 @@ export function HalluciGuardSidebar({
           align-items: center;
           gap: 10px;
           padding: 0 10px;
-          border-radius: 8px;
+          border-radius: 999px;
           color: var(--text-secondary);
           font-size: 13px;
           font-weight: 500;
@@ -475,7 +480,7 @@ export function HalluciGuardSidebar({
         .nav-item-btn.is-active {
           color: var(--text-primary);
           background: var(--surface-sunken);
-          font-weight: 600;
+          font-weight: 500;
         }
 
         .active-indicator-bar {
@@ -576,7 +581,7 @@ export function HalluciGuardSidebar({
           display: flex;
           align-items: center;
           padding: 0 8px;
-          border-radius: 6px;
+          border-radius: 999px;
           color: var(--text-secondary);
           font-size: 13px;
           text-align: left;
