@@ -301,7 +301,7 @@ class ModelClient:
         config: Optional[CorrectorConfig] = None,
         generator: Optional[Generator] = None,
     ) -> None:
-        self.config = config or CorrectorConfig()
+        self.config = config or CorrectorConfig.from_env()
         self._generator = generator
         self._status: Optional[ModelStatus] = None
         if generator is not None:
@@ -322,6 +322,49 @@ class ModelClient:
         """Resolve, then load. Returns the resolved status; never raises."""
         if self._status is not None:
             return self._status
+
+        # Production API provider path. The provider is selected before
+        # local-model resolution so a missing checkpoint cannot disable the
+        # hosted Corrector.
+        if self.config.provider == "groq":
+            api_key = os.environ.get("GROQ_API_KEY", "")
+            if not api_key:
+                self._status = _unavailable(
+                    ModelUnavailableReason.MODEL_PATH_MISSING,
+                    "GROQ_API_KEY is not configured for provider=groq",
+                    tried=["https://api.groq.com/openai/v1/chat/completions"],
+                    base_model=self.config.groq_model,
+                )
+                return self._status
+            try:
+                from .groq_client import GroqGenerator
+
+                self._generator = GroqGenerator(
+                    api_key=api_key,
+                    model=self.config.groq_model,
+                    timeout_seconds=self.config.groq_timeout_seconds,
+                    max_retries=self.config.groq_max_retries,
+                    reasoning_effort=self.config.groq_reasoning_effort,
+                )
+                self._status = ModelStatus(
+                    available=True,
+                    kind="groq_api",
+                    resolved_path="https://api.groq.com/openai/v1/chat/completions",
+                    base_model=self.config.groq_model,
+                    detail=(
+                        "using Groq hosted Corrector; validation and deterministic "
+                        "reconstruction remain HalluciGuard-owned"
+                    ),
+                    tried_paths=["https://api.groq.com/openai/v1/chat/completions"],
+                )
+                return self._status
+            except Exception as exc:
+                self._status = _unavailable(
+                    ModelUnavailableReason.MODEL_LOAD_FAILED,
+                    f"Groq client initialization failed: {type(exc).__name__}: {exc}",
+                    base_model=self.config.groq_model,
+                )
+                return self._status
 
         status = resolve_model(self.config)
         if not status.available:
