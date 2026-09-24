@@ -56,9 +56,17 @@ def _hr(title):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--query", default=DEFAULT_QUERY)
-    ap.add_argument("--draft", default=DEFAULT_DRAFT)
+    ap.add_argument(
+        "--draft",
+        default="",
+        help="OPTIONAL. Real product flow: leave empty and the Generator (base_llm) "
+        "writes the draft from the query itself. Supply one only to inject a known "
+        "hallucination so the Corrector's repair is visible on demand.",
+    )
     args = ap.parse_args()
 
+    # llm_response="" -> _generate_node calls BaseLLMService to produce the draft
+    # from the query alone (exactly how a user hits the product).
     result = asyncio.run(run_verification(args.query, args.draft, domain="general"))
 
     trace = result.get("trace", [])
@@ -66,7 +74,11 @@ def main() -> None:
 
     _hr("INPUT")
     print("query :", args.query)
-    print("draft :", args.draft)
+    if args.draft:
+        print("draft : (supplied by caller to inject a known hallucination)")
+        print("      :", args.draft)
+    else:
+        print("draft : (none supplied -> Generator writes it from the query, real product flow)")
 
     _hr("EXECUTION TRACE (real production graph)")
     print(" -> ".join(str(n) for n in nodes))
