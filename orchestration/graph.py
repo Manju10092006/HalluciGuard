@@ -1034,6 +1034,7 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
                     "passed": False,
                     "remaining_contradictions": 0,
                     "status": "failed",
+                    "failure_category": "CLAIM_DECOMPOSITION_FAILED",
                 },
                 "reverification_attempt_count": int(state.get("reverification_attempt_count", 0)) + 1,
                 "route": "human_escalation",
@@ -1100,11 +1101,25 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             and remaining_contradictions == 0
         )
 
+        # §25: surface a machine-readable failure class whenever the gate fails.
+        # A remaining contradiction (original unresolved OR newly introduced by the
+        # correction) is distinct from a run that could not re-ground the candidate
+        # at all (DEGRADED/FAILED verifier status, e.g. retrieval returned nothing).
+        failure_category: str | None = None
+        if not passed:
+            if remaining_contradictions > 0:
+                failure_category = "REMAINING_CONTRADICTION"
+            elif canonical_v_res.status == ExecutionStatus.FAILED:
+                failure_category = "VERIFIER_FAILURE"
+            else:
+                failure_category = "DEGRADED_REVERIFICATION"
+
         rev_result = ReverificationResult(
             passed=passed,
             verifier_result=canonical_v_res,
             remaining_contradictions=remaining_contradictions,
             status=ExecutionStatus.COMPLETED if canonical_v_res.status == ExecutionStatus.COMPLETED else ExecutionStatus.FAILED,
+            failure_category=failure_category,
         )
         dumped_rev = _dump(rev_result)
         rev_attempts = int(state.get("reverification_attempt_count", 0)) + 1
