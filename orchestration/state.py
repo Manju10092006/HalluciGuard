@@ -73,6 +73,11 @@ class HalluciGuardState(TypedDict, total=False):
     # Shared inter-agent contract (Legacy / Backward-compatibility)
     detector: dict[str, Any]
     detected_claims: list[dict[str, Any]]
+    # Claim Analyzer gate (factual-claim extraction before retrieval). When
+    # ``claims_gated`` is True, ``detected_claims`` holds ONLY factual claims and
+    # the Verifier must not fall back to verifying the whole raw draft.
+    claims_gated: bool
+    claim_analysis: dict[str, Any]
     route: str
     claims: list[dict[str, Any]]
     hallucination_probability: float

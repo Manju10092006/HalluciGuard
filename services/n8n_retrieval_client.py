@@ -149,7 +149,7 @@ class N8NRetrievalClient:
             }
 
     @staticmethod
-    def _normalize_item_to_passage(item: Dict[str, Any], idx: int) -> Optional[Passage]:
+    def _normalize_item_to_passage(item: Dict[str, Any], idx: int, default_claim_id: str = "") -> Optional[Passage]:
         """Convert an individual raw evidence dictionary to a standard Passage model."""
         if not isinstance(item, dict) or not item:
             return None
@@ -160,6 +160,7 @@ class N8NRetrievalClient:
         snippet = str(item.get("snippet") or item.get("content") or item.get("text") or item.get("extract") or "").strip()
         pub_date = str(item.get("published_at") or item.get("publication_date") or item.get("date") or "unknown").strip()
         source_id = str(item.get("source_id") or f"{source}_{idx+1}").strip()
+        claim_id = str(item.get("claim_id") or default_claim_id or "").strip()
 
         if not snippet and not raw_title and not url:
             return None
@@ -167,7 +168,7 @@ class N8NRetrievalClient:
         title = raw_title or f"Evidence Passage {idx+1}"
 
         # adapter_score is an upstream heuristic (token overlap / rank), NOT a BGE score.
-        raw_score = item.get("adapter_score") or item.get("score") or item.get("confidence") or 0.70
+        raw_score = item.get("adapter_score") or item.get("score") or item.get("confidence") or item.get("final_score") or 0.70
         try:
             adapter_score = float(raw_score)
         except (ValueError, TypeError):
@@ -182,6 +183,7 @@ class N8NRetrievalClient:
             source_id=source_id,
             relevance_score=0.0,  # Explicitly 0.0 so Python BGE Reranker computes the true relevance
             source_confidence_hint=round(max(0.0, min(1.0, adapter_score)), 4),
+            claim_id=claim_id,
         )
 
     def normalize_evidence_payload(
@@ -203,8 +205,18 @@ class N8NRetrievalClient:
         resp_req_id: str = request_id
         tavily_called: bool = False
 
+        passages: List[Passage] = []
+        primary_sources: List[str] = []
+
         if isinstance(data, list):
             raw_evidence = data
+            for idx, item in enumerate(raw_evidence):
+                if isinstance(item, dict):
+                    passage = self._normalize_item_to_passage(item, idx)
+                    if passage:
+                        passages.append(passage)
+                        if passage.source and passage.source not in primary_sources:
+                            primary_sources.append(passage.source)
         elif isinstance(data, dict):
             resp_req_id = str(data.get("request_id") or request_id)
             workflow_ver = str(data.get("workflow_version") or "2.0.0")
@@ -223,45 +235,51 @@ class N8NRetrievalClient:
             if isinstance(data.get("trace"), list):
                 stage_traces_list = data["trace"]
 
-            # Capture legacy/diagnostic verdict fields if present (V2 emits authoritative_verdict: null)
-            if any(k in data for k in ("verdict", "confidence", "support", "contradiction", "authoritative_verdict")):
-                legacy_verdict = {
-                    k: data[k]
-                    for k in ("verdict", "confidence", "support", "contradiction", "authoritative_verdict", "note")
-                    if k in data and data[k] is not None
-                }
-
-            if isinstance(data.get("evidence"), list):
-                raw_evidence = data["evidence"]
-            elif isinstance(data.get("passages"), list):
-                raw_evidence = data["passages"]
-            elif isinstance(data.get("results"), list):
-                raw_evidence = data["results"]
-            elif isinstance(data.get("data"), list):
-                raw_evidence = data["data"]
-            elif isinstance(data.get("data"), dict) and isinstance(data["data"].get("evidence"), list):
-                raw_evidence = data["data"]["evidence"]
+            # Batch claims format handling
+            if isinstance(data.get("claims"), list):
+                idx_counter = 0
+                for claim_obj in data["claims"]:
+                    if not isinstance(claim_obj, dict):
+                        continue
+                    cid = str(claim_obj.get("claim_id") or "")
+                    c_evidence = claim_obj.get("evidence") or claim_obj.get("passages") or claim_obj.get("results") or []
+                    if isinstance(c_evidence, list):
+                        for item in c_evidence:
+                            if isinstance(item, dict):
+                                passage = self._normalize_item_to_passage(item, idx_counter, default_claim_id=cid)
+                                idx_counter += 1
+                                if passage:
+                                    passages.append(passage)
+                                    if passage.source and passage.source not in primary_sources:
+                                        primary_sources.append(passage.source)
             else:
-                # Single object evidence
-                if data.get("snippet") or data.get("content") or data.get("title"):
-                    raw_evidence = [data]
+                if isinstance(data.get("evidence"), list):
+                    raw_evidence = data["evidence"]
+                elif isinstance(data.get("passages"), list):
+                    raw_evidence = data["passages"]
+                elif isinstance(data.get("results"), list):
+                    raw_evidence = data["results"]
+                elif isinstance(data.get("data"), list):
+                    raw_evidence = data["data"]
+                elif isinstance(data.get("data"), dict) and isinstance(data["data"].get("evidence"), list):
+                    raw_evidence = data["data"]["evidence"]
+                else:
+                    if data.get("snippet") or data.get("content") or data.get("title"):
+                        raw_evidence = [data]
+
+                for idx, item in enumerate(raw_evidence):
+                    if isinstance(item, dict):
+                        passage = self._normalize_item_to_passage(item, idx)
+                        if passage:
+                            passages.append(passage)
+                            if passage.source and passage.source not in primary_sources:
+                                primary_sources.append(passage.source)
         else:
             return N8NRetrievalResult(
                 success=False,
                 passages=[],
                 error=f"Malformed n8n response: expected JSON object or array, got {type(data).__name__}",
             )
-
-        passages: List[Passage] = []
-        primary_sources: List[str] = []
-
-        for idx, item in enumerate(raw_evidence):
-            if isinstance(item, dict):
-                passage = self._normalize_item_to_passage(item, idx)
-                if passage:
-                    passages.append(passage)
-                    if passage.source and passage.source not in primary_sources:
-                        primary_sources.append(passage.source)
 
         if not tavily_called:
             tavily_called = any("tavily" in s.lower() or "web" in s.lower() for s in primary_sources)
@@ -308,8 +326,11 @@ class N8NRetrievalClient:
     ) -> N8NRetrievalResult:
         """
         Execute POST request to n8n Retrieval Webhook and return normalized evidence passages.
-        
+
         Guaranteed to not raise unhandled exceptions; returns controlled N8NRetrievalResult.
+        This client stays a faithful RETRIEVAL boundary: it normalizes but does
+        not prune. Relevance ranking (:mod:`services.evidence_ranker`) runs in the
+        Verifier pipeline, before NLI, where relevance is a verification concern.
         """
         if not self.webhook_url:
             logger.error("n8n retrieval webhook URL is not configured (set N8N_RETRIEVAL_WEBHOOK_URL)")
@@ -422,6 +443,92 @@ class N8NRetrievalClient:
             latency_ms = int((time.time() - start_time) * 1000)
             err_msg = f"n8n retrieval communication error: {type(exc).__name__} — {str(exc)[:200]}"
             logger.error("[N8N Client] %s", err_msg, exc_info=True)
+            return N8NRetrievalResult(
+                success=False,
+                passages=[],
+                error=err_msg,
+                trace=N8NTrace(
+                    called=True,
+                    workflow_version="2.0.0",
+                    request_id=req_id,
+                    latency_ms=latency_ms,
+                    retrieval_mode=eff_mode,
+                    error=err_msg,
+                ),
+            )
+
+    async def retrieve_claims_batch(
+        self,
+        claims: List[Dict[str, Any]],
+        domain: Optional[str] = "general",
+        retrieval_mode: str = "hybrid",
+        force_tavily: bool = False,
+        max_results_per_claim: int = 5,
+        request_id: Optional[str] = None,
+    ) -> N8NRetrievalResult:
+        """
+        Execute POST request to n8n Retrieval Webhook with a batch payload of claims.
+        """
+        if not self.webhook_url:
+            return N8NRetrievalResult(
+                success=False,
+                error="n8n retrieval webhook URL not configured",
+            )
+        req_id = request_id or str(uuid.uuid4())
+        eff_domain = domain or "general"
+        eff_mode = "tavily_only" if force_tavily else (retrieval_mode or "hybrid")
+
+        payload = {
+            "claims": claims,
+            "domain": eff_domain,
+            "retrieval_mode": eff_mode,
+            "force_tavily": force_tavily,
+            "max_results": max_results_per_claim,
+            "request_id": req_id,
+        }
+
+        headers = self._build_headers()
+        start_time = time.time()
+
+        try:
+            async with httpx.AsyncClient(timeout=self._get_timeout()) as client:
+                response = await client.post(
+                    self.webhook_url,
+                    json=payload,
+                    headers=headers,
+                )
+                latency_ms = int((time.time() - start_time) * 1000)
+
+                if response.status_code != 200:
+                    err_msg = f"n8n batch webhook returned HTTP {response.status_code}: {response.text[:200]}"
+                    return N8NRetrievalResult(
+                        success=False,
+                        passages=[],
+                        http_status=response.status_code,
+                        error=err_msg,
+                        trace=N8NTrace(
+                            called=True,
+                            workflow_version="2.0.0",
+                            request_id=req_id,
+                            latency_ms=latency_ms,
+                            retrieval_mode=eff_mode,
+                            error=err_msg,
+                        ),
+                    )
+
+                data = response.json()
+                result = self.normalize_evidence_payload(
+                    data=data,
+                    request_id=req_id,
+                    retrieval_mode=eff_mode,
+                    latency_ms=latency_ms,
+                )
+                result.http_status = response.status_code
+                return result
+
+        except Exception as exc:
+            latency_ms = int((time.time() - start_time) * 1000)
+            err_msg = f"n8n batch retrieval error: {type(exc).__name__} — {str(exc)[:200]}"
             return N8NRetrievalResult(
                 success=False,
                 passages=[],
