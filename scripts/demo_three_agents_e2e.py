@@ -133,6 +133,8 @@ async def main() -> None:
     ap.add_argument("--draft", default=DEFAULT_DRAFT)
     ap.add_argument("--evidence", default=DEFAULT_EVIDENCE,
                     help="contradictory-evidence snippet the (stand-in) Verifier found")
+    ap.add_argument("--skip-reverify", action="store_true",
+                    help="run ONLY Judge + Corrector (skip the slow live ReVerifier)")
     args = ap.parse_args()
     user_query, draft = args.query, args.draft
 
@@ -184,6 +186,15 @@ async def main() -> None:
 
     if not corr.corrected_text or str(corr.status).endswith("failed"):
         print("\n[FAIL-CLOSED] Corrector produced no usable candidate -> would escalate.")
+        return
+
+    if args.skip_reverify:
+        _hr("SUMMARY (Judge + Corrector only)")
+        print(f"draft     : {draft}")
+        print(f"corrected : {corr.corrected_text}")
+        print(f"judge     : {jr.decision} ({jr.decision_basis})")
+        print(f"corrector : {corr.status} / {corr.validation_status} via {corr.provider_used}")
+        print("\n(ReVerifier skipped via --skip-reverify.)")
         return
 
     # ---- STAGE 3: REVERIFIER (live retrieval + NLI) ---------------------
