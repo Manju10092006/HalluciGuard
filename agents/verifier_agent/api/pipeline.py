@@ -182,6 +182,51 @@ class VerificationPipeline:
     # Evidence gating and confidence calibration
     # ------------------------------------------------------------------
     @staticmethod
+    def _evidence_ranking_enabled() -> bool:
+        import os
+
+        raw = os.getenv("HALLUCIGUARD_EVIDENCE_RANKING")
+        if raw is None or not raw.strip():
+            return True
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    @classmethod
+    def _apply_evidence_ranking(
+        cls,
+        passages: List[Passage],
+        *,
+        claim_text: str,
+        search_queries: List[str],
+        domain: str = "general",
+    ) -> List[Passage]:
+        """Rank passages by deterministic relevance signals and keep only the
+        decision-grade tier (STRONG + selected USABLE), before NLI.
+
+        Surviving passages get ``relevance_score`` set to the computed relevance
+        so the existing selection gate keeps them. Fail-open: on any error the
+        original passages are returned unchanged so a ranking bug never blocks
+        verification.
+        """
+        if not cls._evidence_ranking_enabled() or not passages:
+            return passages
+        try:
+            from services.evidence_ranker import rank_and_select
+
+            selected, _ranked = rank_and_select(
+                passages, claim_text=claim_text, search_queries=search_queries, domain=domain
+            )
+            if not selected:
+                # Every candidate was irrelevant. Returning [] routes the claim to
+                # UNVERIFIED (safe) rather than letting a distractor reach NLI.
+                return []
+            return [
+                item.passage.model_copy(update={"relevance_score": round(item.score, 4)})
+                for item in selected
+            ]
+        except Exception:
+            return passages
+
+    @staticmethod
     def _select_relevant_passages(passages: List[Passage]) -> List[Passage]:
         """Apply relevance and source-diversity gates before NLI."""
         if not passages:
@@ -475,6 +520,20 @@ class VerificationPipeline:
 
                         # §28 certification: refuse mock/empty/malformed evidence.
                         self._enforce_certification_evidence(raw_passages)
+
+                        # Deterministic multi-signal relevance gate (§18/§19/§25):
+                        # retrieval -> RELEVANCE -> (aggregation/rerank/NLI). Prune
+                        # irrelevant evidence (e.g. a same-name distractor) BEFORE
+                        # NLI so it can never drive a false contradiction. Runs
+                        # here, in the Verifier, because relevance is a
+                        # verification concern; the n8n client stays a faithful
+                        # retrieval boundary. Fail-open + env-gated.
+                        raw_passages = self._apply_evidence_ranking(
+                            raw_passages,
+                            claim_text=sub_claim,
+                            search_queries=[expanded_query],
+                            domain=validated_domain,
+                        )
 
 
                     with tracker.track(PipelineStage.AGGREGATION):

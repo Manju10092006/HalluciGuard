@@ -15,6 +15,7 @@ It relies on the authoritative factual investigation produced by the Verifier.
 
 import time
 import logging
+import re
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -133,6 +134,24 @@ def _claim_is_core(claim_text: str, query_terms: set[str]) -> bool:
     return bool(_salient_terms(claim_text) & query_terms)
 
 
+_NEGATIVE_REFUTATION_WORDS = frozenset({
+    "not", "no", "never", "none", "neither", "nor", "cannot", "can't",
+    "isn't", "wasn't", "weren't", "don't", "didn't", "doesn't", "incorrect",
+    "false", "untrue", "unassociated", "unrelated", "disproven", "refuted"
+})
+
+# Word tokenizer that preserves intra-word apostrophes/hyphens so contractions
+# like "isn't" / "can't" survive as single tokens for refutation matching.
+_WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-']*")
+
+
+def _is_negative_refutation(claim_text: str) -> bool:
+    if not claim_text:
+        return False
+    tokens = {t.lower() for t in _WORD_RE.findall(claim_text)}
+    return bool(tokens & _NEGATIVE_REFUTATION_WORDS)
+
+
 def _claim_leaves_core_gap(
     claim_text: str,
     query_terms: set[str],
@@ -147,6 +166,12 @@ def _claim_leaves_core_gap(
     Eiffel Tower's location is verified) adds incidental detail the user did not
     ask about — peripheral, not a core gap.
 
+    Negative refutations: when the user query posits a false premise ("Snehith is
+    the founder of Google") and the answer positively verifies the true fact
+    ("Google was founded by Larry Page and Sergey Brin"), an unverified claim that
+    merely denies the false premise ("Snehith is not associated...") is a
+    refutation supported by the positive verified facts, not a core gap.
+
     Fail-closed exactly like `_claim_is_core`:
       * empty/degenerate query  -> every ungrounded claim is a core gap (True);
       * no verified claims       -> `grounded_anchors` is empty, so any claim
@@ -159,6 +184,8 @@ def _claim_leaves_core_gap(
         return True
     shared = _salient_terms(claim_text) & query_terms
     if not shared:
+        return False
+    if grounded_anchors and _is_negative_refutation(claim_text):
         return False
     # CORE gap only if the claim introduces a query anchor no verified claim covers.
     return bool(shared - grounded_anchors)

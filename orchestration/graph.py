@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import uuid
 from dataclasses import asdict, is_dataclass
 from typing import Any, Callable, Dict, List, Optional
@@ -182,7 +183,11 @@ def _generate_route(state: HalluciGuardState) -> str:
 
 
 async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
-    from agents.detector_agent.detector import DetectorAgent
+    # Detector integration seam: the sole production detector is DetV2 Stage-7.
+    # The bridge loads the DetV2 encoder once (module-level singleton) and fails
+    # closed (routes to Verify) on any DetV2 runtime failure — it never fabricates
+    # an Accept and never silently substitutes a different model.
+    from .detector_bridge import run_detection
 
     node_start = start_timer()
     try:
@@ -191,7 +196,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             raise ValueError("No LLM response available for detection.")
 
         def _run_detect():
-            return DetectorAgent().detect(state["user_query"], llm_resp)
+            return run_detection(state["user_query"], llm_resp)
 
         detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))
@@ -299,13 +304,14 @@ def _detector_route(state: HalluciGuardState) -> str:
 
 
 def _get_verifier_imports():
-    """Import verifier agent classes without sys.path manipulation.
-
-    Uses proper package imports. If the verifier agent package is not
-    installed as a proper module, this raises ImportError.
-    """
-    from agents.verifier_agent.api.pipeline import VerificationPipeline
-    from agents.verifier_agent.schemas.models import SuspiciousClaim, VerifierInputV2
+    """Import verifier agent classes with proper sys.path resolution."""
+    verifier_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
+    )
+    if verifier_dir not in sys.path:
+        sys.path.insert(0, verifier_dir)
+    from api.pipeline import VerificationPipeline
+    from schemas.models import SuspiciousClaim, VerifierInputV2
 
     return VerificationPipeline, SuspiciousClaim, VerifierInputV2
 
@@ -337,17 +343,24 @@ def _build_canonical_verifier_result(
             continue
         c_id = report.get("claim_id", "c1")
         c_text = report.get("claim_text") or report.get("claim", "")
-        verdict_raw = str(report.get("verdict", "")).lower()
+        # Canonicalize enum-repr verdicts ("VerdictLabel.verified") to the bare
+        # value, matching the extraction in _verifier_node. Without use_enum_values
+        # a dumped ClaimReport carries the enum whose str() is the prefixed form.
+        verdict_raw = str(report.get("verdict", "")).strip().lower()
+        if "." in verdict_raw:
+            verdict_raw = verdict_raw.rsplit(".", 1)[-1]
 
         # BUG-002 FIX: Strict verdict validation
         # Only match exact known verdict strings, not prefixes.
         # Unknown strings like "verifed" raise ContractViolation.
-        if verdict_raw in ("verified", "supported", "verdictlabel.verified"):
+        if verdict_raw in ("verified", "supported"):
             c_verdict = CanonicalVerdictLabel.VERIFIED
         elif "contradict" in verdict_raw or "hallucinat" in verdict_raw:
             c_verdict = CanonicalVerdictLabel.CONTRADICTED
         elif "conflict" in verdict_raw:
             c_verdict = CanonicalVerdictLabel.CONFLICTED
+        elif verdict_raw in ("unverified", "unsupported", "unknown"):
+            c_verdict = CanonicalVerdictLabel.UNVERIFIED
         elif verdict_raw == "":
             raise ContractViolation(
                 f"Invalid verifier verdict: received empty string for claim {c_id}",
@@ -453,6 +466,79 @@ def _aggregate_verification_status(claims: list) -> str:
     return VerificationStatus.UNVERIFIED.value
 
 
+async def _claim_analyzer_node(state: HalluciGuardState) -> dict[str, Any]:
+    """Extract ONLY the factual claims from the whole draft before retrieval.
+
+    This is the single gate between the Base LLM draft and the Verifier. It
+    overwrites ``detected_claims`` with factual-only claims so meta / discourse /
+    opinion / instruction / transition / question spans never reach retrieval or
+    the Verifier. It NEVER decides truth — that remains the Verifier's job.
+
+    Fail-open: any analyzer error leaves the prior ``detected_claims`` untouched
+    so the pipeline still runs; the deterministic fallback inside the analyzer
+    already covers the offline / no-credential case.
+    """
+    node_start = start_timer()
+    try:
+        draft = (
+            state.get("llm_response")
+            or state.get("draft_response")
+            or state.get("user_query")
+            or ""
+        )
+        user_query = state.get("user_query", "")
+        domain = state.get("domain", "general")
+
+        from services.claim_analyzer import ClaimAnalyzer
+
+        analysis = await ClaimAnalyzer().analyze(draft, user_query, domain)
+        factual = analysis.factual_claims
+        detected = [
+            {
+                "claim_id": c.claim_id,
+                "text": c.claim_text,
+                "search_queries": c.search_queries,
+                "claim_type": c.claim_type,
+                "original_sentence": c.original_sentence,
+            }
+            for c in factual
+        ]
+        trace = add_trace(
+            state,
+            "claim_analyzer",
+            "completed",
+            latency_ms=elapsed_ms(node_start),
+            factual_count=len(factual),
+            discarded_count=len(analysis.discarded),
+            source=analysis.source,
+            domain=analysis.domain,
+        )
+        return {
+            "detected_claims": detected,
+            "claims_gated": True,
+            "claim_analysis": analysis.to_dict(),
+            "domain": analysis.domain or domain,
+            "trace": trace,
+            "current_node": "claim_analyzer",
+            "updated_at": utc_now(),
+        }
+    except Exception as exc:
+        # Never block the pipeline on the gate; fall through with existing claims.
+        trace = add_trace(
+            state,
+            "claim_analyzer",
+            "failed",
+            latency_ms=elapsed_ms(node_start),
+            error_type=type(exc).__name__,
+        )
+        return {
+            "trace": trace,
+            "errors": add_error(state, "claim_analyzer", exc, retryable=False),
+            "current_node": "claim_analyzer",
+            "updated_at": utc_now(),
+        }
+
+
 async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
     VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _get_verifier_imports()
     node_start = start_timer()
@@ -472,7 +558,11 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             for index, item in enumerate(detected_claims, start=1)
             if str(item.get("text") or "").strip()
         ]
-        if not suspicious_claims:
+        # Whole-draft fallback is ONLY valid when the Claim Analyzer gate did not
+        # run. Once claims are gated, an empty list means "no checkable factual
+        # claim" — verifying the raw draft would re-introduce the meta-sentence
+        # leak (e.g. "Actually, that isn't correct.") the gate exists to prevent.
+        if not suspicious_claims and not state.get("claims_gated"):
             suspicious_claims = [SuspiciousClaim(claim_id="c1", text=claim_text)]
 
         payload = VerifierInputV2(
@@ -501,7 +591,14 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         claims: list[dict[str, Any]] = []
 
         for report in verifier.get("claim_evidence", []):
-            verdict_raw = str(report.get("verdict", "")).lower()
+            # A ClaimReport dumped without use_enum_values yields the VerdictLabel
+            # enum, whose str() is the repr form "VerdictLabel.verified" (mixin str
+            # enums still use Enum.__str__). Canonicalize to the bare value before the
+            # strict contract check — the same enum-prefixed form _aggregate_verification_status
+            # already defends against. This preserves the Verifier's factual verdict.
+            verdict_raw = str(report.get("verdict", "")).strip().lower()
+            if "." in verdict_raw:
+                verdict_raw = verdict_raw.rsplit(".", 1)[-1]
             # BUG-002 FIX: Validate verdict strictly
             try:
                 clean_verdict = _validate_verdict(verdict_raw)
@@ -1357,6 +1454,7 @@ def build_verification_graph(
         "generate": _generate_node,
         "detector": _detector_node,
         "accept": _accept_node,
+        "claim_analyzer": _claim_analyzer_node,
         "verifier": _verifier_node,
         "judge": _judge_node,
         "corrector": _corrector_node,
@@ -1381,8 +1479,11 @@ def build_verification_graph(
     graph.add_conditional_edges(
         "detector",
         _detector_route,
-        {"verifier": "verifier", "accept": "accept", "human_escalation": "human_escalation"},
+        {"verifier": "claim_analyzer", "accept": "accept", "human_escalation": "human_escalation"},
     )
+    # The Claim Analyzer sits between the Detector and the Verifier: it filters
+    # the draft down to factual claims, then hands off for retrieval + NLI.
+    graph.add_edge("claim_analyzer", "verifier")
     graph.add_conditional_edges(
         "verifier",
         _verifier_route,
@@ -1448,6 +1549,7 @@ async def run_verification(
     active_agents = [
         "base_llm",
         "detector",
+        "claim_analyzer",
         "verifier",
         "judge",
         "corrector",
