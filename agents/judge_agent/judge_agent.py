@@ -263,13 +263,24 @@ class JudgeAgent:
         domain_name = normalized_verifier.domain or domain or "General Knowledge"
         policy = self.domain_registry.get_policy(domain_name)
 
-        if str(normalized_verifier.status).lower() in ("failed", "executionstatus.failed"):
-            logger.warning("VerifierResult status indicates failure. Returning ABSTAIN.")
+        # F2 FIX: A verdict is only authoritative when the Verifier run actually
+        # completed. Previously this caught ONLY "failed", so a "degraded" run
+        # (retrieval returned zero passages — grounding never happened) slipped
+        # through and could be ACCEPTed as if fully grounded. Any non-authoritative
+        # status (failed/degraded/fallback/terminated_unresolved/skipped) is unsafe
+        # to accept -> ABSTAIN. (DETECTOR/PROVIDER_FAILURE != factual verdict;
+        # NO_EVIDENCE != TRUE.)
+        _status_str = str(normalized_verifier.status).lower().rsplit(".", 1)[-1]
+        if _status_str not in ("completed", ""):
+            logger.warning(
+                "VerifierResult status %r is non-authoritative. Returning ABSTAIN.",
+                normalized_verifier.status,
+            )
             return JudgeResult(
                 decision=JudgeDecision.ABSTAIN,
                 severity=SeverityLevel.HIGH,
-                reason="VerifierResult status indicates failure.",
-                explanation="Grounding investigation failed to execute. Unsafe to proceed.",
+                reason=f"VerifierResult status '{_status_str}' is non-authoritative.",
+                explanation="Grounding investigation did not complete cleanly (failed or degraded). Unsafe to proceed.",
                 confidence=0.0,
                 correction_request=None,
                 decision_basis=DecisionBasis.VERIFIER_FAILED,
@@ -1003,9 +1014,23 @@ class JudgeAgent:
             try:
                 return DetectorResult.model_validate(detector_result)
             except Exception:
+                from orchestration.schemas import RiskLevel, NextAction
                 prob = float(detector_result.get("hallucination_probability", 0.0))
                 conf = float(detector_result.get("confidence_score", 0.8))
-                from orchestration.schemas import RiskLevel, NextAction
+                # Honesty gate: a degraded / non-completed detector run has no
+                # trustworthy probability, so we must NOT derive Accept/LOW from it
+                # (a fail-safe 0.0 would otherwise launder a failure into an Accept).
+                # Fail closed to VERIFY/HIGH and preserve the degraded status.
+                status_str = str(detector_result.get("status", ExecutionStatus.COMPLETED.value)).lower()
+                degraded = bool(detector_result.get("detector_degraded")) or status_str not in {"completed", "success"}
+                if degraded:
+                    return DetectorResult(
+                        hallucination_probability=prob,
+                        confidence_score=conf,
+                        risk_level=RiskLevel.HIGH,
+                        next_action=NextAction.VERIFY,
+                        status=ExecutionStatus.DEGRADED,
+                    )
                 risk = RiskLevel.HIGH if prob >= 0.7 else (RiskLevel.MEDIUM if prob >= 0.4 else RiskLevel.LOW)
                 return DetectorResult(
                     hallucination_probability=prob,

@@ -284,3 +284,49 @@ def test_russia_count_tie_does_not_auto_accept():
     )
     assert _str(r.decision) != "ACCEPT", f"got {_str(r.decision)} ({r.reason})"
     assert _str(r.decision) == "VERIFY_AGAIN"
+
+
+def test_degraded_verifier_status_never_accepts():
+    """F2: a DEGRADED verifier run (retrieval returned zero passages) is NOT
+    authoritative, even when the claim verdicts look VERIFIED. The Judge must
+    ABSTAIN rather than ACCEPT a verdict resting on an ungrounded run.
+    Guards NO_EVIDENCE != TRUE."""
+    vr = VerifierResult(
+        query_id="Q",
+        domain="General Knowledge",
+        claim_reports=[
+            _cr("Paris is the capital of France", VerdictLabel.VERIFIED, 0.95, 0.02, 0.95),
+        ],
+        evidence=[],
+        overall_confidence=0.9,
+        status=ExecutionStatus.DEGRADED,
+    )
+    r = JudgeAgent().evaluate(
+        verifier_result=vr,
+        user_query="What is the capital of France?",
+        original_response="Paris is the capital of France.",
+        domain="General Knowledge", retry_count=0,
+    )
+    assert _str(r.decision) == "ABSTAIN", f"got {_str(r.decision)} ({r.reason})"
+
+
+def test_failed_verifier_status_never_accepts():
+    """F2 companion: a FAILED verifier run must ABSTAIN (unchanged behavior,
+    guarded so the widened status check does not regress the failed path)."""
+    vr = VerifierResult(
+        query_id="Q",
+        domain="General Knowledge",
+        claim_reports=[
+            _cr("Paris is the capital of France", VerdictLabel.VERIFIED, 0.95, 0.02, 0.95),
+        ],
+        evidence=[],
+        overall_confidence=0.9,
+        status=ExecutionStatus.FAILED,
+    )
+    r = JudgeAgent().evaluate(
+        verifier_result=vr,
+        user_query="What is the capital of France?",
+        original_response="Paris is the capital of France.",
+        domain="General Knowledge", retry_count=0,
+    )
+    assert _str(r.decision) == "ABSTAIN", f"got {_str(r.decision)} ({r.reason})"

@@ -233,7 +233,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         allow_fast_path = os.environ.get("ALLOW_DETECTOR_FAST_PATH", "false").lower() in ("true", "1")
         always_verify = os.environ.get("ALWAYS_VERIFY", "true").lower() in ("true", "1")
         is_stress = state.get("generation_mode") == "stress_test"
-        detector_degraded = str(detector.get("status", "")).lower() in {"failed", "degraded", "fallback", "unavailable"}
+        detector_degraded = bool(detector.get("detector_degraded")) or str(detector.get("status", "")).lower() in {"failed", "degraded", "fallback", "unavailable"}
         should_verify = (
             always_verify
             or not allow_fast_path
@@ -418,13 +418,38 @@ def _build_canonical_verifier_result(
     overall_evidence_conf = verifier.get("overall_evidence_confidence")
     overall_conf_raw = verifier.get("overall_confidence", overall_evidence_conf)
     overall_conf = float(overall_conf_raw) if overall_conf_raw is not None else 0.0
+
+    # F2 FIX (was: hardcoded status=ExecutionStatus.COMPLETED).
+    # VerifierOutputV2 has NO top-level status; it exposes per-stage
+    # PipelineStageStatus entries where retrieval is marked "degraded" (zero
+    # passages retrieved) or "failed" (adapter failure) — see
+    # agents/verifier_agent/api/pipeline.py:787-805. Hardcoding COMPLETED told
+    # the Judge and Re-Verifier that an *ungrounded* run was authoritative, so a
+    # claim resting on no real evidence could be ACCEPTed (Judge L266 only
+    # ABSTAINs on "failed") or slip through the Re-Verifier safety gate
+    # (passed = COMPLETED and no contradictions). Derive the canonical status
+    # from the worst stage instead: any failed -> FAILED, any degraded ->
+    # DEGRADED, else COMPLETED. Absence of grounding is never "authoritative".
+    stage_statuses: list[str] = []
+    for stage in verifier.get("pipeline_stages", []) or []:
+        if isinstance(stage, dict):
+            stage_statuses.append(str(stage.get("status", "")).lower())
+        else:
+            stage_statuses.append(str(getattr(stage, "status", "")).lower())
+    if any("failed" in s for s in stage_statuses):
+        derived_status = ExecutionStatus.FAILED
+    elif any("degraded" in s for s in stage_statuses):
+        derived_status = ExecutionStatus.DEGRADED
+    else:
+        derived_status = ExecutionStatus.COMPLETED
+
     return CanonicalVerifierResult(
         query_id=verifier.get("query_id", query_id),
         domain=verifier.get("domain", domain),
         claim_reports=canonical_reports,
         evidence=[ev for r in canonical_reports for ev in r.evidence],
         overall_confidence=overall_conf,
-        status=ExecutionStatus.COMPLETED,
+        status=derived_status,
     )
 
 
