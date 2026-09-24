@@ -462,6 +462,16 @@ class JudgeResult(BaseModel):
             "and audit; never a factual claim about the response."
         ),
     )
+    decision_metrics: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Structured, machine-readable counts backing the decision (spec §3/§25): "
+            "verified_claims, contradicted_claims, unverified_claims, "
+            "material_contradictions, material_unknowns, and detector_role "
+            "('triage_only' — the detector is never factual evidence). Purely "
+            "observational; the decision itself is produced by the precedence tree."
+        ),
+    )
     status: ExecutionStatus = Field(
         default=ExecutionStatus.COMPLETED,
         description="Status of the judge agent evaluation.",
@@ -539,6 +549,15 @@ class ReverificationResult(BaseModel):
     status: ExecutionStatus = Field(
         default=ExecutionStatus.COMPLETED,
         description="Status of the reverification process.",
+    )
+    failure_category: Optional[str] = Field(
+        default=None,
+        description=(
+            "When passed=False, the machine-readable class of the re-verification "
+            "failure (spec §25): REMAINING_CONTRADICTION, DEGRADED_REVERIFICATION "
+            "(retrieval could not re-ground the corrected answer), "
+            "CLAIM_DECOMPOSITION_FAILED, or VERIFIER_FAILURE. None when passed."
+        ),
     )
 
 

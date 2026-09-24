@@ -330,3 +330,30 @@ def test_failed_verifier_status_never_accepts():
         domain="General Knowledge", retry_count=0,
     )
     assert _str(r.decision) == "ABSTAIN", f"got {_str(r.decision)} ({r.reason})"
+
+
+def test_decision_metrics_are_structured_and_detector_triage_only():
+    """Spec §3/§25: the Judge exposes machine-readable decision counts, and the
+    detector is always recorded as triage-only, never as factual evidence."""
+    vr = _vr(
+        "General Knowledge",
+        [
+            _cr("Paris is the capital of France", VerdictLabel.VERIFIED, 0.95, 0.02, 0.95),
+            _cr("The Eiffel Tower is 2000m tall", VerdictLabel.CONTRADICTED, 0.05, 0.95, 0.9),
+        ],
+    )
+    r = JudgeAgent().evaluate(
+        verifier_result=vr,
+        user_query="Tell me about Paris and the Eiffel Tower height.",
+        original_response="resp",
+        domain="General Knowledge", retry_count=0,
+    )
+    m = r.decision_metrics
+    assert m.get("detector_role") == "triage_only"
+    assert m.get("verified_claims") == 1
+    assert m.get("contradicted_claims") == 1
+    assert m.get("material_contradictions") == 1
+    assert set(m).issuperset(
+        {"verified_claims", "contradicted_claims", "unverified_claims",
+         "material_contradictions", "material_unknowns", "detector_role"}
+    )

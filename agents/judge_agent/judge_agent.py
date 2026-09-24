@@ -559,6 +559,19 @@ class JudgeAgent:
             confidence=confidence,
             correction_request=correction_req,
             decision_basis=decision_basis,
+            decision_metrics={
+                "verified_claims": len(claims_to_preserve),
+                "contradicted_claims": len(claims_to_correct),
+                "unverified_claims": len(unverified_claims),
+                "conflicted_claims": len(conflicted_claims),
+                # "material" == CORE (overlaps the query's salient terms). A
+                # peripheral unverified/contradicted claim is not material.
+                "material_contradictions": len(claims_to_correct),
+                "material_unknowns": len(core_unverified) + len(core_conflicted),
+                # The detector is a triage prior, never factual evidence — it is
+                # not read by any decision branch (invariant: DETECTOR != VERDICT).
+                "detector_role": "triage_only",
+            },
             status=ExecutionStatus.COMPLETED
         )
 
