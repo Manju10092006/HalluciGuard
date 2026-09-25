@@ -309,6 +309,17 @@ class VerificationPipeline:
         if not pairs:
             return [], []
 
+        # Aggregate relation check across ALL passages first. Creation/leadership
+        # relations are multi-valued (Microsoft has TWO founders); a per-passage
+        # check sees each co-founder in isolation and would force a contradiction
+        # on the "Paul Allen" passage while the "Bill Gates" passage entails —
+        # colliding into a false CONFLICTED verdict on a true claim. The
+        # match-first aggregate tells us whether the claimed person is confirmed
+        # anywhere, so we can suppress that spurious per-passage contradiction.
+        aggregate_rel_status = "NO_TRIPLE_EXTRACTED"
+        if relation_verifier and claim:
+            aggregate_rel_status = relation_verifier.verify_relation(claim, passages).status
+
         selected = []
         for passage, result in pairs:
             if result.get("degraded", False):
@@ -321,6 +332,16 @@ class VerificationPipeline:
             if relation_verifier and claim:
                 rel_check = relation_verifier.verify_relation(claim, [passage])
                 rel_status = rel_check.status
+                claim_rel = rel_check.claim_triple.relation if rel_check.claim_triple else ""
+                # Multi-valued creation/leadership: if the whole evidence set
+                # confirms the claimed holder, a single passage naming a DIFFERENT
+                # valid holder (co-founder) must not manufacture a contradiction.
+                if (
+                    rel_status in ("OBJECT_MISMATCH", "RELATION_MISMATCH")
+                    and claim_rel in ("created_by", "leads")
+                    and aggregate_rel_status == "MATCH"
+                ):
+                    rel_status = "NO_TRIPLE_EXTRACTED"  # defer to NLI for this passage
                 if rel_status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
                     contradiction = max(contradiction, 0.95)
                     result["contradiction_score"] = contradiction
