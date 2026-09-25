@@ -47,6 +47,53 @@ from utils.logging import setup_logger
 from api.certification import CertificationError
 
 
+def append_retrieval_health_stage(
+    pipeline_stages: List[PipelineStageStatus],
+    adapter_failures: List[str],
+    total_retrieved: int,
+) -> None:
+    """Record retrieval health without invalidating a successful fallback.
+
+    A provider failure is terminal only when the retrieval chain produced no
+    passages.  If a later adapter recovered and returned evidence, the
+    retrieval stage completed authoritatively; the failed provider remains in
+    ``details`` for observability but must not force the Judge to abstain.
+    """
+    if adapter_failures and total_retrieved == 0:
+        pipeline_stages.append(
+            PipelineStageStatus(
+                stage=PipelineStage.RETRIEVAL,
+                status="failed",
+                duration_ms=0,
+                details=f"All retrieval paths failed: {', '.join(adapter_failures)}",
+            )
+        )
+    elif adapter_failures:
+        pipeline_stages.append(
+            PipelineStageStatus(
+                stage=PipelineStage.RETRIEVAL,
+                status="completed",
+                duration_ms=0,
+                details=(
+                    "Fallback retrieval succeeded after provider failure: "
+                    f"{', '.join(adapter_failures)}"
+                ),
+            )
+        )
+    elif total_retrieved == 0:
+        pipeline_stages.append(
+            PipelineStageStatus(
+                stage=PipelineStage.RETRIEVAL,
+                status="degraded",
+                duration_ms=0,
+                details=(
+                    "No passages were retrieved; downstream reranking, NLI, "
+                    "and evidence scoring had no real evidence to process."
+                ),
+            )
+        )
+
+
 class VerificationPipeline:
     """
     The 9-stage verification pipeline orchestrator.
@@ -785,24 +832,11 @@ class VerificationPipeline:
         )
 
         pipeline_stages_list = tracker.to_pipeline_stages()
-        if adapter_failures:
-            pipeline_stages_list.append(
-                PipelineStageStatus(
-                    stage=PipelineStage.RETRIEVAL,
-                    status="failed",
-                    duration_ms=0,
-                    details=f"Adapter failures: {', '.join(adapter_failures)}",
-                )
-            )
-        elif total_retrieved == 0:
-            pipeline_stages_list.append(
-                PipelineStageStatus(
-                    stage=PipelineStage.RETRIEVAL,
-                    status="degraded",
-                    duration_ms=0,
-                    details="No passages were retrieved; downstream reranking, NLI, and evidence scoring had no real evidence to process.",
-                )
-            )
+        append_retrieval_health_stage(
+            pipeline_stages_list,
+            adapter_failures,
+            total_retrieved,
+        )
 
         sources_attempted = list(getattr(adapter, "sources_attempted", []))
         if not sources_attempted:
