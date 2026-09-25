@@ -335,12 +335,20 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
 def _describe_path(result: dict) -> str:
     """One-line human summary of which branch the pipeline took."""
     corrected = bool(result.get("correction_result") or result.get("corrector"))
-    decision = _clean_enum((result.get("judge_result") or result.get("judge", {})).get("decision", ""))
+    judge_info = result.get("judge_result") or result.get("judge") or {}
+    decision = _clean_enum(judge_info.get("decision", result.get("judge_decision", "")))
+    term_status = str(result.get("terminal_status", "")).lower()
+    ver_status = str(result.get("verification_status", "")).lower()
+
+    if term_status == "human_review" or ver_status == "human_review_required" or decision == "ABSTAIN":
+        return f"generate → detector → verifier → judge({decision or 'ABSTAIN'}) → human_escalation → memory (human review required)"
     if corrected:
         return "generate → detector → verifier → judge(CORRECT) → corrector → reverifier → memory"
-    if decision == "REJECT":
-        return "generate → detector → verifier → judge(REJECT) → memory (answer withheld)"
-    return "generate → detector → verifier → judge(ACCEPT) → memory  (no repair needed)"
+    if decision == "REJECT" or term_status == "rejected":
+        return f"generate → detector → verifier → judge({decision or 'REJECT'}) → reject → memory (answer withheld)"
+    if decision == "ACCEPT":
+        return "generate → detector → verifier → judge(ACCEPT) → memory (no repair needed)"
+    return f"generate → detector → verifier → judge({decision or 'UNKNOWN'}) → memory"
 
 
 if __name__ == "__main__":

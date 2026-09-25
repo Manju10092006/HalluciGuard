@@ -406,13 +406,17 @@ async def _execute_verification(
         )
         verifier_view = _final_verifier_view(result)
         claims_ev = verifier_view.get("claim_evidence", [])
-        if claims_ev:
+        pipeline_ver_status = result.get("verification_status")
+
+        if pipeline_ver_status in {"human_review_required", "verified_and_accepted", "rejected", "rejected_by_judge", "agent_failed", "detector_safe_fast_path"}:
+            derived_status = pipeline_ver_status
+        elif claims_ev:
             has_c = any("contradict" in str(c.get("verdict", "")).lower() or "hallucinat" in str(c.get("verdict", "")).lower() for c in claims_ev)
             has_v = any(str(c.get("verdict", "")).lower() in ("verified", "supported", "verdictlabel.verified") or (str(c.get("verdict", "")).lower().startswith("verif") and "unverif" not in str(c.get("verdict", "")).lower()) for c in claims_ev)
             has_conf = any("conflict" in str(c.get("verdict", "")).lower() for c in claims_ev)
             derived_status = "contradicted" if has_c else "conflicted" if has_conf else "verified" if has_v else "unverified"
         else:
-            derived_status = result.get("verification_status", "unverified")
+            derived_status = pipeline_ver_status or "unverified"
 
         resp = {
             "execution_id": result.get("execution_id"),

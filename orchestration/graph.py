@@ -183,10 +183,10 @@ def _generate_route(state: HalluciGuardState) -> str:
 
 
 async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
-    # Detector integration seam: the sole production detector is DetV2 Stage-7.
-    # The bridge loads the DetV2 encoder once (module-level singleton) and fails
-    # closed (routes to Verify) on any DetV2 runtime failure — it never fabricates
-    # an Accept and never silently substitutes a different model.
+    # Detector integration seam: the pre-retrieval pass extracts/triages claims.
+    # The evidence-grounded classifier runs only when evidence is available, and
+    # the bridge fails closed (routes to Verify) on any detector runtime failure;
+    # it never fabricates an Accept or silently substitutes a different model.
     from .detector_bridge import run_detection
 
     node_start = start_timer()

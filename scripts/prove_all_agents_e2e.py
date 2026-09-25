@@ -87,6 +87,7 @@ def main() -> None:
     claims = result.get("detected_claims") or []
     analysis = _as_dict(result.get("claim_analysis"))
     ver = _as_dict(result.get("verifier_result") or result.get("verifier"))
+    raw_ver = _as_dict(result.get("verifier"))
     judge = _as_dict(result.get("judge"))
     corr = _as_dict(result.get("corrector") or result.get("correction_result"))
     rev = _as_dict(result.get("reverification_result"))
@@ -120,7 +121,9 @@ def main() -> None:
           f"{len(claims)} suspicious claim(s) + live retrieval",
           f"status={ver.get('status')} overall_confidence={ver.get('overall_confidence')} "
           f"claim_reports={len(ver.get('claim_reports', []))} "
-          f"verdicts={[c.get('verdict') for c in ver.get('claim_reports', [])]}")
+          f"verdicts={[c.get('verdict') for c in ver.get('claim_reports', [])]}\n"
+          f"          retrieval={[(c.get('retrieved_documents'), c.get('reranked_documents'), c.get('verified_evidence')) for c in raw_ver.get('claim_evidence', [])]}\n"
+          f"          evidence_titles={[[e.get('title') for e in c.get('evidence', [])] for c in raw_ver.get('claim_evidence', [])]}")
 
     agent(5, "JUDGE", "judge",
           "verifier report + (later) reverification result",
