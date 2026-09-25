@@ -34,6 +34,67 @@ def _dump(value: Any) -> Any:
     return value
 
 
+_QUERY_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "of",
+    "in", "on", "at", "to", "for", "and", "or", "but", "who", "whom", "whose",
+    "what", "which", "when", "where", "why", "how", "that", "this", "these",
+    "those", "it", "its", "as", "by", "from", "with", "about", "into", "do",
+    "does", "did", "can", "could", "will", "would", "should", "has", "have",
+    "had", "there", "their", "his", "her", "you", "your", "i", "me", "my",
+})
+
+
+def _salient_tokens(text: str) -> list[str]:
+    """Lowercased, stopword-filtered content tokens (len>=3), lightly stemmed."""
+    import re
+    raw = re.findall(r"[A-Za-z0-9]+", (text or "").lower())
+    out: list[str] = []
+    for tok in raw:
+        if len(tok) < 3 or tok in _QUERY_STOPWORDS:
+            continue
+        out.append(_stem_token(tok))
+    return out
+
+
+def _stem_token(tok: str) -> str:
+    """Very light suffix stripping so 'founder'/'founded'/'founders' align."""
+    for suffix in ("ers", "er", "ing", "ed", "es", "s"):
+        if tok.endswith(suffix) and len(tok) - len(suffix) >= 3:
+            return tok[: -len(suffix)]
+    return tok
+
+
+def _tokens_match(a: str, b: str) -> bool:
+    """Equal stems, or a shared prefix of >=4 chars (handles minor inflection)."""
+    if a == b:
+        return True
+    n = min(len(a), len(b))
+    return n >= 4 and a[:n] == b[:n]
+
+
+def _answer_addresses_query(query: str, answer: str, threshold: float = 0.6) -> bool:
+    """GENERIC topicality check (Phase-4 invariant, no per-domain rules).
+
+    A correction can be factually true yet answer a DIFFERENT question than the
+    user asked (e.g. query 'Who founded Microsoft?' -> corrected 'Snehith is a
+    Product Manager at Microsoft.'). Such an off-topic repair carries no
+    contradiction and would otherwise sail through the re-verifier gate. We
+    require the corrected answer to still cover the salient topic of the
+    original query. This is purely entity/term coverage — never a hardcoded
+    subject/relation. Returns True (do not block) when the query has no salient
+    tokens to score against, so it can only ever *withhold* an accept, never
+    create one.
+    """
+    q_tokens = _salient_tokens(query)
+    if not q_tokens:
+        return True
+    a_tokens = _salient_tokens(answer)
+    if not a_tokens:
+        return False
+    covered = sum(1 for qt in q_tokens if any(_tokens_match(qt, at) for at in a_tokens))
+    return (covered / len(q_tokens)) >= threshold
+
+
 def _validate_verdict(raw: str) -> str:
     """Validate a verdict string against allowed values.
 
@@ -183,10 +244,10 @@ def _generate_route(state: HalluciGuardState) -> str:
 
 
 async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
-    # Detector integration seam: the sole production detector is DetV2 Stage-7.
-    # The bridge loads the DetV2 encoder once (module-level singleton) and fails
-    # closed (routes to Verify) on any DetV2 runtime failure — it never fabricates
-    # an Accept and never silently substitutes a different model.
+    # Detector integration seam: the pre-retrieval pass extracts/triages claims.
+    # The evidence-grounded classifier runs only when evidence is available, and
+    # the bridge fails closed (routes to Verify) on any detector runtime failure;
+    # it never fabricates an Accept or silently substitutes a different model.
     from .detector_bridge import run_detection
 
     node_start = start_timer()
@@ -716,6 +777,65 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         return update
 
 
+async def _grounded_detector_node(state: HalluciGuardState) -> dict[str, Any]:
+    """Run the trained detector after retrieval and before Judge.
+
+    The first detector pass is necessarily evidence-free triage. This second
+    pass closes the production integration gap: it supplies Verifier passages
+    to the reference-grounded checkpoint, causing real model inference and
+    calibrated sentence-level probabilities. Detector failure is fail-closed
+    but does not discard the independently computed Verifier result.
+    """
+    from .detector_bridge import run_grounded_detection
+
+    node_start = start_timer()
+    llm_response = state.get("llm_response") or state.get("draft_response", "")
+    evidence = list(state.get("retrieved_evidence") or state.get("evidence") or [])
+
+    def _run_detect():
+        return run_grounded_detection(
+            state.get("user_query", ""),
+            llm_response,
+            evidence,
+        )
+
+    detector = _dump(await asyncio.to_thread(_run_detect))
+    status = "completed" if detector.get("inference_executed") else "skipped"
+    bus = add_bus_message(
+        state,
+        source_agent="detector",
+        target_agent="judge",
+        message_type="GROUNDED_DETECTOR_RESULT",
+        payload={
+            "hallucination_probability": detector.get("hallucination_probability"),
+            "risk_level": detector.get("risk_level"),
+            "model_loaded": detector.get("model_loaded", False),
+            "inference_executed": detector.get("inference_executed", False),
+            "evidence_count": len(evidence),
+        },
+    )
+    return {
+        "detector": detector,
+        "detector_result": detector,
+        "hallucination_probability": float(
+            detector.get("hallucination_probability", 0.0)
+        ),
+        "confidence": float(detector.get("confidence_score", 0.0)),
+        "inter_agent_bus": bus,
+        "updated_at": utc_now(),
+        "trace": add_trace(
+            state,
+            "detector_grounded",
+            status,
+            latency_ms=elapsed_ms(node_start),
+            model_loaded=detector.get("model_loaded", False),
+            inference_executed=detector.get("inference_executed", False),
+            evidence_count=len(evidence),
+            risk_level=detector.get("risk_level", "HIGH"),
+        ),
+    }
+
+
 def _verifier_route(state: HalluciGuardState) -> str:
     """
     Determine the next node after verification based on execution status.
@@ -1087,19 +1207,34 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             1 for r in canonical_v_res.claim_reports
             if str(getattr(r, "verdict", "")).lower() in ("contradicted", "verdictlabel.contradicted")
         )
-        # The Re-Verifier is a SAFETY gate on the correction, not a demand that
-        # every re-extracted atomic claim be positively re-proven. Post-correction
-        # re-extraction routinely yields UNVERIFIED sub-claims (retrieval returns 0
-        # evidence for a fragment) even when the repaired answer is sound and the
-        # offending contradiction is gone. Requiring "all claims verified" therefore
-        # made a *successful* correction fail the gate forever -> the pipeline bounced
-        # to human review again and again. The correct property is: the re-verified
-        # candidate must carry NO remaining contradiction, on a verifier run that
-        # actually completed. Missing evidence is UNKNOWN, never a failure (spec §49-50).
+        positively_verified = bool(canonical_v_res.claim_reports) and all(
+            str(getattr(r, "verdict", "")).lower()
+            in ("verified", "supported", "verdictlabel.verified")
+            for r in canonical_v_res.claim_reports
+        )
+        # The ReVerifier is the final safety gate for generated corrections.
+        # Absence of a contradiction is not proof: an UNVERIFIED or CONFLICTED
+        # regeneration must not be released as accepted. Require every corrected
+        # atomic claim to be positively grounded by a completed verifier run.
         passed = (
             canonical_v_res.status == ExecutionStatus.COMPLETED
             and remaining_contradictions == 0
+            and positively_verified
         )
+
+        # PHASE-4 INVARIANT (generic, no per-domain rule): a correction may be
+        # factually true yet answer a DIFFERENT question than the user asked. It
+        # then carries no contradiction and would pass the gate on evidence for
+        # an unrelated fact. Before a *corrected* candidate can pass, require it
+        # to still cover the salient topic of the ORIGINAL query. This can only
+        # ever downgrade a pass to human review — it never manufactures an
+        # ACCEPT — so it is safe against false positives on the accept side.
+        off_topic_correction = False
+        if passed and corr_res.get("corrected_text"):
+            original_query = state.get("user_query", "") or state.get("query", "")
+            if original_query and not _answer_addresses_query(original_query, candidate_text):
+                passed = False
+                off_topic_correction = True
 
         # §25: surface a machine-readable failure class whenever the gate fails.
         # A remaining contradiction (original unresolved OR newly introduced by the
@@ -1107,7 +1242,9 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
         # at all (DEGRADED/FAILED verifier status, e.g. retrieval returned nothing).
         failure_category: str | None = None
         if not passed:
-            if remaining_contradictions > 0:
+            if off_topic_correction:
+                failure_category = "CORRECTION_OFF_TOPIC"
+            elif remaining_contradictions > 0:
                 failure_category = "REMAINING_CONTRADICTION"
             elif canonical_v_res.status == ExecutionStatus.FAILED:
                 failure_category = "VERIFIER_FAILURE"
@@ -1231,6 +1368,66 @@ def _judge_route(state: HalluciGuardState) -> str:
     return "human_escalation"
 
 
+def _build_agent_outcomes(
+    state: HalluciGuardState,
+    *,
+    memory_result: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build a non-empty, truthful outcome for every production agent."""
+    latest_trace = {
+        str(event.get("node")): event
+        for event in state.get("trace", [])
+        if isinstance(event, dict) and event.get("node")
+    }
+
+    def outcome(node: str, result: Any, *, reason: str | None = None) -> dict[str, Any]:
+        event = latest_trace.get(node)
+        if event:
+            return {
+                "status": str(event.get("status", "completed")),
+                "executed": True,
+                "reason": reason,
+                "result": result if result not in (None, {}, []) else {"status": event.get("status", "completed")},
+            }
+        return {
+            "status": "not_required",
+            "executed": False,
+            "reason": reason or "conditional stage was not required for this route",
+            "result": {"status": "not_required"},
+        }
+
+    corrector = state.get("correction_result") or state.get("corrector") or {}
+    reverifier = state.get("reverification_result") or {}
+    memory_payload = memory_result or state.get("memory_result") or state.get("memory") or {}
+    return {
+        "base_llm": outcome("base_llm", state.get("base_llm") or {}),
+        "detector": outcome("detector", state.get("detector_result") or state.get("detector") or {}),
+        "claim_analyzer": outcome("claim_analyzer", state.get("claim_analysis") or {}),
+        "verifier": outcome("verifier", state.get("verifier_result") or state.get("verifier") or {}),
+        "judge": outcome("judge", state.get("judge_result") or state.get("judge") or {}),
+        "corrector": outcome(
+            "corrector",
+            corrector,
+            reason=None if corrector else "Judge found no contradicted claim requiring repair",
+        ),
+        "reverifier": outcome(
+            "reverifier",
+            reverifier,
+            reason=(
+                None
+                if reverifier
+                else "No corrected answer was produced, so post-correction verification was unnecessary"
+            ),
+        ),
+        "memory": {
+            "status": str(memory_payload.get("status", "completed")),
+            "executed": True,
+            "reason": memory_payload.get("reason") or memory_payload.get("skipped_reason"),
+            "result": memory_payload,
+        },
+    }
+
+
 async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
     from agents.memory_agent.memory.memory_agent import MemoryAgent
     from agents.memory_agent.schemas.models import StoreFactRequest
@@ -1293,6 +1490,9 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         return {
             "memory": memory,
             "memory_result": _dump(mem_result),
+            "agent_outcomes": _build_agent_outcomes(
+                state, memory_result=_dump(mem_result)
+            ),
             "final_response": state.get("final_response") or state.get("llm_response", ""),
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
@@ -1358,8 +1558,14 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         stored_count = getattr(batch, "stored", len(stored))
         duplicate_count = getattr(batch, "duplicates", 0)
         failed_count = getattr(batch, "failed", 0)
+        if stored_count > 0:
+            memory_status = MemoryStatus.STORED
+        elif duplicate_count > 0 and failed_count == 0:
+            memory_status = MemoryStatus.DUPLICATE
+        else:
+            memory_status = MemoryStatus.FAILED
         mem_result = MemoryResult(
-            status=MemoryStatus.STORED,
+            status=memory_status,
             stored_count=stored_count,
             duplicate_count=duplicate_count,
             failed_count=failed_count,
@@ -1381,12 +1587,15 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                 "stored_count": stored_count,
                 "duplicate_count": duplicate_count,
                 "failed_count": failed_count,
-                "status": "stored",
+                "status": memory_status.value,
             },
         )
         return {
             "memory": memory,
             "memory_result": _dump(mem_result),
+            "agent_outcomes": _build_agent_outcomes(
+                state, memory_result=_dump(mem_result)
+            ),
             "final_response": state.get("final_response") or state.get("llm_response", ""),
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
@@ -1415,6 +1624,13 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             update["route"] = "memory"  # Stay at memory node, not escalate
             update["terminal_status"] = "accepted"  # Answer remains accepted
             update["verification_status"] = "verified_and_accepted"
+        update["agent_outcomes"] = _build_agent_outcomes(
+            state,
+            memory_result={
+                "status": "failed",
+                "reason": f"{type(exc).__name__}: {str(exc)[:160]}",
+            },
+        )
         return update
 
 
@@ -1496,6 +1712,7 @@ def build_verification_graph(
         "accept": _accept_node,
         "claim_analyzer": _claim_analyzer_node,
         "verifier": _verifier_node,
+        "grounded_detector": _grounded_detector_node,
         "judge": _judge_node,
         "corrector": _corrector_node,
         "reverifier": _reverifier_node,
@@ -1527,8 +1744,9 @@ def build_verification_graph(
     graph.add_conditional_edges(
         "verifier",
         _verifier_route,
-        {"judge": "judge", "human_escalation": "human_escalation"},
+        {"judge": "grounded_detector", "human_escalation": "human_escalation"},
     )
+    graph.add_edge("grounded_detector", "judge")
     graph.add_conditional_edges(
         "judge",
         _judge_route,

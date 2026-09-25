@@ -8,7 +8,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
-from agents.detector_agent import DetectionResult, DetectorAgent
+from halluciguard_detector import DetectorAgent
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 
 logger = logging.getLogger(__name__)
@@ -143,28 +143,38 @@ class BaseLLMDetectorVerifierService:
                 verifier=None,
             )
 
-        # Step 2: Detector Agent Execution
+        # Step 2: pre-retrieval claim triage. The Verifier obtains evidence;
+        # no truth probability is invented before that evidence exists.
         try:
-            detection_result: DetectionResult = self.detector_agent.detect(
+            detection_result: dict[str, Any] = self.detector_agent.detect(
                 user_query=user_query,
                 llm_response=draft_response,
             )
 
-            risk_tier = str(detection_result.risk_level.value).upper()
-            next_act_str = str(detection_result.next_action.value).upper()
+            status = str(detection_result.get("status", "completed")).lower()
+            completed = status == "completed"
+            risk_tier = str(detection_result.get("risk_level", "HIGH")).upper()
+            next_act_str = str(detection_result.get("next_action", "Verify")).upper()
             decision = "VERIFY" if next_act_str == "VERIFY" else "ACCEPT"
+            model_source = str(detection_result.get("model_source", "halluciguard_detector"))
+            # Prefer the explicit degraded flag and preserve execution diagnostics.
+            degraded = bool(detection_result.get("detector_degraded", not completed))
 
             detector_dict: dict[str, Any] = {
-                "confidence_score": detection_result.confidence_score,
-                "hallucination_probability": detection_result.hallucination_probability,
+                "confidence_score": detection_result.get("confidence_score"),
+                "hallucination_probability": detection_result.get("hallucination_probability"),
                 "risk_tier": risk_tier,
                 "decision": decision,
-                "model_source": detection_result.model_source,
-                # §6 execution diagnostics — prove real inference vs. baseline
-                "detector_model_loaded": bool(getattr(detection_result, "detector_model_loaded", False)),
-                "detector_inference_executed": bool(getattr(detection_result, "detector_inference_executed", False)),
-                "detector_degraded": bool(getattr(detection_result, "detector_degraded", False)),
-                "detector_model_source": str(getattr(detection_result, "detector_model_source", "")),
+                "model_source": model_source,
+                # §6 execution diagnostics — prove real inference vs. degraded fallback.
+                "detector_model_loaded": bool(detection_result.get("model_loaded", False)),
+                "detector_inference_executed": bool(detection_result.get("inference_executed", False)),
+                "detector_degraded": degraded,
+                "detector_model_source": model_source,
+                "probability_available": detection_result.get("hallucination_probability") is not None,
+                "grounded": bool(detection_result.get("grounded", False)),
+                "claims": detection_result.get("claims", []),
+                "verification_reason": detection_result.get("verification_reason"),
             }
         except Exception as exc:
             logger.error(
@@ -175,7 +185,7 @@ class BaseLLMDetectorVerifierService:
                 "status": "failed",
                 "error": f"Detector error: {type(exc).__name__} — {str(exc)[:200]}",
                 "risk_tier": "UNKNOWN",
-                "decision": "ACCEPT",
+                "decision": "VERIFY",
             }
             # Detector failure prevents Verifier execution
             return LLMDetectorVerifierSliceResult(

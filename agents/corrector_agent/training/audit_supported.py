@@ -55,7 +55,7 @@ def main():
     api_key = os.environ.get("API_KEY", "YOUR_API_KEY")
     
     files = ['halluciguard_dataset.jsonl', 'halluciguard_ragtruth.jsonl', 'halluciguard_truthfulqa.jsonl']
-    dir_path = r'C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets'
+    dir_path = 'agents/corrector_agent/training/data'
     
     records_to_audit = []
     

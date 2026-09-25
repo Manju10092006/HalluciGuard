@@ -12,3 +12,7 @@ frontend/
 frontend-v2/
 halluciguard-hf-space.zip
 *.log
+
+# The production detector is a local checkpoint required at runtime.
+!artifacts/detector-best/
+!artifacts/detector-best/**

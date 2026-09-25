@@ -7,7 +7,7 @@
 ---
 
 ## 1. Current Input Contract (`VerifierInputV2`)
-Defined in [`agents/verifier_agent/schemas/models.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/schemas/models.py#L60-L64):
+Defined in [`agents/verifier_agent/schemas/models.py`](../agents/verifier_agent/schemas/models.py):
 ```python
 class SuspiciousClaim(BaseModel):
     claim_id: str
@@ -22,7 +22,7 @@ class VerifierInputV2(BaseModel):
 ---
 
 ## 2. Current Output Contract (`VerifierOutputV2`)
-Defined in [`agents/verifier_agent/schemas/models.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/schemas/models.py#L119-L132):
+Defined in [`agents/verifier_agent/schemas/models.py`](../agents/verifier_agent/schemas/models.py):
 ```python
 class VerifierOutputV2(BaseModel):
     query_id: str
@@ -41,7 +41,7 @@ class VerifierOutputV2(BaseModel):
 ---
 
 ## 3. Current Verdict Enum (`VerdictLabel`)
-Defined in [`agents/verifier_agent/schemas/models.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/schemas/models.py#L20-L24):
+Defined in [`agents/verifier_agent/schemas/models.py`](../agents/verifier_agent/schemas/models.py):
 - `VERIFIED`
 - `LIKELY_HALLUCINATED`
 - `INSUFFICIENT_EVIDENCE`
@@ -52,8 +52,8 @@ Defined in [`agents/verifier_agent/schemas/models.py`](file:///c:/Users/S.Manjun
 ---
 
 ## 4. Current Domain Routing (`ModelRouter` & `AdapterRegistry`)
-- `ModelRouter` ([`models/model_router.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/models/model_router.py)) maps incoming domains to internal model configs and adapter names.
-- `AdapterRegistry.get_adapter(domain)` ([`adapters/registry.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/adapters/registry.py#L36-L50)) canonicalizes domain names and falls back silently to `"general"` (Wikipedia) if no registered adapter exists.
+- `ModelRouter` (`agents/verifier_agent/models/model_router.py`) maps incoming domains to internal model configs and adapter names.
+- `AdapterRegistry.get_adapter(domain)` (`agents/verifier_agent/adapters/registry.py`) canonicalizes domain names and falls back silently to `"general"` (Wikipedia) if no registered adapter exists.
 
 ---
 
@@ -78,34 +78,34 @@ Defined in [`agents/verifier_agent/schemas/models.py`](file:///c:/Users/S.Manjun
 ---
 
 ## 7. Current Reranking Flow
-- `Reranker` ([`rerankers/reranker.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/rerankers/reranker.py)) loads cross-encoder `BAAI/bge-reranker-large`.
+- `Reranker` (`agents/verifier_agent/rerankers/cross_encoder.py`) loads cross-encoder `BAAI/bge-reranker-large`.
 - Computes relevance scores/logits between claim and retrieved passage snippets, sorting passages in descending order of relevance.
 
 ---
 
 ## 8. Current NLI Flow
-- `NLIEngine` ([`nli/entailment.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/nli/entailment.py)) uses `cross-encoder/nli-deberta-v3-base`.
+- `NLIEngine` (`agents/verifier_agent/nli/entailment.py`) uses `cross-encoder/nli-deberta-v3-base`.
 - Computes Softmax probabilities over `[contradiction, entailment, neutral]`.
 - Maps top score to `EntailmentLabel`.
 
 ---
 
 ## 9. Current Scoring Flow
-- `EvidenceScorer` ([`scorers/evidence_scorer.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/scorers/evidence_scorer.py)) combines NLI scores (`entailment`, `contradiction`), source credibility (`SourceReliabilityManager`), recency factor, and reranker relevance weight.
+- `EvidenceScorer` (`agents/verifier_agent/scorers/evidence_scorer.py`) combines NLI scores (`entailment`, `contradiction`), source credibility (`SourceReliabilityManager`), recency factor, and reranker relevance weight.
 - Gates evidence with `MIN_NLI_SIGNAL = 0.45`.
 - Derives `support_score`, `contradiction_score`, `trust_score`, and `verdict`.
 
 ---
 
 ## 10. Current Cache Behavior
-- `SqliteCache` ([`cache/sqlite_cache.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/cache/sqlite_cache.py)) stores payloads in `verification_cache.db`.
+- `SqliteCache` (`agents/verifier_agent/cache/sqlite_cache.py`) stores payloads in `verification_cache.db`.
 - Uses SHA-256 versioned key `verifier-v2.1:{domain}:{query}`.
 - Currently, cache invalidation can only be done manually; there is no global environment toggle `VERIFIER_CACHE_ENABLED=false`.
 
 ---
 
 ## 11. Current Claim Decomposition Behavior
-- Rule-based `ClaimDecomposer` ([`claims/claim_decomposer.py`](file:///c:/Users/S.Manjunath%20Reddy/OneDrive/Music/Pictures/Videos/HalluciGuard/agents/verifier_agent/claims/claim_decomposer.py)) splits multi-sentence text into individual claims via regex and clause rules.
+- Rule-based `ClaimDecomposer` (`agents/verifier_agent/claims/claim_decomposer.py`) splits multi-sentence text into individual claims via regex and clause rules.
 
 ---
 

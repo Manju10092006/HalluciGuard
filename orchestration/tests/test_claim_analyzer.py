@@ -48,6 +48,19 @@ def test_question_is_filtered():
     assert any(c.claim_type == QUESTION for c in analysis.candidates)
 
 
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        "I'm sorry, but I can't help with that.",
+        "I’m sorry, but I can’t help with that.",
+    ],
+)
+def test_refusal_is_not_a_factual_claim(refusal):
+    analysis = fallback_analyze(refusal)
+    assert analysis.factual_claims == []
+    assert len(analysis.discarded) == 1
+
+
 def test_transition_and_factual_mixed():
     draft = "Let me explain. Python 3.12 was released in 2023."
     analysis = fallback_analyze(draft)
@@ -61,6 +74,18 @@ def test_founder_claim_routed_and_search_query_present():
     factual = analysis.factual_claims
     assert len(factual) == 1
     assert factual[0].search_queries  # a query is prepared for retrieval
+
+
+def test_fallback_strips_markdown_from_retrieval_claim_but_keeps_original():
+    draft = "Microsoft was founded by **Bill Gates** and **Paul Allen** in April\u202f1975."
+    analysis = fallback_analyze(draft)
+    factual = analysis.factual_claims
+    assert [c.claim_text for c in factual] == [
+        "Microsoft was founded by Bill Gates in April 1975.",
+        "Microsoft was founded by Paul Allen in April 1975.",
+    ]
+    assert all("**Bill Gates**" in c.original_sentence for c in factual)
+    assert all(c.search_queries == [c.claim_text] for c in factual)
 
 
 def test_every_span_is_recorded_for_observability():

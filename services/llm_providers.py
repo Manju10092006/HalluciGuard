@@ -35,8 +35,8 @@ DEFAULT_PROVIDER_ORDER: tuple[str, ...] = (GROQ, GEMINI, OPENROUTER)
 # currently-supported, low-latency, general-purpose chat models for each
 # provider. Override per deployment; never hardcode a model at a call site.
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
-DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
-DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-14b"
+DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+DEFAULT_OPENROUTER_MODEL = "qwen/qwen-2.5-7b-instruct"
 
 # Default output-token budget for the credit-unconstrained hosted providers.
 # Groq's default (openai/gpt-oss-*) is a *reasoning* model that spends tokens on

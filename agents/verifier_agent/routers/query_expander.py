@@ -10,6 +10,14 @@ from claims.entity_resolver import EntityResolver, EntityResolution
 logger = logging.getLogger(__name__)
 
 
+def _clean_query_text(query: str) -> str:
+    """Strip answer-formatting markup before entity parsing and web search."""
+    clean = str(query or "").replace("\u202f", " ").replace("\u00a0", " ")
+    clean = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", clean)
+    clean = re.sub(r"(?:\*\*|__|`)", "", clean)
+    return " ".join(clean.split())
+
+
 class QueryExpander:
     """Expands queries with entity resolution, domain-specific synonyms, and terms."""
 
@@ -46,6 +54,7 @@ class QueryExpander:
         Returns:
             Tuple of (expanded_query, entity_resolution)
         """
+        query = _clean_query_text(query)
         resolution = self.entity_resolver.resolve(query, domain)
         domain_key = domain.lower()
 
@@ -80,7 +89,7 @@ class QueryExpander:
         Generate primary and expanded search queries preserving the semantic subject.
         Returns a list of 1-3 distinct search query strings.
         """
-        clean_q = " ".join((query or "").split())
+        clean_q = _clean_query_text(query)
         if not clean_q:
             return []
 
@@ -128,6 +137,29 @@ class QueryExpander:
             person_b = kin_match.group(3).strip()
             queries.append(f"{person_b} {rel_type}")
             queries.append(f"{person_b} family")
+
+        # 3b. Role / title predicate: "Snehith is the founder of Microsoft" ->
+        # "Microsoft founder", "who is the founder of Microsoft", "Microsoft founded by".
+        # This is the dominant hallucination shape ("X is the ROLE of Y") and must
+        # anchor retrieval on the OBJECT entity + role (the checkable fact), not on
+        # the fabricated subject — otherwise search returns a profile of X.
+        role_match = re.search(
+            r"^([A-Za-z0-9\s\-\.]+?)\s+(?:is|was)\s+(?:the\s+|a\s+|an\s+|one\s+of\s+the\s+)?"
+            r"(?:co[\s-]?)?(founder|creator|inventor|author|ceo|c\.e\.o|president|chairman|"
+            r"owner|developer|designer|discoverer|writer|director|maker|architect|"
+            r"chief\s+executive)s?\s+of\s+([A-Za-z0-9\s\-\.]+)",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if role_match:
+            role = re.sub(r"\s+", " ", role_match.group(2).strip().lower())
+            role = "founder" if role in ("ceo", "c.e.o", "chief executive") and False else role
+            obj = role_match.group(3).strip().rstrip(".")
+            if obj and len(obj) > 1:
+                queries.append(f"{obj} {role}")
+                queries.append(f"who is the {role} of {obj}")
+                if role in ("founder", "creator", "inventor", "author", "developer", "designer", "maker"):
+                    queries.append(f"{obj} founded by")
 
         # 4. Starring / Film roles: "Ram Charan starred in Game Changer" -> "Game Changer cast", "Game Changer starring"
         star_match = re.search(

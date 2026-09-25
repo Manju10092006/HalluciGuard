@@ -45,6 +45,30 @@ COUNTER_EVIDENCE = _p(
 )
 
 
+def test_article_section_is_not_deduplicated_against_article_lead():
+    """Deep sections carry relation evidence absent from generic lead text."""
+    claim = "Rust was created by Graydon Hoare while working at Mozilla."
+    lead = _p(
+        "Rust (programming language)",
+        "Rust is a general-purpose programming language emphasizing safety and performance.",
+        "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+        hint=0.85,
+    )
+    early_years = _p(
+        "Rust (programming language) — Early years",
+        "Graydon Hoare began developing Rust at Mozilla Research in 2006.",
+        "https://en.wikipedia.org/wiki/Rust_(programming_language)#2006-2009_Early_years",
+        hint=0.85,
+    )
+    ranked = rank_evidence(
+        [lead, early_years], claim_text=claim, search_queries=["Rust Graydon Hoare Mozilla"]
+    )
+    assert len(ranked) == 2
+    section = next(item for item in ranked if "Early years" in str(item.passage["title"]))
+    assert section.discard_reason not in {"duplicate_canonical_url", "duplicate_url"}
+    assert section.score > next(item.score for item in ranked if item is not section)
+
+
 def test_counter_evidence_outranks_same_name_distractor():
     ranked = rank_evidence(
         [IRRELEVANT_SAMENAME, COUNTER_EVIDENCE], claim_text=CLAIM, search_queries=QUERIES

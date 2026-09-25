@@ -37,6 +37,15 @@ class EvidenceScorer:
         except Exception:
             return 0.20
 
+    def _get_ungrounded_confidence_ceiling(self) -> float:
+        """Confidence ceiling for a VERIFIED verdict that no structured relation
+        check could ground (F-1). Falls back to 0.70 if settings are unavailable."""
+        try:
+            from config.settings import get_settings
+            return float(get_settings().ungrounded_confidence_ceiling)
+        except Exception:
+            return 0.70
+
     @staticmethod
     def _bounded(value: Any, default: float = 0.0) -> float:
         try:
@@ -214,6 +223,7 @@ class EvidenceScorer:
                 "trust_score": 0.0,
                 "confidence_score": 0.0,
                 "verdict": VerdictLabel.UNVERIFIED,
+                "grounded": False,
                 "evidence_classification_counts": {
                     "supporting": 0,
                     "contradicting": 0,
@@ -236,9 +246,16 @@ class EvidenceScorer:
         url_contradiction_weights: Dict[str, float] = {}
         supporting_sources: set[str] = set()
         contradicting_sources: set[str] = set()
+        # F-1: track whether ANY passage produced a decisive structured relation
+        # result (MATCH / OBJECT_MISMATCH / RELATION_MISMATCH). A VERIFIED verdict
+        # with this still False rested purely on raw NLI + lexical heuristics and
+        # is confidence-capped below.
+        grounded_decisive = False
 
         for passage, nli in zip(passages, nli_results):
             rel_result = self.relation_verifier.verify_relation(claim, [passage])
+            if rel_result.status in ("MATCH", "OBJECT_MISMATCH", "RELATION_MISMATCH"):
+                grounded_decisive = True
             evidence_class = self.classify_evidence(claim, passage, nli)
             classification_counts[evidence_class.lower()] += 1
 
@@ -279,6 +296,17 @@ class EvidenceScorer:
             relevance = self.relevance_weight(
                 getattr(passage, "relevance_score", 0.5)
             )
+            # A decisive structured relation comparison already proves that the
+            # passage discusses the same subject and predicate.  Do not let a
+            # poorly calibrated cross-encoder score erase that deterministic
+            # grounding signal; retain source/NLI weighting, but apply a strong
+            # relevance floor for the confirmed relation pair.
+            if rel_result.status in (
+                "MATCH",
+                "OBJECT_MISMATCH",
+                "RELATION_MISMATCH",
+            ):
+                relevance = max(relevance, 0.80)
 
             # Canonical URL / doc key for deduplication
             url_key = (getattr(passage, "url", "") or source_id or getattr(passage, "title", "")).strip().lower()
@@ -371,12 +399,27 @@ class EvidenceScorer:
         else:
             confidence_score = 0.0
 
+        # F-1: a VERIFIED verdict that no structured relation check could ground
+        # rests solely on the NLI + lexical heuristics. The entity-grounding gate
+        # recognises only a small set of relation templates, so a confident
+        # VERIFIED on a non-templated claim is precisely the false-accept risk
+        # this system exists to prevent. Cap its confidence so the Judge treats
+        # it as moderate-certainty (and escalates CORE claims) rather than
+        # trusting raw NLI as if it were entity-grounded. The verdict is NOT
+        # changed, and CONTRADICTED confidence is left intact (fail-closed keeps
+        # refutations strong).
+        if verdict == VerdictLabel.VERIFIED and not grounded_decisive:
+            ceiling = self._get_ungrounded_confidence_ceiling()
+            if confidence_score > ceiling:
+                confidence_score = ceiling
+
         return {
             "verdict": verdict,
             "support_score": round(support_score, 4),
             "contradiction_score": round(contradiction_score, 4),
             "trust_score": round(trust_score, 4),
             "confidence_score": confidence_score,
+            "grounded": grounded_decisive,
             "evidence_classification_counts": classification_counts,
         }
 

@@ -61,9 +61,14 @@ _FILLER_EXACT = {
     "of course", "indeed", "right", "you're right", "you are right",
     "exactly", "i agree", "good question", "great question",
     "that's a good question", "well", "ok", "okay", "certainly",
+    "actually", "actually no",
     # negated acknowledgements — assert nothing internet-checkable on their own
     "that's not correct", "that is not correct", "that's incorrect",
     "that is incorrect", "that's wrong", "that is wrong", "no that's not correct",
+    "actually that's not correct", "actually that is not correct", "actually that isn't correct",
+    "actually that's incorrect", "actually that is incorrect", "actually that's wrong",
+    "that isn't correct", "that isn't right", "that's not right", "that is not right",
+    "no that isn't correct", "no that is not correct", "no that's not right",
 }
 
 # Punctuation-insensitive form of the filler set, so "No, that's not correct"
@@ -105,10 +110,15 @@ _MD_LABEL_RE = re.compile(r"^\s*[A-Z][A-Za-z /]{1,40}:\s+(?=\S)")  # "Key points
 # Leading conversational framing stripped from the front of a sentence.
 _PREFIX_RE = re.compile(
     r"^\s*(?:"
-    r"that's correct|that is correct|that's right|that is right|"
-    r"sure|yes|yeah|well|of course|certainly|absolutely|indeed|"
-    r"according to me|in my opinion|to answer your question|"
-    r"i think|i believe|as an ai(?: language model)?"
+    r"actually,\s*(?:that's|that\s+is|that\s+isn't)\s+(?:not\s+)?(?:correct|right|true|accurate|wrong|incorrect)|"
+    r"actually,\s*no|actually|"
+    r"no,\s*(?:that's|that\s+is|that\s+isn't)\s+(?:not\s+)?(?:correct|right|true|accurate|wrong|incorrect)|"
+    r"that's\s+(?:not\s+)?(?:correct|right|true|accurate|wrong|incorrect)|"
+    r"that\s+is\s+(?:not\s+)?(?:correct|right|true|accurate|wrong|incorrect)|"
+    r"that\s+isn't\s+(?:correct|right|true|accurate)|"
+    r"sure|yes|yeah|well|of\s+course|certainly|absolutely|indeed|"
+    r"according\s+to\s+me|in\s+my\s+opinion|to\s+answer\s+your\s+question|"
+    r"i\s+think|i\s+believe|as\s+an\s+ai(?: language model)?"
     r")\b[\s,:;!.\-]*",
     re.IGNORECASE,
 )

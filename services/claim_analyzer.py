@@ -210,6 +210,15 @@ def _build_prompt(draft: str, user_query: str, domain_hint: str) -> str:
 _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
+def _clean_claim_text(text: str) -> str:
+    """Remove presentation Markdown while preserving the factual wording."""
+    cleaned = str(text or "").replace("\u202f", " ").replace("\u00a0", " ")
+    cleaned = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", cleaned)
+    cleaned = re.sub(r"(?:\*\*|__|`)", "", cleaned)
+    cleaned = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", cleaned)
+    return " ".join(cleaned.split()).strip()
+
+
 def _extract_json(text: str) -> dict[str, Any] | None:
     """Best-effort JSON extraction from an LLM reply (handles code fences/prose)."""
     if not text:
@@ -245,7 +254,7 @@ def _coerce_candidates(obj: dict[str, Any]) -> tuple[str, list[ClaimCandidate]]:
     for idx, raw in enumerate(raw_claims, start=1):
         if not isinstance(raw, dict):
             continue
-        claim_text = str(raw.get("claim_text") or raw.get("text") or "").strip()
+        claim_text = _clean_claim_text(raw.get("claim_text") or raw.get("text") or "")
         original = str(raw.get("original_sentence") or claim_text).strip()
         if not claim_text and not original:
             continue
@@ -257,7 +266,7 @@ def _coerce_candidates(obj: dict[str, Any]) -> tuple[str, list[ClaimCandidate]]:
             queries = [queries]
         if not isinstance(queries, list):
             queries = []
-        search_queries = [str(q).strip() for q in queries if str(q).strip()]
+        search_queries = [_clean_claim_text(q) for q in queries if _clean_claim_text(q)]
         if ctype == FACTUAL_CLAIM and not search_queries:
             search_queries = [claim_text or original]
         candidates.append(
@@ -297,8 +306,8 @@ _INSTRUCTION_RE = re.compile(
     re.IGNORECASE,
 )
 _DISCLAIMER_RE = re.compile(
-    r"\b(i am not a (doctor|lawyer|financial)|not (medical|legal|financial) advice|"
-    r"consult (a|your)|this (may|might) be outdated|i cannot|i can'?t (verify|confirm))\b",
+    r"\b(i(?:['’]m| am) sorry|i am not a (doctor|lawyer|financial)|not (medical|legal|financial) advice|"
+    r"consult (a|your)|this (may|might) be outdated|i cannot|i can[’']?t(?:\s+help|\s+(?:verify|confirm)))\b",
     re.IGNORECASE,
 )
 _TRANSITION_RE = re.compile(
@@ -328,6 +337,30 @@ def _classify_nonfactual(sentence: str) -> tuple[str, str]:
     return NON_FACTUAL, "not an objectively checkable assertion"
 
 
+_MULTI_CREATOR_RE = re.compile(
+    r"^(?P<subject>.+?)\s+(?P<aux>was|is|were)\s+"
+    r"(?P<verb>founded|created|developed|invented|designed|built)\s+by\s+"
+    r"(?P<first>[A-Z][\w.'’\-]*(?:\s+[A-Z][\w.'’\-]*){0,3})\s+and\s+"
+    r"(?P<second>[A-Z][\w.'’\-]*(?:\s+[A-Z][\w.'’\-]*){0,3})"
+    r"(?P<suffix>\s+(?:in|on)\s+.+?)?[.]?$"
+)
+
+
+def _atomize_factual_sentence(sentence: str) -> list[str]:
+    """Split a coordinated creator assertion into independently checkable facts."""
+    match = _MULTI_CREATOR_RE.match(sentence.strip())
+    if not match:
+        return [sentence]
+    suffix = match.group("suffix") or ""
+    return [
+        (
+            f"{match.group('subject')} {match.group('aux')} {match.group('verb')} by "
+            f"{creator}{suffix}."
+        )
+        for creator in (match.group("first"), match.group("second"))
+    ]
+
+
 def fallback_analyze(draft: str, user_query: str = "", domain_hint: str = "") -> ClaimAnalysis:
     """Deterministic, network-free analysis. Always available."""
     # Import lazily so the module has no hard dependency on the verifier package
@@ -344,6 +377,7 @@ def fallback_analyze(draft: str, user_query: str = "", domain_hint: str = "") ->
     candidates: list[ClaimCandidate] = []
     factual_idx = 0
     for i, sentence in enumerate(sentences, start=1):
+        clean_sentence = _clean_claim_text(sentence)
         # A clearly non-factual span (meta/discourse/opinion/instruction/
         # disclaimer/question/transition) is filtered regardless of what the
         # decomposer's checkable-filter thinks — the decomposer is tuned for
@@ -363,20 +397,21 @@ def fallback_analyze(draft: str, user_query: str = "", domain_hint: str = "") ->
                 )
             )
             continue
-        checkable = bool(is_checkable(sentence)) if is_checkable else _fallback_checkable(sentence)
+        checkable = bool(is_checkable(clean_sentence)) if is_checkable else _fallback_checkable(clean_sentence)
         if checkable:
-            factual_idx += 1
-            candidates.append(
-                ClaimCandidate(
-                    claim_id=f"c{factual_idx}",
-                    claim_text=sentence,
-                    original_sentence=sentence,
-                    claim_type=FACTUAL_CLAIM,
-                    domain=domain,
-                    search_queries=[sentence],
-                    reason="deterministic: passed checkable-claim filter",
+            for atomic_claim in _atomize_factual_sentence(clean_sentence):
+                factual_idx += 1
+                candidates.append(
+                    ClaimCandidate(
+                        claim_id=f"c{factual_idx}",
+                        claim_text=atomic_claim,
+                        original_sentence=sentence,
+                        claim_type=FACTUAL_CLAIM,
+                        domain=domain,
+                        search_queries=[atomic_claim],
+                        reason="deterministic: passed checkable-claim filter",
+                    )
                 )
-            )
         else:
             ctype, reason = _classify_nonfactual(sentence)
             candidates.append(

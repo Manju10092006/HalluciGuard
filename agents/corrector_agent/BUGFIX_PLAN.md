@@ -15,14 +15,14 @@ There is **no** `trust_score < threshold` boundary causing the discard. Instead,
 
 ## 3. Dataset Audit & Discrepancy (Answers to Step 1)
 1. **Exact Files Currently Read**: 
-   `training/build_dataset.py` currently reads from three files in `C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets`:
+   `training/build_dataset.py` originally read from three machine-local dataset files:
    - `halluciguard_dataset.jsonl` (187 records)
    - `halluciguard_ragtruth.jsonl` (84 records)
    - `halluciguard_truthfulqa.jsonl` (498 records)
 2. **Leftover Files Confirmation**:
-   Yes, the three files currently in `C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets` are the old leftover files. They use a nested `input`/`target` schema, not the exact flat schema provided.
+   The three original machine-local files were old leftovers. They use a nested `input`/`target` schema, not the exact flat schema provided.
 3. **Discrepancy Explanation**:
-   The record count came out to 769 (187 + 84 + 498) because the script was pointing to the old leftover directory (`C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets`) rather than the actual new dataset. Because my code incorrectly assumed the *new* flat schema (`r.get('query')`, etc.), it failed to extract any fields from the nested `input/target` schema of the leftover files, resulting in 0 evidence for all 769 records. I will fix `build_dataset.py` to point to `<DATASETS_FOLDER_PATH>` and map the fields using the exact flat schema you provided.
+   The record count came out to 769 (187 + 84 + 498) because the script was pointing to an old local directory rather than the intended dataset. Because the code assumed the *new* flat schema (`r.get('query')`, etc.), it failed to extract fields from the nested `input/target` schema, resulting in 0 evidence for all 769 records. The portable dataset location is `agents/corrector_agent/training/data`.
 
 ## 4. Orchestrator Role Definition & Architecture Fix (Answer to Step 2)
 **Role Definition Chosen:** (b) The fine-tuned model is only used for phrasing/fluency polish on top of evidence text the merger already assembled.

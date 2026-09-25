@@ -181,12 +181,22 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
         "       how urgently the Verifier should look. The Verifier is the arbiter.",
     )
     detector = result.get("detector_result") or result.get("detector", {})
-    prob = float(detector.get("hallucination_probability", 0.0))
-    conf = float(detector.get("confidence_score", detector.get("confidence", 0.0)))
-    degraded = bool(detector.get("detector_degraded")) or not detector.get("detector_inference_executed", True)
+    probability_available = bool(
+        detector.get(
+            "probability_available",
+            detector.get("hallucination_probability") is not None,
+        )
+    )
+    degraded = bool(detector.get("detector_degraded"))
     val("Hallucination risk level", _clean_enum(detector.get("risk_level", "UNKNOWN")))
-    val("Hallucination probability", f"{prob:.4f}")
-    val("Confidence score", f"{conf:.4f}")
+    if probability_available:
+        prob = float(detector.get("hallucination_probability", 0.0))
+        conf = float(detector.get("confidence_score", detector.get("confidence", 0.0)))
+        val("Hallucination probability", f"{prob:.4f}")
+        val("Confidence score", f"{conf:.4f}")
+    else:
+        val("Hallucination probability", "N/A — grounded evidence is unavailable at triage")
+        val("Confidence score", "N/A — routing fail-closed to Verifier")
     val("Recommended route", _clean_enum(detector.get("next_action", "verify")))
     val("Detector degraded?", degraded)
 
@@ -254,8 +264,8 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
         "       verified evidence — never invent new facts.",
         "IN   : the draft + contradicted claims + evidence + Judge decision.",
         "OUT  : a corrected answer.",
-        "WHEN : conditional — runs only if the Judge said CORRECT_AND_ACCEPT.",
-        "       If the Judge said ACCEPT, there is nothing to fix, so it is SKIPPED.",
+        "WHEN : conditional — runs only if the Judge requested correction.",
+        "       Otherwise it reports NOT REQUIRED instead of an empty state.",
     )
     corrector = result.get("correction_result") or result.get("corrector")
     if corrector:
@@ -268,8 +278,9 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
         if corrector.get("reasoning"):
             val("Repair reasoning", corrector.get("reasoning"))
     else:
-        print("  • Status: SKIPPED")
-        print("    (Judge emitted ACCEPT — no contradicted claim needed repair.)")
+        outcome = (result.get("agent_outcomes") or {}).get("corrector", {})
+        print("  • Status: EVALUATED — NOT REQUIRED")
+        val("Reason", outcome.get("reason", "Judge found no contradicted claim requiring repair"))
 
     # ── 6. REVERIFIER ──────────────────────────────────────────────────────────
     header("6", "REVERIFIER  (Post-Correction Re-Validation)",
@@ -290,7 +301,9 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
         val("Remaining contradictions", reverifier.get("remaining_contradictions", 0))
         val("Reverification attempts", result.get("reverification_attempt_count", 1))
     else:
-        print("  • Status: SKIPPED (no correction happened, so nothing to re-validate.)")
+        outcome = (result.get("agent_outcomes") or {}).get("reverifier", {})
+        print("  • Status: EVALUATED — NOT REQUIRED")
+        val("Reason", outcome.get("reason", "No corrected answer was produced"))
 
     # ── 7. MEMORY ──────────────────────────────────────────────────────────────
     header("7", "MEMORY AGENT  (Verified-Knowledge Persistence)",
@@ -307,9 +320,10 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
     stored_cnt = memory.get("stored_count", memory.get("count", 0))
     fact_ids = memory.get("fact_ids", [f.get("fact_id") for f in memory.get("stored", []) if isinstance(f, dict)])
     val("Persistence status", mem_status)
-    val("Verified facts stored", stored_cnt)
+    val("New verified facts stored", stored_cnt)
+    val("Existing duplicates reused", memory.get("duplicate_count", 0))
     if fact_ids:
-        val("Persisted fact IDs", fact_ids)
+        val("Stored/referenced fact IDs", fact_ids)
     val("Knowledge graph active", memory.get("knowledge_graph", True))
     val("Vector memory active", memory.get("vector_memory", True))
     if memory.get("skipped_reason") or memory.get("reason"):
@@ -335,12 +349,20 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
 def _describe_path(result: dict) -> str:
     """One-line human summary of which branch the pipeline took."""
     corrected = bool(result.get("correction_result") or result.get("corrector"))
-    decision = _clean_enum((result.get("judge_result") or result.get("judge", {})).get("decision", ""))
+    judge_info = result.get("judge_result") or result.get("judge") or {}
+    decision = _clean_enum(judge_info.get("decision", result.get("judge_decision", "")))
+    term_status = str(result.get("terminal_status", "")).lower()
+    ver_status = str(result.get("verification_status", "")).lower()
+
+    if term_status == "human_review" or ver_status == "human_review_required" or decision == "ABSTAIN":
+        return f"generate → detector → verifier → judge({decision or 'ABSTAIN'}) → human_escalation → memory (human review required)"
     if corrected:
         return "generate → detector → verifier → judge(CORRECT) → corrector → reverifier → memory"
-    if decision == "REJECT":
-        return "generate → detector → verifier → judge(REJECT) → memory (answer withheld)"
-    return "generate → detector → verifier → judge(ACCEPT) → memory  (no repair needed)"
+    if decision == "REJECT" or term_status == "rejected":
+        return f"generate → detector → verifier → judge({decision or 'REJECT'}) → reject → memory (answer withheld)"
+    if decision == "ACCEPT":
+        return "generate → detector → verifier → judge(ACCEPT) → memory (no repair needed)"
+    return f"generate → detector → verifier → judge({decision or 'UNKNOWN'}) → memory"
 
 
 if __name__ == "__main__":

@@ -146,7 +146,7 @@ def main():
         print("Please set one of these variables before running this script.")
         sys.exit(1)
 
-    dir_path = r'C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets'
+    dir_path = 'agents/corrector_agent/training/data'
     fname = 'halluciguard_dataset.jsonl'
     path = os.path.join(dir_path, fname)
     

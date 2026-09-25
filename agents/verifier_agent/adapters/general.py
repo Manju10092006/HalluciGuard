@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import urllib.parse
 from typing import List
 from bs4 import BeautifulSoup
@@ -205,7 +206,7 @@ class GeneralAdapter:
         except Exception as e:
             logger.warning(f"Wikipedia REST search failed for '{cleaned_q}': {e}. Trying Action API.")
 
-        # Fallback: MediaWiki Action API
+        # Fallback 1: MediaWiki Action API
         if not candidate_pages:
             try:
                 res = await client.get(
@@ -223,9 +224,24 @@ class GeneralAdapter:
                 candidate_pages = res.json().get("query", {}).get("search", [])
             except Exception as e:
                 logger.error(f"Failed general search fallback: {e}")
-                return []
 
-        import re
+        # Fallback 2: Entity-focused search for verbose/complex sentences
+        if not candidate_pages:
+            stopwords = {"is", "the", "a", "an", "in", "of", "to", "and", "or", "for", "with", "that", "this", "from", "was", "were", "been", "have", "has", "had", "by", "on", "at", "as", "while", "they"}
+            entity_words = [w for w in re.findall(r"\b[A-Z0-9][a-zA-Z0-9\-']*\b", query) if w.lower() not in stopwords]
+            if entity_words:
+                entity_q = " ".join(entity_words[:6])
+                try:
+                    res = await client.get(
+                        "https://en.wikipedia.org/w/rest.php/v1/search/page",
+                        adapter_name=self.name,
+                        params={"q": entity_q, "limit": k},
+                        headers=headers,
+                    )
+                    candidate_pages = res.json().get("pages", [])
+                except Exception:
+                    pass
+
         stopwords = {
             "is", "the", "a", "an", "in", "of", "to", "and", "or", "for",
             "with", "that", "this", "from", "was", "were", "been", "have",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import List
 from bs4 import BeautifulSoup
 
@@ -10,6 +11,13 @@ from utils.async_executor import gather_results
 from utils.http_client import ResilientHttpClient, get_client
 
 logger = logging.getLogger(__name__)
+
+# Process-wide circuit breaker for keyless Semantic Scholar. One 429 means the
+# shared rate-limit pool is exhausted; every other expanded query in the same
+# run would 429 too, so we skip S2 entirely for a short cooldown instead of
+# hammering it. arXiv + Crossref still cover the research domain meanwhile.
+_S2_COOLDOWN_SECONDS = 120.0
+_s2_blocked_until = 0.0
 
 class AiResearchAdapter:
     def __init__(self) -> None:
@@ -121,11 +129,14 @@ class AiResearchAdapter:
             return []
 
     async def _search_semanticscholar(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:
+        global _s2_blocked_until
+        if time.monotonic() < _s2_blocked_until:
+            return []  # circuit open: skip until cooldown elapses
         try:
             headers = {"x-api-key": self.semantic_scholar_key} if self.semantic_scholar_key else None
             res = await client.get(
                 "https://api.semanticscholar.org/graph/v1/paper/search",
-                adapter_name=self.name,
+                adapter_name="semanticscholar",
                 params={"query": query, "limit": k, "fields": "title,abstract,url,year,externalIds"},
                 headers=headers,
             )
@@ -150,7 +161,12 @@ class AiResearchAdapter:
                 ))
             return passages
         except Exception as e:
-            logger.warning(f"Semantic Scholar search search failed. URL: https://api.semanticscholar.org/graph/v1/paper/search. Error: {e}")
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 429 or "429" in str(e):
+                _s2_blocked_until = time.monotonic() + _S2_COOLDOWN_SECONDS
+                logger.warning("Semantic Scholar rate-limited (429); circuit open for %.0fs", _S2_COOLDOWN_SECONDS)
+            else:
+                logger.warning(f"Semantic Scholar search search failed. URL: https://api.semanticscholar.org/graph/v1/paper/search. Error: {e}")
             return []
 
     async def _search_crossref(self, client: ResilientHttpClient, query: str, k: int) -> List[Passage]:

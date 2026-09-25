@@ -387,7 +387,15 @@ def _canonical_url(passage: Any) -> str:
     if not url:
         return ""
     parsed = urlparse(url)
-    return f"{parsed.netloc}{parsed.path}".rstrip("/")
+    base = f"{parsed.netloc}{parsed.path}".rstrip("/")
+    # A section/chunk URL is not a duplicate of the article lead. Retrieval
+    # adapters deliberately emit deep Wikipedia sections because the lead often
+    # omits the exact relation under verification (creator, parent, release
+    # date, etc.). Dropping the fragment here removed the strongest evidence
+    # before BGE/NLI — e.g. Rust#2006-2009_Early_years was collapsed into the
+    # generic Rust article whose lead does not mention Graydon Hoare.
+    fragment = parsed.fragment.strip().lower()
+    return f"{base}#{fragment}" if fragment else base
 
 
 def _dedup(passages: list[Any]) -> tuple[list[Any], list[tuple[Any, str]]]:

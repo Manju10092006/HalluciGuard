@@ -357,7 +357,7 @@ def run_benchmark():
     print("  HALLUCIGUARD ENTERPRISE BENCHMARK EXECUTION HARNESS    ")
     print("==========================================================")
 
-    dataset_path = r"C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets\halluciguard_dataset.jsonl"
+    dataset_path = "agents/corrector_agent/training/data/halluciguard_dataset.jsonl"
     dataset = []
     with open(dataset_path, "r", encoding="utf-8") as f:
         for line in f:

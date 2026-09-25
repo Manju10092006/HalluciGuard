@@ -52,8 +52,14 @@ def print_slice_execution_report(result_dict: Dict[str, Any], domain: str = "gen
     print("-" * 76)
 
     # ── Detector ────────────────────────────────────────────────────────────
-    print("DETECTOR:")
-    print(f"  • Hallucination Prob    : {detector.get('hallucination_probability', 0.0):.4f}")
+    print("DETECTOR — PRE-RETRIEVAL TRIAGE:")
+    detector_probability = detector.get("hallucination_probability")
+    probability_text = (
+        f"{float(detector_probability):.4f}"
+        if detector_probability is not None
+        else "N/A (evidence not retrieved yet)"
+    )
+    print(f"  • Hallucination Prob    : {probability_text}")
     print(f"  • Risk Tier             : {detector.get('risk_tier', 'UNKNOWN')}")
     print(f"  • Decision              : {detector.get('decision', 'UNKNOWN')}")
     print(f"  • Model Source          : {detector.get('model_source', 'HaluEval DistilBERT')}")
@@ -62,6 +68,15 @@ def print_slice_execution_report(result_dict: Dict[str, Any], domain: str = "gen
     print(f"  • Inference Executed    : {detector.get('detector_inference_executed', False)}")
     print(f"  • Degraded (baseline)   : {detector.get('detector_degraded', False)}")
     print(f"  • Detector Provenance   : {detector.get('detector_model_source', '') or 'n/a'}")
+    detector_claims = detector.get("claims") or []
+    print(f"  • Claims Extracted      : {len(detector_claims)}")
+    for claim_index, detector_claim in enumerate(detector_claims, 1):
+        print(
+            f"    [{claim_index}] {detector_claim.get('label', 'UNVERIFIED')}: "
+            f"{detector_claim.get('text', '')}"
+        )
+    if not detector.get("grounded", False):
+        print("  • Grounding Status      : Deferred until Verifier retrieves evidence")
     print("-" * 76)
 
     # ── Verifier & n8n ──────────────────────────────────────────────────────
@@ -80,8 +95,22 @@ def print_slice_execution_report(result_dict: Dict[str, Any], domain: str = "gen
 
         print(f"\n  Claim #{c_idx}: \"{claim_text}\"")
         print("  N8N RETRIEVAL:")
-        sources = n8n_trace.get("primary_sources") or trace.get("primary_sources") or ["wikipedia"]
-        retrieved_count = n8n_trace.get("evidence_count", verifier.get("retrieved_sources", len(claim_rep.get("evidence", []))))
+        primary_trace = trace.get("primary") or {}
+        sources = (
+            n8n_trace.get("primary_sources")
+            or trace.get("primary_sources")
+            or ([trace.get("primary_adapter")] if trace.get("primary_adapter") else [])
+            or ["wikipedia"]
+        )
+        # Report the complete retrieval boundary, including Python fallback.
+        # n8n may legitimately return zero while the fallback adapter retrieves
+        # evidence; showing only n8n's count made healthy fallback look broken.
+        retrieved_count = claim_rep.get("retrieved_documents")
+        if retrieved_count is None:
+            retrieved_count = primary_trace.get(
+                "result_count",
+                verifier.get("retrieved_sources", len(claim_rep.get("evidence", []))),
+            )
         tavily_used = n8n_trace.get("tavily_called", False)
         counts = n8n_trace.get("counts") or {}
         perf = n8n_trace.get("performance") or {}
@@ -89,6 +118,10 @@ def print_slice_execution_report(result_dict: Dict[str, Any], domain: str = "gen
         print(f"    • Sources Used        : {sources}")
         print(f"    • Retrieved Count     : {retrieved_count} candidate passages")
         print(f"    • Tavily Fallback     : {tavily_used}")
+        if n8n_trace:
+            print(f"    • n8n Retrieved       : {n8n_trace.get('evidence_count', 0)}")
+        if primary_trace:
+            print(f"    • Python Fallback     : {primary_trace.get('result_count', 0)} retrieved")
         if counts:
             print(f"    • Counts Breakdown    : {counts}")
         if perf:

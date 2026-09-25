@@ -6,7 +6,7 @@ Create a `.env` file in the project root:
 
 ```env
 # Optional API Keys (system works offline or with free endpoints where available)
-TAVILY_API_KEY=tvly-xxxxxxxxxxxxxxxxxxxx
+TAVILY_API_KEY=
 OPENFDA_KEY=
 NVD_API_KEY=
 ALPHA_VANTAGE_KEY=
