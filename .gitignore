@@ -115,6 +115,10 @@ experiments/
 # Generated benchmark/certification result dumps (regenerable output)
 benchmark_results_certified.json
 
+# Superseded frontend kept locally for rollback/reference. The deployed client
+# is frontend-v2; this directory is intentionally excluded from GitHub.
+/frontend/
+
 cloudflared.exe
 
 # Standalone detector: heavy/regenerable artifacts and vendored third-party repos (nested .git)

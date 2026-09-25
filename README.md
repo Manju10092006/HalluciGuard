@@ -180,7 +180,6 @@ HalluciGuard/
 │   ├── src/components/          # UI and agent-activity components
 │   ├── src/lib/                 # API client and shared utilities
 │   └── public/                  # Static assets
-├── frontend/                    # Retained legacy frontend implementation
 ├── orchestration/               # LangGraph graph, state, contracts, FastAPI
 ├── services/                    # Base LLM, providers, claim analysis, n8n client
 ├── halluciguard_detector/       # Trained grounded Detector package and API

@@ -22,9 +22,9 @@ frontend-v2/
 
 The root `package.json` delegates deployment builds to `frontend-v2`.
 
-### `frontend/` — retained legacy implementation
-
-This directory remains tracked because it is a complete earlier client and may still be useful for comparison or rollback. The repository does not claim both are active production frontends.
+The superseded `frontend/` copy is retained locally for rollback/reference but
+is intentionally excluded from GitHub. This keeps the remote repository and
+deployment documentation focused on the single active client.
 
 ## Backend
 
