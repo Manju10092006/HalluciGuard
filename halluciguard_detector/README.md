@@ -16,6 +16,74 @@ The implementation borrows the reference-conditioned checking formulation from M
 
 The included `artifacts/detector-best` checkpoint is the completed one-epoch baseline described in [MODEL_CARD.md](MODEL_CARD.md). Its metrics are honest baseline results, not a claim of perfect open-world detection.
 
+## Production integration
+
+The production graph uses two calls through `orchestration/detector_bridge.py`:
+
+1. **Pre-retrieval triage** receives the query and candidate answer. Because no evidence exists, it emits claim spans, `probability_available=false`, `inference_executed=false`, and routes to verification. It does not load the checkpoint or fabricate a truth score.
+2. **Grounded inference** runs immediately after Verifier retrieval. It receives the same query/answer plus retrieved evidence, loads `artifacts/detector-best`, executes the trained model, applies calibration, and replaces the triage result before Judge.
+
+```mermaid
+flowchart LR
+    Q[Query + candidate] --> S[Sentence spans]
+    S --> T[Pre-retrieval triage]
+    T --> R[Verifier retrieval]
+    R --> X[Lexical evidence selection]
+    X --> TOK[DeBERTa tokenizer<br/>evidence, sentence]
+    TOK --> M[detector-best checkpoint]
+    M --> L[Three-class logits]
+    L --> C[Temperature scaling]
+    C --> P[P contradicted + P not-enough-info]
+    P --> K[Risk, routing and sentence contract]
+```
+
+## Input and output contract
+
+Grounded input requires `user_query`, a non-empty candidate answer, and non-empty evidence. Runtime output includes probability, confidence, risk, action, model source/status, degradation reason, model load and inference proof, model/calibrator versions, calibration status, per-sentence spans/labels/probabilities, warnings and diagnostics. The canonical supervisor contract is smaller; the bridge retains these operational fields for audit.
+
+## Training record
+
+| Item | Recorded value |
+|---|---|
+| Dataset | RAGTruth human span annotations |
+| Labels | `SUPPORTED`, `CONTRADICTED`, `NOT_ENOUGH_INFO` |
+| Conversion | deterministic sentence spans and annotation overlap |
+| Leakage control | source-grouped train/dev; official test untouched |
+| Examples | train 29,832; dev 10,873; test 18,777 |
+| Encoder | `microsoft/deberta-v3-xsmall` with a fresh three-class head |
+| Artifact run | 1 epoch, batch size 16, maximum length 256, seed 42 |
+| Optimizer | AdamW; implementation default LR `2e-5`, weight decay `0.01` |
+| Schedule / clipping | linear, 6% warmup; gradient clipping 1.0 |
+| Precision/device | AMP on CUDA; report records CUDA, not the exact GPU model |
+
+The artifact report does not record every possible command-line override. Missing hardware or run values are not inferred.
+
+## Calibration and held-out evaluation
+
+Temperature scaling is fitted only on development logits. The persisted temperature is `0.7586129308` and the dev-selected hallucination threshold is `0.6216216216`. Hallucination probability is calibrated `P(CONTRADICTED) + P(NOT_ENOUGH_INFO)`, not a raw logit.
+
+| Metric | Value |
+|---|---:|
+| Accuracy | 0.8655 |
+| Precision | 0.3083 |
+| Recall | 0.5332 |
+| F1 | 0.3907 |
+| ROC-AUC | 0.8212 |
+| PR-AUC | 0.2886 |
+| ECE | 0.1296 |
+| False-positive rate | 0.1053 |
+| False-negative rate | 0.4668 |
+
+Confusion counts: TN 15,441; FP 1,817; FN 709; TP 810 over 18,777 sentences. The runtime entity-conflict guard is excluded from these figures.
+
+## Failure behavior
+
+- Missing evidence: honest triage result, no inference, force verification.
+- Missing/corrupt artifact or inference exception: degraded, risk `HIGH`, action `Verify`, reason retained.
+- Model/calibration failure never silently substitutes another Detector.
+- `NOT_ENOUGH_INFO` means the supplied evidence is inadequate, not that the claim is globally false.
+- Judge treats Detector output as triage and consumes independent Verifier verdicts.
+
 ## Install and reproduce
 
 ```powershell
@@ -42,7 +110,7 @@ python -m halluciguard_detector.cli predict-text `
 Use `-e` more than once to supply multiple evidence passages. The detector
 cannot establish truth from the query and answer alone; evidence is required.
 
-Run the complete Base LLM → Detector → n8n Verifier slice:
+Run the compatibility Base LLM → Detector → Verifier slice:
 
 ```powershell
 python scripts/test_llm_detector_verifier_slice.py --query "Who created Java?" --force-verifier
@@ -65,3 +133,7 @@ POST /v1/detect
 ## Operational boundary
 
 This component is a triage detector, not the final Judge. Route `CONTRADICTED` and `NOT_ENOUGH_INFO` claims to HalluciGuard's evidence Verifier. Metrics are dataset-specific and must not be described as proof that the model "works perfectly" on open-world facts.
+
+## Research basis
+
+The reference-conditioned formulation is informed by RAGTruth, MiniCheck and RefChecker. HalluciGuard's preprocessing, trained checkpoint, calibration, entity guard, contracts and orchestration integration are implemented in this repository. See [`../docs/research.md`](../docs/research.md).
