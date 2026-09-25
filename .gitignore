@@ -83,6 +83,13 @@ __pycache__/
 .pytest_cache/
 *.pyc
 artifacts/
+
+# Production Detector checkpoint. The weight is stored through Git LFS; the
+# remaining tokenizer/calibration/metric files are ordinary Git objects.
+!artifacts/
+artifacts/*
+!artifacts/detector-best/
+!artifacts/detector-best/**
 reports/output/
 benchmarks/output/
 results/

@@ -1,13 +1,45 @@
 from __future__ import annotations
 
 import json
+from enum import Enum
 from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from agents.detector_agent import DetectionResult, DetectorAgent, NextAction, RiskLevel
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 from services.llm_detector_service import BaseLLMDetectorService
+
+
+class RiskLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class NextAction(str, Enum):
+    ACCEPT = "Accept"
+    VERIFY = "Verify"
+
+
+def _det(
+    confidence_score: float,
+    hallucination_probability: float,
+    risk_level: RiskLevel,
+    next_action: NextAction,
+    model_source: str = "halluciguard_detector_ragtruth_deberta",
+) -> dict:
+    """Build the public dictionary returned by ``DetectorAgent.detect``."""
+    return {
+        "confidence_score": confidence_score,
+        "hallucination_probability": hallucination_probability,
+        "risk_level": risk_level.value,
+        "next_action": next_action.value,
+        "model_source": model_source,
+        "status": "completed",
+        "detector_degraded": False,
+        "model_loaded": True,
+        "inference_executed": True,
+    }
 
 
 class StubBaseLLMService(BaseLLMService):
@@ -21,14 +53,16 @@ class StubBaseLLMService(BaseLLMService):
         return self._stub_result
 
 
-class DummyDetectorAgent(DetectorAgent):
-    def __init__(self, detection_result: DetectionResult):
+class DummyDetectorAgent:
+    """Plain stub matching the detector's ``detect()`` surface."""
+
+    def __init__(self, detection_result: dict):
         self._stub_result = detection_result
         self.recorded_query = None
         self.recorded_response = None
         self.detect_calls = 0
 
-    def detect(self, user_query: str, llm_response: str) -> DetectionResult:
+    def detect(self, user_query: str, llm_response: str) -> dict:
         self.detect_calls += 1
         self.recorded_query = user_query
         self.recorded_response = llm_response
@@ -50,12 +84,11 @@ async def test_successful_generation_reaches_detector():
         request_id="req-123",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.95,
         hallucination_probability=0.05,
         risk_level=RiskLevel.LOW,
         next_action=NextAction.ACCEPT,
-        model_source="halueval-distilbert",
     )
 
     llm_stub = StubBaseLLMService(gen_result)
@@ -89,7 +122,7 @@ async def test_detector_receives_exact_generated_response():
         request_id="req-456",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.90,
         hallucination_probability=0.10,
         risk_level=RiskLevel.LOW,
@@ -122,12 +155,12 @@ async def test_detector_output_preserved_without_transformation():
         request_id="req-789",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.40,
         hallucination_probability=0.75,
         risk_level=RiskLevel.HIGH,
         next_action=NextAction.VERIFY,
-        model_source="halueval-distilbert",
+        model_source="halluciguard_detector_ragtruth_deberta",
     )
 
     llm_stub = StubBaseLLMService(gen_result)
@@ -140,7 +173,7 @@ async def test_detector_output_preserved_without_transformation():
     assert result.detector["hallucination_probability"] == 0.75
     assert result.detector["risk_tier"] == "HIGH"
     assert result.detector["decision"] == "VERIFY"
-    assert result.detector["model_source"] == "halueval-distilbert"
+    assert result.detector["model_source"] == "halluciguard_detector_ragtruth_deberta"
 
 
 @pytest.mark.asyncio
@@ -160,7 +193,7 @@ async def test_llm_generation_failure_prevents_detector_execution():
         error="OPENROUTER_API_KEY is not configured",
         error_code="MISSING_API_KEY",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.90,
         hallucination_probability=0.10,
         risk_level=RiskLevel.LOW,
@@ -194,7 +227,7 @@ async def test_empty_generated_response_prevents_detector_execution():
         request_id="req-empty",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.90,
         hallucination_probability=0.10,
         risk_level=RiskLevel.LOW,
@@ -226,12 +259,11 @@ async def test_final_contract_is_json_serializable():
         request_id="req-json",
         status="success",
     )
-    det_result = DetectionResult(
+    det_result = _det(
         confidence_score=0.88,
         hallucination_probability=0.12,
         risk_level=RiskLevel.LOW,
         next_action=NextAction.ACCEPT,
-        model_source="halueval-distilbert",
     )
 
     llm_stub = StubBaseLLMService(gen_result)

@@ -56,31 +56,53 @@ def validate_openrouter_configuration() -> ComponentCheckResult:
 
 
 def validate_detector_model_reference() -> ComponentCheckResult:
-    """Validate that Detector configuration points to a loadable model artifact."""
-    try:
-        from agents.detector_agent.config import DetectorConfig
-        from agents.detector_agent.halueval_inference import (
-            validate_halueval_model_reference,
-        )
+    """Validate the local reference-grounded detector package and artifacts."""
+    from pathlib import Path
 
-        cfg = DetectorConfig()
-        resolved = validate_halueval_model_reference(cfg.halueval_model_path)
-        return ComponentCheckResult(
-            ok=True,
-            component="detector",
-            detail="Detector model reference is valid.",
-            metadata={
-                "configured_model_path": cfg.halueval_model_path,
-                "resolved_model_reference": resolved,
-            },
-        )
+    repo_root = Path(__file__).resolve().parent.parent
+    configured = os.environ.get("HALLUCIGUARD_DETECTOR_MODEL", "").strip()
+    model_dir = Path(configured) if configured else repo_root / "artifacts" / "detector-best"
+    if not model_dir.is_absolute():
+        model_dir = repo_root / model_dir
+    required = (
+        "model.safetensors",
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "calibration.json",
+    )
+    try:
+        from halluciguard_detector import DetectorAgent  # noqa: F401
     except Exception as exc:
         return ComponentCheckResult(
             ok=False,
             component="detector",
-            detail=f"{type(exc).__name__}: {exc}",
-            metadata={"configured_model_path": os.environ.get("HALUEVAL_MODEL_PATH", "")},
+            detail=f"HalluciGuard detector package is not importable: {type(exc).__name__}: {exc}",
+            metadata={"detector": "halluciguard_detector", "model_dir": str(model_dir)},
         )
+
+    missing = [name for name in required if not (model_dir / name).is_file()]
+    metadata: Dict[str, Any] = {
+        "detector": "halluciguard_detector",
+        "model_dir": str(model_dir),
+        "model_source": "local_safetensors",
+        "required_files": list(required),
+        "missing_files": missing,
+        "grounding_required": True,
+    }
+    if missing:
+        return ComponentCheckResult(
+            ok=False,
+            component="detector",
+            detail=f"Detector artifact directory is incomplete; missing: {', '.join(missing)}",
+            metadata=metadata,
+        )
+    return ComponentCheckResult(
+        ok=True,
+        component="detector",
+        detail="Reference-grounded detector package and local artifacts are ready.",
+        metadata=metadata,
+    )
 
 
 def validate_verifier_configuration() -> ComponentCheckResult:

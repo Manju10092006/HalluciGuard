@@ -8,7 +8,7 @@ exists to *prove* the runtime chain executed for real, so any of the following
 becomes a CONTROLLED FAILURE instead of being silently presented as a genuine,
 model-backed result:
 
-  * the detector fell back to its hardcoded baseline (real HaluEval never ran),
+  * the evidence-grounded detector model did not run,
   * the BGE reranker fell back (hybrid scores passed through as if they were BGE),
   * the DeBERTa NLI fell back on evidence that was actually present,
   * evidence is mock / empty / malformed.
@@ -126,7 +126,7 @@ def enforce_retrieval_evidence(
 
 
 def enforce_detector(detector_result: Dict[str, Any], enabled: bool) -> None:
-    """Fail if the detector fell back to baseline instead of running HaluEval."""
+    """Fail if grounded detector inference did not execute for real."""
     if not enabled or not detector_result:
         return
     degraded = bool(detector_result.get("detector_degraded"))
@@ -134,6 +134,7 @@ def enforce_detector(detector_result: Dict[str, Any], enabled: bool) -> None:
     if degraded or not executed:
         raise CertificationError(
             "detector",
-            "Detector fell back to the baseline heuristic; real HaluEval inference did not run. "
-            "Fix HALUEVAL_MODEL_PATH / model load before certifying.",
+            "Evidence-grounded detector inference did not run. Pre-retrieval triage "
+            "cannot be certified as a truth verdict; supply evidence and verify the "
+            "HALLUCIGUARD_DETECTOR_MODEL artifact before certifying.",
         )
