@@ -488,6 +488,23 @@ class VerificationPipeline:
                         all_raw: List[Passage] = []
                         n8n_trace_obj = None
 
+                        # Object-anchored factual queries for this sub-claim. For
+                        # relational claims ("X is the founder of Y") these anchor
+                        # on the OBJECT entity ("Y founder", "who is the founder of
+                        # Y", "Y founded by"); for a plain claim it is just [claim].
+                        search_queries = self.query_expander.generate_search_queries(
+                            sub_claim, validated_domain
+                        )
+                        if not search_queries:
+                            search_queries = [expanded_query]
+                        raw_lc = sub_claim.strip().lower()
+                        # Queries that reframe the claim onto the checkable object
+                        # entity — the ones that surface the ground truth a
+                        # fabricated subject would otherwise hide from retrieval.
+                        anchored_queries = [
+                            q for q in search_queries if q.strip().lower() != raw_lc
+                        ]
+
                         # ── N8N Retrieval Service V2 Integration ──────────────
                         if getattr(self.settings, "n8n_retrieval_enabled", True):
                             force_tav = (payload.retrieval_mode == "tavily_only")
@@ -509,32 +526,33 @@ class VerificationPipeline:
                                 )
                                 adapter_failures.append(f"n8n:{str(n8n_res.error)[:80]}")
 
-                        # ── Python Retrieval Fallback (when n8n is disabled / failed / returned 0) ──
-                        if not all_raw:
-                            search_queries = self.query_expander.generate_search_queries(
-                                sub_claim, validated_domain
-                            )
-                            if not search_queries:
-                                search_queries = [expanded_query]
-
-                            for q in search_queries:
-                                try:
-                                    search_kwargs = {}
-                                    if hasattr(adapter, 'last_retrieval_trace'):
-                                        search_kwargs['retrieval_mode'] = payload.retrieval_mode
-                                    if getattr(payload, 'source_mode', None):
-                                        search_kwargs['source_mode'] = payload.source_mode
-                                    q_passages = await adapter.search(q, **search_kwargs)
-                                    all_raw.extend(q_passages)
-                                except Exception as e:
-                                    self.logger.error(
-                                        "Adapter retrieval failed for query '%s': %s",
-                                        q,
-                                        e,
-                                    )
-                                    adapter_failures.append(
-                                        f"{validated_domain}:{str(e)[:100]}"
-                                    )
+                        # ── Retrieval query set through Python adapters ───────
+                        # If n8n produced nothing, run the FULL query set (classic
+                        # fallback). If n8n DID return evidence, still issue the
+                        # object-anchored queries and merge: retrieving on the raw
+                        # claim alone biases toward the (possibly fabricated)
+                        # subject, so without this the Corrector only ever sees a
+                        # same-name distractor and can never recover the real fact.
+                        # Non-relational claims add no extra queries here.
+                        adapter_queries = anchored_queries if all_raw else search_queries
+                        for q in adapter_queries:
+                            try:
+                                search_kwargs = {}
+                                if hasattr(adapter, 'last_retrieval_trace'):
+                                    search_kwargs['retrieval_mode'] = payload.retrieval_mode
+                                if getattr(payload, 'source_mode', None):
+                                    search_kwargs['source_mode'] = payload.source_mode
+                                q_passages = await adapter.search(q, **search_kwargs)
+                                all_raw.extend(q_passages)
+                            except Exception as e:
+                                self.logger.error(
+                                    "Adapter retrieval failed for query '%s': %s",
+                                    q,
+                                    e,
+                                )
+                                adapter_failures.append(
+                                    f"{validated_domain}:{str(e)[:100]}"
+                                )
 
                         # Attach n8n trace to adapter trace or initialize retrieval trace
                         if n8n_trace_obj:
@@ -578,25 +596,36 @@ class VerificationPipeline:
                         raw_passages = self._apply_evidence_ranking(
                             raw_passages,
                             claim_text=sub_claim,
-                            search_queries=[expanded_query],
+                            search_queries=list(dict.fromkeys([expanded_query, *search_queries])),
                             domain=validated_domain,
                         )
 
 
                     with tracker.track(PipelineStage.AGGREGATION):
+                        # Relevance ranking is about TOPICALITY, not truth. For a
+                        # relational claim the checkable proposition is
+                        # object-anchored ("who is the founder of Y"), so rank
+                        # candidates by that phrasing. Ranking by the subject-heavy
+                        # raw claim ("Snehith is the founder of Microsoft") floats a
+                        # same-name distractor to the top and prunes the passages
+                        # that actually carry the true relation before NLI ever sees
+                        # them. NLI + relation verification below still run against
+                        # the RAW claim, so a contradiction is detected against the
+                        # truth rather than hidden by it.
+                        relevance_query = anchored_queries[0] if anchored_queries else sub_claim
                         aggregated_passages = self.aggregator.aggregate([raw_passages])
                         hybrid_passages = self.hybrid_retriever.retrieve(
-                            sub_claim,
+                            relevance_query,
                             aggregated_passages,
-                            k=5,
+                            k=8,
                             dense_model=route.dense_model,
                         )
 
                     with tracker.track(PipelineStage.RERANKING):
                         reranked_passages = self.reranker.rerank(
-                            sub_claim,
+                            relevance_query,
                             hybrid_passages,
-                            k=5,
+                            k=6,
                             model_name=route.reranker_model,
                         )
                         claim_reranked += len(reranked_passages)

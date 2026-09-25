@@ -129,6 +129,29 @@ class QueryExpander:
             queries.append(f"{person_b} {rel_type}")
             queries.append(f"{person_b} family")
 
+        # 3b. Role / title predicate: "Snehith is the founder of Microsoft" ->
+        # "Microsoft founder", "who is the founder of Microsoft", "Microsoft founded by".
+        # This is the dominant hallucination shape ("X is the ROLE of Y") and must
+        # anchor retrieval on the OBJECT entity + role (the checkable fact), not on
+        # the fabricated subject — otherwise search returns a profile of X.
+        role_match = re.search(
+            r"^([A-Za-z0-9\s\-\.]+?)\s+(?:is|was)\s+(?:the\s+|a\s+|an\s+|one\s+of\s+the\s+)?"
+            r"(?:co[\s-]?)?(founder|creator|inventor|author|ceo|c\.e\.o|president|chairman|"
+            r"owner|developer|designer|discoverer|writer|director|maker|architect|"
+            r"chief\s+executive)s?\s+of\s+([A-Za-z0-9\s\-\.]+)",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if role_match:
+            role = re.sub(r"\s+", " ", role_match.group(2).strip().lower())
+            role = "founder" if role in ("ceo", "c.e.o", "chief executive") and False else role
+            obj = role_match.group(3).strip().rstrip(".")
+            if obj and len(obj) > 1:
+                queries.append(f"{obj} {role}")
+                queries.append(f"who is the {role} of {obj}")
+                if role in ("founder", "creator", "inventor", "author", "developer", "designer", "maker"):
+                    queries.append(f"{obj} founded by")
+
         # 4. Starring / Film roles: "Ram Charan starred in Game Changer" -> "Game Changer cast", "Game Changer starring"
         star_match = re.search(
             r"^([A-Za-z0-9\s\-]+?)\s+(?:starred\s+in|acted\s+in|played\s+in)\s+([A-Za-z0-9\s\-]+)",

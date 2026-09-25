@@ -286,6 +286,50 @@ class RelationVerifier:
                     )
                 )
 
+            # ── 4b. Predicate-noun role: "X is the ROLE of Y" ─────────
+            # The dominant hallucination shape. The verb patterns above only
+            # catch "X founded Y" / "Y was founded by X"; a claim phrased as
+            # "Snehith is the founder of Microsoft" (or CEO/president/…) carries
+            # no verb, so without this it yields NO triple and the relation layer
+            # goes silent — letting a same-name distractor drive the verdict.
+            #   creation roles -> created_by, subject=ORG, object=PERSON
+            #     "Snehith is the founder of Microsoft" -> (microsoft, created_by, snehith)
+            #   leadership roles -> leads, subject=ORG, object=PERSON
+            #     "Tim Cook is the CEO of Apple"        -> (apple, leads, tim cook)
+            role_np = re.search(
+                r"([A-Za-z0-9\s\.\-]+?)\s+(?:is|was)\s+(?:the\s+|a\s+|an\s+|one\s+of\s+the\s+)?"
+                r"(?:co[\s-]?)?(founder|cofounder|creator|inventor|author|developer|"
+                r"designer|maker|discoverer|architect|writer|builder|"
+                r"ceo|c\.e\.o|president|chairman|chairwoman|owner|director|head|"
+                r"chief\s+executive)s?\s+of\s+([A-Za-z0-9\s\.\-]+)",
+                sent_clean,
+                re.IGNORECASE,
+            )
+            if role_np:
+                person = role_np.group(1).strip()
+                role_word = re.sub(r"\s+", " ", role_np.group(2).strip().lower())
+                org = role_np.group(3).strip()
+                org = re.split(
+                    r"\b(and|which|who|in|since|from|located|headquartered|based)\b",
+                    org,
+                    flags=re.IGNORECASE,
+                )[0].strip()
+                creation_roles = {
+                    "founder", "cofounder", "creator", "inventor", "author",
+                    "developer", "designer", "maker", "discoverer", "architect",
+                    "writer", "builder",
+                }
+                if person and org and len(org) > 1:
+                    triples.append(
+                        Triple(
+                            subject=self._normalize_name(org),
+                            relation="created_by" if role_word in creation_roles else "leads",
+                            object=self._normalize_name(person),
+                            qualifiers=[role_word, "predicate_noun"],
+                            raw_text=sent_clean,
+                        )
+                    )
+
             # ── 5. Cybersecurity Vulnerability / Association ──────────
             # e.g., "CVE-2021-44228 is associated with Log4Shell"
             cve_match = re.search(
@@ -478,6 +522,39 @@ class RelationVerifier:
                 evidence_triples=[],
                 status="NO_TRIPLE_EXTRACTED",
                 mismatch_detail="No structured relation triples recognized in retrieved evidence",
+            )
+
+        # ── Creation / leadership pre-scan (match-first) ──────────────
+        # "X is the founder of Y" / "X is the CEO of Y" claims frequently meet
+        # evidence naming MULTIPLE valid people (Bill Gates AND Paul Allen).
+        # The generic loop below returns on the FIRST subject-matching evidence
+        # triple, so a true co-founder claim could be falsely contradicted just
+        # because a different founder's triple was encountered first. Resolve
+        # these relations up front: only declare OBJECT_MISMATCH when NO
+        # subject-matching evidence triple confirms the claimed person.
+        for rel, noun in (("created_by", "creator"), ("leads", "leader")):
+            if c_triple.relation != rel:
+                continue
+            subj_aligned = [
+                e for e in all_evidence_triples
+                if e.relation == rel and self._names_match(c_triple.subject, e.subject)
+            ]
+            if not subj_aligned:
+                continue
+            if any(self._names_match(c_triple.object, e.object) for e in subj_aligned):
+                return RelationCheckResult(
+                    claim_triple=c_triple,
+                    evidence_triples=all_evidence_triples,
+                    status="MATCH",
+                    combination_rule_applied="CONFIRM_ENTAILMENT",
+                )
+            proven = subj_aligned[0].object
+            return RelationCheckResult(
+                claim_triple=c_triple,
+                evidence_triples=all_evidence_triples,
+                status="OBJECT_MISMATCH",
+                mismatch_detail=f"Claim asserts {noun} is '{c_triple.object}', but authoritative evidence proves {noun} is '{proven}'",
+                combination_rule_applied="BYPASS_SUPPRESSION_FORCE_CONTRADICTION",
             )
 
         # Compare claim triple against candidate evidence triples
