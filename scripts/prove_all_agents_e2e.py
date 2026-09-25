@@ -108,8 +108,8 @@ def main() -> None:
 
     agent(2, "DETECTOR", "detector",
           f"draft response ({len(args.draft)} chars)",
-          f"triage={det.get('classification') or det.get('label') or det.get('decision')} "
-          f"score={det.get('hallucination_probability', det.get('score'))} "
+          f"triage={det.get('next_action')} risk={det.get('risk_level')} "
+          f"score={det.get('hallucination_probability') if det.get('probability_available') else 'N/A (pre-retrieval)'} "
           f"atomic_claims={len(claims)}")
 
     agent(3, "CLAIM_ANALYZER", "claim_analyzer",

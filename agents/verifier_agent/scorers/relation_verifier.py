@@ -56,7 +56,7 @@ class RelationVerifier:
     # forcing a contradiction. Matches "not"/"never"/"cannot"/"no longer" and any
     # "n't" contraction (isn't, wasn't, didn't, doesn't, hasn't, won't, can't, ...).
     _NEGATION_CUE = re.compile(
-        r"\b(?:not|never|cannot|no\s+longer)\b|n['’]t\b",
+        r"\b(?:not|never|cannot|no|none|neither|nor|unrelated|incorrect|false|unassociated|no\s+longer)\b|n['’]t\b",
         re.IGNORECASE,
     )
 
@@ -337,20 +337,98 @@ class RelationVerifier:
         return triples
 
     def _names_match(self, name1: str, name2: str) -> bool:
-        """Check if two entity names match (exact, substring, or token overlap)."""
+        """Return True only when two entity names denote the SAME entity.
+
+        Fail-closed matching ladder (F-2 fix — false-VERIFIED vector):
+          1. Exact normalized equality. ``_normalize_name`` already strips
+             articles, honorifics, professions and corporate suffixes, so this
+             covers "Paris"=="Paris", "James A. Gosling"=="James Gosling" and
+             "Amazon Inc"=="Amazon".
+          2. Token-SET equality. The extractor concatenates ``title + snippet``
+             before extraction, so a subject is routinely duplicated
+             ("Hyderabad Hyderabad ...") or reordered. Comparing the sets of
+             distinct tokens treats "hyderabad" and "hyderabad hyderabad" as the
+             same entity while keeping "india" vs "indiana" ({india} != {indiana})
+             and "paris" vs "paris texas" ({paris} != {paris, texas}) distinct.
+          3. Guarded multi-token containment: the SMALLER name must have >= 2
+             tokens and be a full token-subset of the larger. This admits
+             "Eiffel Tower" vs "Eiffel Tower landmark" and "James Gosling" vs
+             "Sir James Gosling", while rejecting the qualifier trap where a
+             lone token is swallowed by a longer, DIFFERENT entity.
+
+        A single-token name therefore matches ONLY by exact / set equality. This
+        kills the prior substring / single-token-subset bugs where "Paris"
+        matched "Paris, Texas" and "India" matched "Indiana" — each forced a
+        spurious 0.95 entailment and a false VERIFIED downstream. When names do
+        not match here the caller degrades to the polarity-aware NLI stage
+        instead of asserting a relation, so a miss is fail-safe (defers), never a
+        fabricated match.
+        """
         n1 = self._normalize_name(name1)
         n2 = self._normalize_name(name2)
         if not n1 or not n2:
             return False
-        if n1 == n2 or n1 in n2 or n2 in n1:
+        if n1 == n2:
             return True
         t1 = set(n1.split())
         t2 = set(n2.split())
-        if t1 and t2 and (t1.issubset(t2) or t2.issubset(t1)):
+        if not t1 or not t2:
+            return False
+        # Same distinct tokens (handles the title+snippet duplication and any
+        # word reordering) => same entity.
+        if t1 == t2:
             return True
-        if len(t1) >= 2 and len(t2) >= 2 and len(t1.intersection(t2)) >= min(len(t1), len(t2)):
+        smaller, larger = (t1, t2) if len(t1) <= len(t2) else (t2, t1)
+        # Require the contained name to be multi-token: a bare token (Paris,
+        # India, Washington) can never be engulfed by a longer distinct name.
+        if len(smaller) >= 2 and smaller.issubset(larger):
             return True
         return False
+
+    def _contextual_creation_triples(self, passage: Any) -> List[Triple]:
+        """Recover passive creation facts whose subject is supplied by the page.
+
+        Encyclopedic leads commonly say ``Founded in 1975 by ...`` instead of
+        repeating the article title.  The generic sentence regex cannot infer
+        that omitted subject and may accidentally consume page-label text as
+        the entity.  Use the passage title as the subject only for this explicit
+        passive construction; otherwise leave the result to NLI.
+        """
+        raw_title = str(getattr(passage, "title", "") or "")
+        snippet = str(getattr(passage, "snippet", "") or "")
+        if not raw_title or not snippet:
+            return []
+
+        title = re.sub(r"^Wikipedia:\s*", "", raw_title, flags=re.IGNORECASE)
+        title = re.sub(r"\s*\([^)]*\)\s*$", "", title).strip()
+        if not title:
+            return []
+
+        passive = re.search(
+            r"\b(created|developed|invented|built|designed|founded|introduced)"
+            r"(?:\s+(?:originally|initially))?"
+            r"(?:\s+in\s+(?:the\s+)?(?:year\s+)?\d{3,4})?"
+            r"\s+by\s+([A-Za-z0-9][A-Za-z0-9 .,'&\-]+?)"
+            r"(?=\s+(?:to|for|at|in|as|who|which|where)\b|[.;:]|$)",
+            snippet,
+            re.IGNORECASE,
+        )
+        if not passive:
+            return []
+
+        creator = passive.group(2).strip(" ,")
+        if not creator:
+            return []
+        return [
+            Triple(
+                subject=self._normalize_name(title),
+                relation="created_by",
+                object=self._normalize_name(creator),
+                qualifiers=[passive.group(1).lower(), "title_anchored"],
+                negated=bool(self._NEGATION_CUE.search(passive.group(0))),
+                raw_text=passive.group(0),
+            )
+        ]
 
     def verify_relation(
         self,
@@ -391,6 +469,7 @@ class RelationVerifier:
         for p in evidence_passages:
             text = f"{getattr(p, 'title', '')} {getattr(p, 'snippet', '')}"
             e_triples = self.extract_triples(text)
+            e_triples.extend(self._contextual_creation_triples(p))
             all_evidence_triples.extend(e_triples)
 
         if not all_evidence_triples:
