@@ -48,6 +48,19 @@ def test_question_is_filtered():
     assert any(c.claim_type == QUESTION for c in analysis.candidates)
 
 
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        "I'm sorry, but I can't help with that.",
+        "I’m sorry, but I can’t help with that.",
+    ],
+)
+def test_refusal_is_not_a_factual_claim(refusal):
+    analysis = fallback_analyze(refusal)
+    assert analysis.factual_claims == []
+    assert len(analysis.discarded) == 1
+
+
 def test_transition_and_factual_mixed():
     draft = "Let me explain. Python 3.12 was released in 2023."
     analysis = fallback_analyze(draft)

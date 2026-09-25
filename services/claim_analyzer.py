@@ -306,8 +306,8 @@ _INSTRUCTION_RE = re.compile(
     re.IGNORECASE,
 )
 _DISCLAIMER_RE = re.compile(
-    r"\b(i am not a (doctor|lawyer|financial)|not (medical|legal|financial) advice|"
-    r"consult (a|your)|this (may|might) be outdated|i cannot|i can'?t (verify|confirm))\b",
+    r"\b(i(?:['’]m| am) sorry|i am not a (doctor|lawyer|financial)|not (medical|legal|financial) advice|"
+    r"consult (a|your)|this (may|might) be outdated|i cannot|i can[’']?t(?:\s+help|\s+(?:verify|confirm)))\b",
     re.IGNORECASE,
 )
 _TRANSITION_RE = re.compile(
