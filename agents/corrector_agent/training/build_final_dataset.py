@@ -2,7 +2,7 @@ import os
 import json
 import random
 
-DIR_PATH = r'C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets'
+DIR_PATH = 'agents/corrector_agent/training/data'
 RAW_FILES = ['halluciguard_dataset.jsonl', 'halluciguard_ragtruth.jsonl', 'halluciguard_truthfulqa.jsonl']
 FLAGGED_SUPPORTED_FILE = 'training/data/flagged_supported.json'
 STAGE1_FILE = 'training/data/shape_b_llm_synthesized_stage1.jsonl'

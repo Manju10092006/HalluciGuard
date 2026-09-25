@@ -1,7 +1,7 @@
 import json
 import os
 
-DATASETS_DIR = r"C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets"
+DATASETS_DIR = "agents/corrector_agent/training/data"
 files = ["halluciguard_dataset.jsonl", "halluciguard_ragtruth.jsonl", "halluciguard_truthfulqa.jsonl"]
 
 total = 0

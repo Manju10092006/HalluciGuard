@@ -7,7 +7,7 @@ from reportlab.platypus import (
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 
-pdf_path = r"C:\Users\LENOVO\Desktop\HalluciGuard_System_Architecture_and_Stakeholders.pdf"
+pdf_path = "docs/diagrams/HalluciGuard_System_Architecture_and_Stakeholders.pdf"
 doc = SimpleDocTemplate(
     pdf_path,
     pagesize=letter,

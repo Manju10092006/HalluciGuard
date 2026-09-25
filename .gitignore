@@ -26,6 +26,8 @@ ENV/
 # Environment
 .env
 *.env.local
+.env.*
+!.env.example
 
 # ML Models (too large for git)
 *.bin
@@ -46,6 +48,8 @@ verification_cache.db
 # Logs
 *.log
 logs/*.log
+runtime-logs/
+*.out
 
 # Generated Document Builds & Binary Assets
 *.pdf
@@ -59,6 +63,10 @@ illustrations/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local AI/editor configuration
+.claude/
+.mcp.json
 
 # Test
 .pytest_cache/
@@ -76,8 +84,10 @@ temp/
 *.tmp
 scratch/
 .generated/
-runtime outputs
+runtime outputs/
 .next/
+.next-*/
+.vercel/
 *.tsbuildinfo
 __pycache__/
 .pytest_cache/
@@ -118,6 +128,22 @@ halluciguard_judge/__pycache__/
 
 # n8n workflow scratch dump
 wf_dump/
+
+# One-off local diagnostics and probes
+/scripts/audit_phase2.sh
+/scripts/probe_*.py
+/n8n/halluciguard-verify-v3.json
+/CLAUDE.md
+
+# Superseded local prompts, generated reviews and raw diagnostics
+/ORIGINAL_REQUEST.md
+/Stock Market R03417W69RP3OFG8.txt
+/The complete, production-grade Glob.txt
+/raw_diagnostic_results.json
+/HalluciGuard_Training_Review.ipynb
+/HalluciGuard_Technical_Architecture_and_Verification_Documentation.docx
+/docs/ANTIGRAVITY_FORENSIC_AUDIT.md
+/agents/verifier_agent/scratch/
 
 # Editor / notebook scratch
 .cursor/

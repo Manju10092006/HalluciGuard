@@ -1,7 +1,7 @@
 import os
 import json
 
-dir_path = r'C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets'
+dir_path = 'agents/corrector_agent/training/data'
 files = ['halluciguard_dataset.jsonl', 'halluciguard_ragtruth.jsonl', 'halluciguard_truthfulqa.jsonl']
 
 flagged_15 = []
