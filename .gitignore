@@ -118,3 +118,15 @@ halluciguard_judge/__pycache__/
 
 # n8n workflow scratch dump
 wf_dump/
+
+# Editor / notebook scratch
+.cursor/
+.ipynb_checkpoints/
+
+# Runtime databases + vector store (regenerable local state, not source)
+/data/
+
+# Stray image-cropping scripts (not part of HalluciGuard)
+auto_crop_boxes.py
+crop_boxes.py
+verify_and_clean_crops.py
