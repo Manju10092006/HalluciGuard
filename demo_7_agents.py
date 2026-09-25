@@ -167,7 +167,13 @@ def _display_claim_analyzer(result: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _display_detector(result: dict[str, Any]) -> None:
     detector = _dict(result.get("detector_result") or result.get("detector"))
-    _section("3", "DETECTOR AGENT — HALLUCINATION RISK TRIAGE")
+    inference_executed = bool(detector.get("inference_executed"))
+    detector_title = (
+        "DETECTOR AGENT — GROUNDED MODEL INFERENCE"
+        if inference_executed
+        else "DETECTOR AGENT — PRE-VERIFICATION TRIAGE"
+    )
+    _section("3", detector_title)
     _sub("INPUT ANALYZED")
     _quote(result.get("draft_response") or result.get("llm_response"))
     _sub("MODEL INFORMATION")
@@ -175,7 +181,7 @@ def _display_detector(result: dict[str, Any]) -> None:
         ("Model source", "model_source"),
         ("Model version", "model_version"),
         ("Model loaded", "model_loaded"),
-        ("Inference executed", "detector_inference_executed"),
+        ("Inference executed", "inference_executed"),
         ("Calibration applied", "calibration_applied"),
         ("Calibrator version", "calibrator_version"),
     ):
@@ -189,15 +195,18 @@ def _display_detector(result: dict[str, Any]) -> None:
     _field("Risk level", _enum(detector.get("risk_level")))
     _field("Recommended action", _enum(detector.get("next_action")))
     _field("Degraded", detector.get("detector_degraded", False))
-    _field("Sentence-level scores", detector.get("sentences") or NOT_EXPOSED)
+    _field("Sentence-level scores", detector.get("per_claim_results") or NOT_EXPOSED)
     _field("Diagnostics", detector.get("diagnostics") or NOT_EXPOSED)
     _sub("HUMAN-READABLE INTERPRETATION")
     if probability_available:
-        print(f"The Detector estimated a {float(probability) * 100:.2f}% risk and recommended {_enum(detector.get('next_action'))}. This is triage only; the Verifier remains the factual authority.")
+        print(f"The trained, evidence-grounded Detector estimated a {float(probability) * 100:.2f}% risk and recommended {_enum(detector.get('next_action'))}. The Verifier remains the final factual authority.")
     else:
         print("The Detector could not produce an evidence-grounded probability before retrieval, so it routed the answer to verification. It did not declare the answer true or false.")
     _sub("NEXT")
-    print("The generated response and extracted factual claims continue to retrieval and Verifier.")
+    if inference_executed:
+        print("The grounded detector result and Verifier evidence continue together to Judge.")
+    else:
+        print("The generated response and extracted factual claims continue to retrieval and Verifier.")
 
 
 def _verifier_reports(result: dict[str, Any]) -> list[dict[str, Any]]:

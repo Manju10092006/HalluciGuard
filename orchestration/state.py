@@ -72,6 +72,8 @@ class HalluciGuardState(TypedDict, total=False):
 
     # Shared inter-agent contract (Legacy / Backward-compatibility)
     detector: dict[str, Any]
+    # The detector executes twice: pre-retrieval triage and grounded inference
+    # after Verifier evidence. ``detector_result`` holds the latest pass.
     detected_claims: list[dict[str, Any]]
     # Claim Analyzer gate (factual-claim extraction before retrieval). When
     # ``claims_gated`` is True, ``detected_claims`` holds ONLY factual claims and

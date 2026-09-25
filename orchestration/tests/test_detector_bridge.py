@@ -12,6 +12,16 @@ class _StubAgent:
         return self._payload
 
 
+class _GroundedStubAgent(_StubAgent):
+    def __init__(self, payload):
+        super().__init__(payload)
+        self.evidence = None
+
+    def detect(self, user_query, llm_response, evidence=None):
+        self.evidence = evidence
+        return self._payload
+
+
 def _grounded(**overrides):
     base = {
         "hallucination_probability": 0.80,
@@ -44,6 +54,34 @@ def test_grounded_result_maps_claims(monkeypatch):
     assert out["per_claim_results"][0]["claim_id"] == "c1"
     assert out["per_claim_results"][0]["label"] == "CONTRADICTED"
     assert out["per_claim_results"][1]["requires_verification"] is False
+
+
+def test_grounded_production_entrypoint_passes_verifier_evidence(monkeypatch):
+    agent = _GroundedStubAgent(_grounded())
+    monkeypatch.setattr(db, "_get_agent", lambda: agent)
+    evidence = [{"snippet": "Claim one is false."}]
+
+    out = db.run_grounded_detection("q", "Claim one.", evidence)
+
+    assert agent.evidence == evidence
+    assert out["model_loaded"] is True
+    assert out["inference_executed"] is True
+    assert out["calibration_applied"] is True
+    assert out["probability_available"] is True
+
+
+def test_grounded_production_entrypoint_fails_closed(monkeypatch):
+    class _BrokenAgent:
+        def detect(self, user_query, llm_response, evidence=None):
+            raise RuntimeError("checkpoint corrupt")
+
+    monkeypatch.setattr(db, "_get_agent", lambda: _BrokenAgent())
+    out = db.run_grounded_detection("q", "r", ["evidence"])
+
+    assert out["risk_level"] == "HIGH"
+    assert out["next_action"] == "Verify"
+    assert out["detector_degraded"] is True
+    assert "grounded_detector_failed" in out["degraded_reason"]
 
 
 def test_pre_verification_triage_does_not_fabricate_probability(monkeypatch):

@@ -777,6 +777,65 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         return update
 
 
+async def _grounded_detector_node(state: HalluciGuardState) -> dict[str, Any]:
+    """Run the trained detector after retrieval and before Judge.
+
+    The first detector pass is necessarily evidence-free triage. This second
+    pass closes the production integration gap: it supplies Verifier passages
+    to the reference-grounded checkpoint, causing real model inference and
+    calibrated sentence-level probabilities. Detector failure is fail-closed
+    but does not discard the independently computed Verifier result.
+    """
+    from .detector_bridge import run_grounded_detection
+
+    node_start = start_timer()
+    llm_response = state.get("llm_response") or state.get("draft_response", "")
+    evidence = list(state.get("retrieved_evidence") or state.get("evidence") or [])
+
+    def _run_detect():
+        return run_grounded_detection(
+            state.get("user_query", ""),
+            llm_response,
+            evidence,
+        )
+
+    detector = _dump(await asyncio.to_thread(_run_detect))
+    status = "completed" if detector.get("inference_executed") else "skipped"
+    bus = add_bus_message(
+        state,
+        source_agent="detector",
+        target_agent="judge",
+        message_type="GROUNDED_DETECTOR_RESULT",
+        payload={
+            "hallucination_probability": detector.get("hallucination_probability"),
+            "risk_level": detector.get("risk_level"),
+            "model_loaded": detector.get("model_loaded", False),
+            "inference_executed": detector.get("inference_executed", False),
+            "evidence_count": len(evidence),
+        },
+    )
+    return {
+        "detector": detector,
+        "detector_result": detector,
+        "hallucination_probability": float(
+            detector.get("hallucination_probability", 0.0)
+        ),
+        "confidence": float(detector.get("confidence_score", 0.0)),
+        "inter_agent_bus": bus,
+        "updated_at": utc_now(),
+        "trace": add_trace(
+            state,
+            "detector_grounded",
+            status,
+            latency_ms=elapsed_ms(node_start),
+            model_loaded=detector.get("model_loaded", False),
+            inference_executed=detector.get("inference_executed", False),
+            evidence_count=len(evidence),
+            risk_level=detector.get("risk_level", "HIGH"),
+        ),
+    }
+
+
 def _verifier_route(state: HalluciGuardState) -> str:
     """
     Determine the next node after verification based on execution status.
@@ -1653,6 +1712,7 @@ def build_verification_graph(
         "accept": _accept_node,
         "claim_analyzer": _claim_analyzer_node,
         "verifier": _verifier_node,
+        "grounded_detector": _grounded_detector_node,
         "judge": _judge_node,
         "corrector": _corrector_node,
         "reverifier": _reverifier_node,
@@ -1684,8 +1744,9 @@ def build_verification_graph(
     graph.add_conditional_edges(
         "verifier",
         _verifier_route,
-        {"judge": "judge", "human_escalation": "human_escalation"},
+        {"judge": "grounded_detector", "human_escalation": "human_escalation"},
     )
+    graph.add_edge("grounded_detector", "judge")
     graph.add_conditional_edges(
         "judge",
         _judge_route,

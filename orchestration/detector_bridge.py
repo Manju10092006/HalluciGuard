@@ -1,9 +1,9 @@
 """Single production integration seam for the HalluciGuard detector.
 
 Before retrieval the detector performs claim triage and routes factual content
-to the Verifier without inventing a probability. Grounded model inference is
-available through ``DetectorAgent.detect(..., evidence=[...])`` once evidence
-exists. Any runtime failure fails closed to verification.
+to the Verifier without inventing a probability. After retrieval the graph
+calls the same bridge with evidence, which loads and executes the trained model.
+Any runtime failure fails closed to verification.
 """
 from __future__ import annotations
 
@@ -109,14 +109,39 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         "probability_semantics": result.get("probability_semantics"),
         "verification_reason": result.get("verification_reason"),
         "degraded_reason": diagnostics.get("degraded_reason") or result.get("degraded_reason"),
+        "diagnostics": diagnostics,
         "warnings": result.get("warnings") or [],
         "per_claim_results": per_claim_results,
     }
 
 
 def run_detection(user_query: str, llm_response: str) -> dict[str, Any]:
+    """Run evidence-free pre-retrieval triage.
+
+    This intentionally does not load the trained reference-grounded model.
+    ``run_grounded_detection`` is the production inference entry point.
+    """
     try:
         result = _get_agent().detect(user_query, llm_response)
         return _map_result(result)
     except Exception as exc:  # fail closed; the graph must still reach Verifier
         return _failclosed(f"detector_failed: {type(exc).__name__}: {str(exc)[:160]}")
+
+
+def run_grounded_detection(
+    user_query: str,
+    llm_response: str,
+    evidence: list[dict[str, Any]] | list[str],
+) -> dict[str, Any]:
+    """Execute the trained detector against evidence retrieved by Verifier."""
+    try:
+        result = _get_agent().detect(
+            user_query,
+            llm_response,
+            evidence=evidence,
+        )
+        return _map_result(result)
+    except Exception as exc:  # fail closed; Judge still receives verifier truth
+        return _failclosed(
+            f"grounded_detector_failed: {type(exc).__name__}: {str(exc)[:160]}"
+        )
