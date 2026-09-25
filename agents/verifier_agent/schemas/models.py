@@ -53,6 +53,7 @@ class Passage(BaseModel):
     source_id: str = ""
     relevance_score: float = 0.0
     source_confidence_hint: float = 0.0
+    claim_id: str = ""
     relation_check: Optional[Dict[str, Any]] = None
 
 
