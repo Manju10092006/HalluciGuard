@@ -114,6 +114,12 @@ experiments/
 
 # Generated benchmark/certification result dumps (regenerable output)
 benchmark_results_certified.json
+/benchmark_results.json
+/benchmark_results_v1.3.json
+/benchmark_results_v1.7.json
+
+# Local n8n safety exports; the canonical workflows remain versioned.
+/n8n/*backup*.json
 
 # Superseded frontend kept locally for rollback/reference. The deployed client
 # is frontend-v2; this directory is intentionally excluded from GitHub.

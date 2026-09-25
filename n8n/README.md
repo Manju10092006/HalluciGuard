@@ -22,7 +22,6 @@ flowchart LR
 |---|---|
 | `halluciguard-verify-v2.json` | Version 2 workflow export used by the existing client contract |
 | `halluciguard_n8n_v2_updated.json` | Updated V2 export/variant retained for provenance |
-| `workflow_backup_v2.json` | Minimal V2 backup export |
 | `halluciguard-verify-v3.json` | Local V3 workflow candidate; include only after credential-safe validation |
 
 The Python client currently targets a configurable webhook rather than a hardcoded cloud account. It accepts evidence arrays, passage arrays, result arrays and batched claim shapes, then normalizes them into `Passage` objects.
