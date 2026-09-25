@@ -34,6 +34,67 @@ def _dump(value: Any) -> Any:
     return value
 
 
+_QUERY_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "of",
+    "in", "on", "at", "to", "for", "and", "or", "but", "who", "whom", "whose",
+    "what", "which", "when", "where", "why", "how", "that", "this", "these",
+    "those", "it", "its", "as", "by", "from", "with", "about", "into", "do",
+    "does", "did", "can", "could", "will", "would", "should", "has", "have",
+    "had", "there", "their", "his", "her", "you", "your", "i", "me", "my",
+})
+
+
+def _salient_tokens(text: str) -> list[str]:
+    """Lowercased, stopword-filtered content tokens (len>=3), lightly stemmed."""
+    import re
+    raw = re.findall(r"[A-Za-z0-9]+", (text or "").lower())
+    out: list[str] = []
+    for tok in raw:
+        if len(tok) < 3 or tok in _QUERY_STOPWORDS:
+            continue
+        out.append(_stem_token(tok))
+    return out
+
+
+def _stem_token(tok: str) -> str:
+    """Very light suffix stripping so 'founder'/'founded'/'founders' align."""
+    for suffix in ("ers", "er", "ing", "ed", "es", "s"):
+        if tok.endswith(suffix) and len(tok) - len(suffix) >= 3:
+            return tok[: -len(suffix)]
+    return tok
+
+
+def _tokens_match(a: str, b: str) -> bool:
+    """Equal stems, or a shared prefix of >=4 chars (handles minor inflection)."""
+    if a == b:
+        return True
+    n = min(len(a), len(b))
+    return n >= 4 and a[:n] == b[:n]
+
+
+def _answer_addresses_query(query: str, answer: str, threshold: float = 0.6) -> bool:
+    """GENERIC topicality check (Phase-4 invariant, no per-domain rules).
+
+    A correction can be factually true yet answer a DIFFERENT question than the
+    user asked (e.g. query 'Who founded Microsoft?' -> corrected 'Snehith is a
+    Product Manager at Microsoft.'). Such an off-topic repair carries no
+    contradiction and would otherwise sail through the re-verifier gate. We
+    require the corrected answer to still cover the salient topic of the
+    original query. This is purely entity/term coverage — never a hardcoded
+    subject/relation. Returns True (do not block) when the query has no salient
+    tokens to score against, so it can only ever *withhold* an accept, never
+    create one.
+    """
+    q_tokens = _salient_tokens(query)
+    if not q_tokens:
+        return True
+    a_tokens = _salient_tokens(answer)
+    if not a_tokens:
+        return False
+    covered = sum(1 for qt in q_tokens if any(_tokens_match(qt, at) for at in a_tokens))
+    return (covered / len(q_tokens)) >= threshold
+
+
 def _validate_verdict(raw: str) -> str:
     """Validate a verdict string against allowed values.
 
@@ -1101,13 +1162,29 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             and remaining_contradictions == 0
         )
 
+        # PHASE-4 INVARIANT (generic, no per-domain rule): a correction may be
+        # factually true yet answer a DIFFERENT question than the user asked. It
+        # then carries no contradiction and would pass the gate on evidence for
+        # an unrelated fact. Before a *corrected* candidate can pass, require it
+        # to still cover the salient topic of the ORIGINAL query. This can only
+        # ever downgrade a pass to human review — it never manufactures an
+        # ACCEPT — so it is safe against false positives on the accept side.
+        off_topic_correction = False
+        if passed and corr_res.get("corrected_text"):
+            original_query = state.get("user_query", "") or state.get("query", "")
+            if original_query and not _answer_addresses_query(original_query, candidate_text):
+                passed = False
+                off_topic_correction = True
+
         # §25: surface a machine-readable failure class whenever the gate fails.
         # A remaining contradiction (original unresolved OR newly introduced by the
         # correction) is distinct from a run that could not re-ground the candidate
         # at all (DEGRADED/FAILED verifier status, e.g. retrieval returned nothing).
         failure_category: str | None = None
         if not passed:
-            if remaining_contradictions > 0:
+            if off_topic_correction:
+                failure_category = "CORRECTION_OFF_TOPIC"
+            elif remaining_contradictions > 0:
                 failure_category = "REMAINING_CONTRADICTION"
             elif canonical_v_res.status == ExecutionStatus.FAILED:
                 failure_category = "VERIFIER_FAILURE"
