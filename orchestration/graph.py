@@ -1148,18 +1148,19 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             1 for r in canonical_v_res.claim_reports
             if str(getattr(r, "verdict", "")).lower() in ("contradicted", "verdictlabel.contradicted")
         )
-        # The Re-Verifier is a SAFETY gate on the correction, not a demand that
-        # every re-extracted atomic claim be positively re-proven. Post-correction
-        # re-extraction routinely yields UNVERIFIED sub-claims (retrieval returns 0
-        # evidence for a fragment) even when the repaired answer is sound and the
-        # offending contradiction is gone. Requiring "all claims verified" therefore
-        # made a *successful* correction fail the gate forever -> the pipeline bounced
-        # to human review again and again. The correct property is: the re-verified
-        # candidate must carry NO remaining contradiction, on a verifier run that
-        # actually completed. Missing evidence is UNKNOWN, never a failure (spec §49-50).
+        positively_verified = bool(canonical_v_res.claim_reports) and all(
+            str(getattr(r, "verdict", "")).lower()
+            in ("verified", "supported", "verdictlabel.verified")
+            for r in canonical_v_res.claim_reports
+        )
+        # The ReVerifier is the final safety gate for generated corrections.
+        # Absence of a contradiction is not proof: an UNVERIFIED or CONFLICTED
+        # regeneration must not be released as accepted. Require every corrected
+        # atomic claim to be positively grounded by a completed verifier run.
         passed = (
             canonical_v_res.status == ExecutionStatus.COMPLETED
             and remaining_contradictions == 0
+            and positively_verified
         )
 
         # PHASE-4 INVARIANT (generic, no per-domain rule): a correction may be
@@ -1308,6 +1309,66 @@ def _judge_route(state: HalluciGuardState) -> str:
     return "human_escalation"
 
 
+def _build_agent_outcomes(
+    state: HalluciGuardState,
+    *,
+    memory_result: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build a non-empty, truthful outcome for every production agent."""
+    latest_trace = {
+        str(event.get("node")): event
+        for event in state.get("trace", [])
+        if isinstance(event, dict) and event.get("node")
+    }
+
+    def outcome(node: str, result: Any, *, reason: str | None = None) -> dict[str, Any]:
+        event = latest_trace.get(node)
+        if event:
+            return {
+                "status": str(event.get("status", "completed")),
+                "executed": True,
+                "reason": reason,
+                "result": result if result not in (None, {}, []) else {"status": event.get("status", "completed")},
+            }
+        return {
+            "status": "not_required",
+            "executed": False,
+            "reason": reason or "conditional stage was not required for this route",
+            "result": {"status": "not_required"},
+        }
+
+    corrector = state.get("correction_result") or state.get("corrector") or {}
+    reverifier = state.get("reverification_result") or {}
+    memory_payload = memory_result or state.get("memory_result") or state.get("memory") or {}
+    return {
+        "base_llm": outcome("base_llm", state.get("base_llm") or {}),
+        "detector": outcome("detector", state.get("detector_result") or state.get("detector") or {}),
+        "claim_analyzer": outcome("claim_analyzer", state.get("claim_analysis") or {}),
+        "verifier": outcome("verifier", state.get("verifier_result") or state.get("verifier") or {}),
+        "judge": outcome("judge", state.get("judge_result") or state.get("judge") or {}),
+        "corrector": outcome(
+            "corrector",
+            corrector,
+            reason=None if corrector else "Judge found no contradicted claim requiring repair",
+        ),
+        "reverifier": outcome(
+            "reverifier",
+            reverifier,
+            reason=(
+                None
+                if reverifier
+                else "No corrected answer was produced, so post-correction verification was unnecessary"
+            ),
+        ),
+        "memory": {
+            "status": str(memory_payload.get("status", "completed")),
+            "executed": True,
+            "reason": memory_payload.get("reason") or memory_payload.get("skipped_reason"),
+            "result": memory_payload,
+        },
+    }
+
+
 async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
     from agents.memory_agent.memory.memory_agent import MemoryAgent
     from agents.memory_agent.schemas.models import StoreFactRequest
@@ -1370,6 +1431,9 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         return {
             "memory": memory,
             "memory_result": _dump(mem_result),
+            "agent_outcomes": _build_agent_outcomes(
+                state, memory_result=_dump(mem_result)
+            ),
             "final_response": state.get("final_response") or state.get("llm_response", ""),
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
@@ -1435,8 +1499,14 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         stored_count = getattr(batch, "stored", len(stored))
         duplicate_count = getattr(batch, "duplicates", 0)
         failed_count = getattr(batch, "failed", 0)
+        if stored_count > 0:
+            memory_status = MemoryStatus.STORED
+        elif duplicate_count > 0 and failed_count == 0:
+            memory_status = MemoryStatus.DUPLICATE
+        else:
+            memory_status = MemoryStatus.FAILED
         mem_result = MemoryResult(
-            status=MemoryStatus.STORED,
+            status=memory_status,
             stored_count=stored_count,
             duplicate_count=duplicate_count,
             failed_count=failed_count,
@@ -1458,12 +1528,15 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                 "stored_count": stored_count,
                 "duplicate_count": duplicate_count,
                 "failed_count": failed_count,
-                "status": "stored",
+                "status": memory_status.value,
             },
         )
         return {
             "memory": memory,
             "memory_result": _dump(mem_result),
+            "agent_outcomes": _build_agent_outcomes(
+                state, memory_result=_dump(mem_result)
+            ),
             "final_response": state.get("final_response") or state.get("llm_response", ""),
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
@@ -1492,6 +1565,13 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             update["route"] = "memory"  # Stay at memory node, not escalate
             update["terminal_status"] = "accepted"  # Answer remains accepted
             update["verification_status"] = "verified_and_accepted"
+        update["agent_outcomes"] = _build_agent_outcomes(
+            state,
+            memory_result={
+                "status": "failed",
+                "reason": f"{type(exc).__name__}: {str(exc)[:160]}",
+            },
+        )
         return update
 
 

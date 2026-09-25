@@ -448,6 +448,7 @@ async def _execute_verification(
             "correction_result": result.get("correction_result"),
             "reverification_result": result.get("reverification_result"),
             "memory_result": result.get("memory_result"),
+            "agent_outcomes": result.get("agent_outcomes", {}),
             "retry_count": result.get("retry_count", 0),
             "correction_attempt_count": result.get("correction_attempt_count", 0),
             "reverification_attempt_count": result.get("reverification_attempt_count", 0),

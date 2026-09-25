@@ -111,6 +111,7 @@ async def test_reverifier_does_not_pass_unverified_regeneration(monkeypatch):
     )
     result = await _reverifier_node(
         _state(
+            user_query="Java",
             correction_result={
                 "corrected_text": "Java was developed by a team at Sun Microsystems."
             },
@@ -118,8 +119,14 @@ async def test_reverifier_does_not_pass_unverified_regeneration(monkeypatch):
         )
     )
 
-    assert result["reverification_result"]["passed"] is True
+    # An unverified regeneration is not independently grounded, so the safety
+    # gate must not release it even when it contains no explicit contradiction.
+    assert result["reverification_result"]["passed"] is False
     assert result["reverification_result"]["remaining_contradictions"] == 0
+    assert result["reverification_result"]["failure_category"] in {
+        "DEGRADED_REVERIFICATION",
+        "VERIFIER_FAILURE",
+    }
 
 
 @pytest.mark.asyncio

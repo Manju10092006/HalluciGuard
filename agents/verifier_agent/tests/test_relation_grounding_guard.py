@@ -34,6 +34,7 @@ if VERIFIER_DIR not in sys.path:
 from schemas.models import Passage, VerdictLabel
 from scorers.relation_verifier import RelationVerifier
 from scorers.evidence_scorer import EvidenceScorer
+from api.pipeline import VerificationPipeline
 
 
 def _make_passage(
@@ -243,3 +244,214 @@ class TestUngroundedConfidenceCap:
         result = self.scorer.score_evidence("Some claim.", [], [], domain="general")
         assert result["grounded"] is False
         assert result["verdict"] == VerdictLabel.UNVERIFIED
+
+
+class TestPageTitleCleaning:
+    """`_clean_page_title` must reduce a decorated retrieval title to the bare
+    entity, so title-anchored passive facts align with a single-token claim
+    subject. Real adapters emit these exact decorations (see
+    scripts/probe_retrieval.py)."""
+
+    def setup_method(self):
+        self.rv = RelationVerifier()
+
+    def test_strips_wikipedia_prefix(self):
+        assert self.rv._clean_page_title("Wikipedia: Microsoft") == "Microsoft"
+
+    def test_strips_web_prefix_and_wikipedia_suffix(self):
+        # Tavily form. Before the fix this normalized to "web microsoft
+        # wikipedia" and never matched the claim subject "microsoft".
+        assert self.rv._clean_page_title("Web: Microsoft - Wikipedia") == "Microsoft"
+
+    def test_strips_section_parenthetical(self):
+        assert self.rv._clean_page_title("Wikipedia: Microsoft (Overview)") == "Microsoft"
+
+    def test_preserves_city_state_comma(self):
+        # A comma is NOT a separator we strip — "Albuquerque, New Mexico" is one
+        # entity and must survive intact (the object matcher needs the state).
+        assert self.rv._clean_page_title("Wikipedia: Albuquerque, New Mexico") == "Albuquerque, New Mexico"
+
+
+class TestFounderTitleGrounding:
+    """A true (co-)founder claim must MATCH even when the only decisive evidence
+    is a title-anchored passive lead on a Tavily-decorated page — the false
+    CONFLICTED vector for 'Microsoft was founded by Bill Gates/Paul Allen'."""
+
+    def setup_method(self):
+        self.rv = RelationVerifier()
+
+    def test_founder_grounded_via_tavily_title_only(self):
+        # The founding fact is recoverable ONLY through the page title: the lead
+        # is passive ("Founded in 1975 by ...") with no inline org subject, and
+        # the title is Tavily-decorated. This isolates the title-cleaning fix.
+        claim = "Microsoft was founded by Bill Gates."
+        evidence = _make_passage(
+            title="Web: Microsoft - Wikipedia",
+            snippet="American multinational technology company. Founded in 1975 by Bill Gates and Paul Allen.",
+            source="web",
+            relevance_score=0.85,
+        )
+        res = self.rv.verify_relation(claim, [evidence])
+        assert res.status == "MATCH"
+
+    def test_cofounder_not_contradicted_by_single_founder_context(self):
+        # "Microsoft was founded by Paul Allen" is TRUE. A Bill-Gates biography
+        # ("He co-founded Microsoft") must not out-vote the multi-founder lead
+        # and force OBJECT_MISMATCH — the match-first pre-scan confirms Paul Allen.
+        claim = "Microsoft was founded by Paul Allen."
+        gates_bio = _make_passage(
+            title="Wikipedia: Bill Gates",
+            snippet="Bill Gates is an American businessman who co-founded Microsoft.",
+            relevance_score=0.85,
+        )
+        ms_lead = _make_passage(
+            title="Wikipedia: Microsoft",
+            snippet="Microsoft Corporation is a technology company. Founded in 1975 by Bill Gates and Paul Allen.",
+            relevance_score=0.85,
+        )
+        res = self.rv.verify_relation(claim, [gates_bio, ms_lead])
+        assert res.status == "MATCH"
+
+    def test_founder_grounded_when_full_date_precedes_by(self):
+        claim = "Microsoft was founded by Bill Gates in April 1975."
+        evidence = _make_passage(
+            title="Wikipedia: Microsoft (Overview)",
+            snippet=(
+                "Microsoft is a computer technology corporation founded on "
+                "April 4, 1975, by Bill Gates and Paul Allen in Albuquerque, New Mexico."
+            ),
+            relevance_score=0.85,
+        )
+        res = self.rv.verify_relation(claim, [evidence])
+        assert res.status == "MATCH"
+
+
+class TestOrgLocationGrounding:
+    """Organization location / headquarters claims must ground deterministically
+    (the false CONTRADICTED vector for 'started in Albuquerque' / 'HQ in
+    Redmond'), stay multi-location tolerant, yet still catch a real wrong city."""
+
+    def setup_method(self):
+        self.rv = RelationVerifier()
+
+    def _ms_founding(self):
+        return _make_passage(
+            title="Wikipedia: Microsoft (History)",
+            snippet=(
+                "Microsoft is a computer technology corporation founded on April 4, 1975, "
+                "by Bill Gates and Paul Allen in Albuquerque, New Mexico. The company later "
+                "moved its headquarters to Redmond, Washington."
+            ),
+            relevance_score=0.85,
+        )
+
+    def _ms_hq(self):
+        return _make_passage(
+            title="Wikipedia: Microsoft (Overview)",
+            snippet="The company is based at Microsoft's headquarters in Redmond, Washington.",
+            relevance_score=0.85,
+        )
+
+    def test_started_in_city_matches_despite_later_hq(self):
+        # #4: TRUE. Evidence proves BOTH Albuquerque (founding) and Redmond (HQ);
+        # multi-location tolerance must confirm Albuquerque rather than let the
+        # Redmond triple manufacture an OBJECT_MISMATCH.
+        claim = "Microsoft was started in Albuquerque, New Mexico."
+        res = self.rv.verify_relation(claim, [self._ms_founding(), self._ms_hq()])
+        assert res.status == "MATCH"
+
+    def test_headquarters_city_matches(self):
+        # #6: TRUE. The HQ claim must ground against the supporting HQ passage
+        # (raw NLI mislabels this true statement as a contradiction).
+        claim = "Microsoft's headquarters remain in Redmond, Washington today."
+        res = self.rv.verify_relation(claim, [self._ms_hq(), self._ms_founding()])
+        assert res.status == "MATCH"
+
+    def test_wrong_city_is_object_mismatch(self):
+        # Tolerance must NOT hide a genuine contradiction: a subject-aligned
+        # location claim that NO evidence confirms is still OBJECT_MISMATCH.
+        claim = "Microsoft was started in Boston, Massachusetts."
+        res = self.rv.verify_relation(claim, [self._ms_founding(), self._ms_hq()])
+        assert res.status == "OBJECT_MISMATCH"
+        # The detail must cite a real proven location, not the unconfirmed claim city.
+        detail = (res.mismatch_detail or "").lower()
+        assert "albuquerque" in detail or "redmond" in detail
+
+    def test_city_state_disambiguation_preserved(self):
+        # F-2 protection carried into org location: "Paris, Texas" must not be
+        # confirmed by evidence about "Paris, France".
+        claim = "Foobar Inc is headquartered in Paris, Texas."
+        evidence = _make_passage(
+            title="Wikipedia: Foobar Inc",
+            snippet="Foobar Inc is headquartered in Paris, France.",
+            relevance_score=0.85,
+        )
+        res = self.rv.verify_relation(claim, [evidence])
+        assert res.status == "OBJECT_MISMATCH"
+
+    def test_founder_date_is_not_misread_as_location(self):
+        claim = "Microsoft was founded by Bill Gates in April 1975."
+        triples = self.rv.extract_triples(claim)
+        assert any(t.relation == "created_by" for t in triples)
+        assert all(
+            not (t.relation == "location_of" and t.object == "april")
+            for t in triples
+        )
+
+
+class TestDecisionGradeTopicality:
+    """NLI cannot turn an entity-only lexical hit into a refutation."""
+
+    def setup_method(self):
+        self.rv = RelationVerifier()
+
+    def test_off_topic_city_page_cannot_contradict_org_location_claim(self):
+        claim = "Microsoft was started in Albuquerque, New Mexico."
+        city_page = _make_passage(
+            title="Wikipedia: Albuquerque, New Mexico",
+            snippet=(
+                "Albuquerque is the most populous city in New Mexico and was "
+                "founded in 1706 as La Villa de Alburquerque."
+            ),
+            relevance_score=0.91,
+        )
+        nli = [{
+            "label": "contradiction",
+            "entailment_score": 0.01,
+            "contradiction_score": 0.98,
+            "neutral_score": 0.01,
+        }]
+
+        passages, results = VerificationPipeline._select_decision_grade_evidence(
+            [city_page], nli, claim=claim, relation_verifier=self.rv
+        )
+
+        assert passages == []
+        assert results == []
+        assert nli[0]["contradiction_score"] == 0.0
+        assert nli[0]["label"] == "neutral"
+
+    def test_subject_aligned_wrong_location_remains_contradiction(self):
+        claim = "Microsoft was started in Boston, Massachusetts."
+        microsoft_page = _make_passage(
+            title="Wikipedia: Microsoft",
+            snippet=(
+                "Microsoft was founded by Bill Gates and Paul Allen in "
+                "Albuquerque, New Mexico."
+            ),
+            relevance_score=0.91,
+        )
+        nli = [{
+            "label": "neutral",
+            "entailment_score": 0.02,
+            "contradiction_score": 0.08,
+            "neutral_score": 0.90,
+        }]
+
+        passages, results = VerificationPipeline._select_decision_grade_evidence(
+            [microsoft_page], nli, claim=claim, relation_verifier=self.rv
+        )
+
+        assert passages == [microsoft_page]
+        assert results[0]["label"] == "contradiction"
+        assert results[0]["contradiction_score"] >= 0.95

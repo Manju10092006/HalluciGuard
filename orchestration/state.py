@@ -99,6 +99,7 @@ class HalluciGuardState(TypedDict, total=False):
     # Active and disabled agents reporting
     active_agents: list[str]
     disabled_agents: dict[str, dict[str, str | bool]] | list[str]
+    agent_outcomes: dict[str, dict[str, Any]]
 
     # Control plane
     final_response: str

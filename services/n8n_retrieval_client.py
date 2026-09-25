@@ -323,6 +323,7 @@ class N8NRetrievalClient:
         force_tavily: bool = False,
         max_results: int = 5,
         request_id: Optional[str] = None,
+        queries: Optional[List[str]] = None,
     ) -> N8NRetrievalResult:
         """
         Execute POST request to n8n Retrieval Webhook and return normalized evidence passages.
@@ -352,6 +353,15 @@ class N8NRetrievalClient:
             "max_results": max_results,
             "request_id": req_id,
         }
+        normalized_queries = list(
+            dict.fromkeys(
+                str(query).strip()
+                for query in (queries or [])
+                if str(query).strip()
+            )
+        )[:3]
+        if normalized_queries:
+            payload["queries"] = normalized_queries
 
         headers = self._build_headers()
         start_time = time.time()

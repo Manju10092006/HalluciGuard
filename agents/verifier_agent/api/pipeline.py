@@ -317,8 +317,14 @@ class VerificationPipeline:
         # match-first aggregate tells us whether the claimed person is confirmed
         # anywhere, so we can suppress that spurious per-passage contradiction.
         aggregate_rel_status = "NO_TRIPLE_EXTRACTED"
+        aggregate_claim_rel = ""
+        aggregate_claim_subject = ""
         if relation_verifier and claim:
-            aggregate_rel_status = relation_verifier.verify_relation(claim, passages).status
+            aggregate_rel_check = relation_verifier.verify_relation(claim, passages)
+            aggregate_rel_status = aggregate_rel_check.status
+            if aggregate_rel_check.claim_triple:
+                aggregate_claim_rel = aggregate_rel_check.claim_triple.relation
+                aggregate_claim_subject = aggregate_rel_check.claim_triple.subject
 
         selected = []
         for passage, result in pairs:
@@ -338,10 +344,10 @@ class VerificationPipeline:
                 # valid holder (co-founder) must not manufacture a contradiction.
                 if (
                     rel_status in ("OBJECT_MISMATCH", "RELATION_MISMATCH")
-                    and claim_rel in ("created_by", "leads")
+                    and claim_rel in ("created_by", "leads", "location_of")
                     and aggregate_rel_status == "MATCH"
                 ):
-                    rel_status = "NO_TRIPLE_EXTRACTED"  # defer to NLI for this passage
+                    rel_status = "NO_TRIPLE_EXTRACTED"
                 if rel_status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
                     contradiction = max(contradiction, 0.95)
                     result["contradiction_score"] = contradiction
@@ -360,7 +366,63 @@ class VerificationPipeline:
                 "incorrectly claimed", "not true", "not associated", "is false",
             )
             snippet_lower = f"{passage.title} {passage.snippet}".lower()
-            if any(rf in snippet_lower for rf in refutation_phrases) and not any(neg in claim.lower() for neg in ("not", "never", "disproven", "false", "myth")):
+            has_explicit_refutation = any(rf in snippet_lower for rf in refutation_phrases)
+            claim_is_negative = any(neg in claim.lower() for neg in ("not", "never", "disproven", "false", "myth"))
+
+            # Generic NLI models frequently label a biography of one co-founder
+            # as contradicting a true claim about the other co-founder. Once the
+            # aggregate structured check has positively grounded this
+            # multi-valued relation, raw NLI-only contradictions are noise. Keep
+            # genuinely explicit refutations so conflicting sources still reach
+            # the conflict resolver.
+            if (
+                aggregate_rel_status == "MATCH"
+                and aggregate_claim_rel in ("created_by", "leads", "location_of")
+                and contradiction > entailment
+                and not has_explicit_refutation
+            ):
+                contradiction = 0.0
+                result["contradiction_score"] = 0.0
+                if rel_status != "MATCH":
+                    result["label"] = "neutral"
+                    result["neutral_score"] = max(
+                        float(result.get("neutral_score", 0.0)),
+                        max(0.0, 1.0 - entailment),
+                    )
+
+            # A raw NLI contradiction is not decision-grade evidence for a
+            # structured relation when the passage never mentions the claim's
+            # subject. Example: an Albuquerque city page can lexically match
+            # "Microsoft was started in Albuquerque" but says nothing about
+            # Microsoft. Treating it as a refutation caused a false correction
+            # request. Genuine structured mismatches and explicit refutations
+            # remain untouched.
+            subject_mentioned = True
+            if aggregate_claim_subject and relation_verifier:
+                normalized_context = relation_verifier._normalize_name(
+                    f"{passage.title} {passage.snippet}"
+                )
+                context_tokens = set(normalized_context.split())
+                subject_tokens = set(aggregate_claim_subject.split())
+                subject_mentioned = bool(subject_tokens) and subject_tokens.issubset(
+                    context_tokens
+                )
+            if (
+                aggregate_claim_rel
+                and rel_status == "NO_TRIPLE_EXTRACTED"
+                and contradiction > entailment
+                and not subject_mentioned
+                and not has_explicit_refutation
+            ):
+                contradiction = 0.0
+                result["contradiction_score"] = 0.0
+                result["label"] = "neutral"
+                result["neutral_score"] = max(
+                    float(result.get("neutral_score", 0.0)),
+                    max(0.0, 1.0 - entailment),
+                )
+
+            if has_explicit_refutation and not claim_is_negative:
                 contradiction = max(contradiction, 0.95)
                 result["contradiction_score"] = contradiction
                 result["entailment_score"] = 0.0
@@ -536,6 +598,7 @@ class VerificationPipeline:
                                 force_tavily=force_tav,
                                 max_results=5,
                                 request_id=request_id,
+                                queries=search_queries,
                             )
                             n8n_trace_obj = n8n_res.trace
                             if n8n_res.success and n8n_res.passages:

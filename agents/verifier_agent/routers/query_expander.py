@@ -10,6 +10,14 @@ from claims.entity_resolver import EntityResolver, EntityResolution
 logger = logging.getLogger(__name__)
 
 
+def _clean_query_text(query: str) -> str:
+    """Strip answer-formatting markup before entity parsing and web search."""
+    clean = str(query or "").replace("\u202f", " ").replace("\u00a0", " ")
+    clean = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", clean)
+    clean = re.sub(r"(?:\*\*|__|`)", "", clean)
+    return " ".join(clean.split())
+
+
 class QueryExpander:
     """Expands queries with entity resolution, domain-specific synonyms, and terms."""
 
@@ -46,6 +54,7 @@ class QueryExpander:
         Returns:
             Tuple of (expanded_query, entity_resolution)
         """
+        query = _clean_query_text(query)
         resolution = self.entity_resolver.resolve(query, domain)
         domain_key = domain.lower()
 
@@ -80,7 +89,7 @@ class QueryExpander:
         Generate primary and expanded search queries preserving the semantic subject.
         Returns a list of 1-3 distinct search query strings.
         """
-        clean_q = " ".join((query or "").split())
+        clean_q = _clean_query_text(query)
         if not clean_q:
             return []
 

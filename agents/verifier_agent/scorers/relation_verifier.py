@@ -188,6 +188,78 @@ class RelationVerifier:
                     )
                 )
 
+            # ── 2b. Organization Location / Headquarters ──────────────
+            # e.g., "Microsoft was started in Albuquerque, New Mexico"
+            # e.g., "Microsoft's headquarters remain in Redmond, Washington"
+            # e.g., "Microsoft moved its headquarters to Redmond, Washington"
+            # e.g., "based at Microsoft's headquarters in Redmond, Washington"
+            # These true org-location claims are outside the narrow location
+            # templates above, so without a triple they fall through to raw NLI,
+            # which routinely mislabels them (an off-topic city page or even a
+            # supporting passage is scored as a contradiction). The place object
+            # keeps "City, State" so the fail-closed name matcher still separates
+            # "Paris, Texas" from "Paris, France". Multi-location orgs (started in
+            # one city, HQ in another) are reconciled by the match-first pre-scan
+            # in verify_relation, so a second valid location never contradicts.
+            # The claim subject leads its sentence ("Microsoft was started in
+            # ...", "Microsoft's headquarters remain in ..."), so these inline
+            # patterns are anchored to the sentence start. That keeps the
+            # extracted subject the real org instead of a mid-sentence common
+            # noun ("...is a computer technology corporation founded ... in X"
+            # would otherwise yield a junk subject). Evidence phrasings that bury
+            # the org (page-subject "Founded ... in <Place>", "based at <Org>'s
+            # headquarters in <Place>") are recovered title-anchored by
+            # _contextual_location_triples in verify_relation instead.
+            _place = r"([A-Za-z][A-Za-z\s\-]+(?:,\s*[A-Za-z][A-Za-z\s\-]+)?)"
+            _org = r"([A-Za-z][A-Za-z0-9&.\-]*(?:\s+[A-Za-z][A-Za-z0-9&.\-]*){0,2}?)"
+            org_loc_match = (
+                # "<Org>'s headquarters (are|remain|...) in <Place>"
+                re.search(
+                    r"^\s*" + _org + r"['’]s\s+(?:global\s+)?(?:headquarters|head\s+office|hq)\s+"
+                    r"(?:are|is|were|remain|remains|located|based|situated|stay|stays)?\s*(?:in|at)\s+" + _place,
+                    sent_clean, re.IGNORECASE,
+                )
+                # "<Org> (was|is) founded|started|established|based|headquartered ... in <Place>"
+                or re.search(
+                    r"^\s*" + _org + r"\s+(?:was|is|were|has\s+been)?\s*(?:originally\s+)?"
+                    r"(?:founded|started|established|launched|incorporated|based|headquartered|located|situated)\s+"
+                    r"(?:on\s+[\w\s,]+?\s+)?(?:by\s+[A-Za-z\s\-]+?\s+)?in\s+" + _place,
+                    sent_clean, re.IGNORECASE,
+                )
+                # "<Org> moved its headquarters (from ...) to <Place>"
+                or re.search(
+                    r"^\s*" + _org + r"\s+moved\s+its\s+(?:headquarters|head\s+office|hq)\s+"
+                    r"(?:from\s+[A-Za-z\s\-]+\s+)?to\s+" + _place,
+                    sent_clean, re.IGNORECASE,
+                )
+            )
+            if org_loc_match:
+                subj = org_loc_match.group(1).strip()
+                obj = org_loc_match.group(2).strip()
+                obj = re.split(
+                    r"\b(today|currently|now|where|which|with|and|as|since|until|while|although|before|after|on|whose)\b",
+                    obj, flags=re.IGNORECASE,
+                )[0].strip(" ,")
+                normalized_obj = self._normalize_name(obj)
+                month_names = {
+                    "january", "february", "march", "april", "may", "june",
+                    "july", "august", "september", "october", "november", "december",
+                }
+                # "founded by X in April 1975" expresses a date, not an
+                # organization location. Without this guard the claim's first
+                # triple becomes (org, location_of, april), hiding the actual
+                # created_by relation from verification.
+                if subj and len(obj) > 2 and normalized_obj not in month_names:
+                    triples.append(
+                        Triple(
+                            subject=self._normalize_name(subj),
+                            relation="location_of",
+                            object=normalized_obj,
+                            qualifiers=["org_location"],
+                            raw_text=sent_clean,
+                        )
+                    )
+
             # ── 3. Kinship / Family Relations ─────────────────────────
             # e.g. "Chiranjeevi is the father of Allu Arjun"
             # e.g. "Allu Arjun was born ... to film producer Allu Aravind and Nirmala"
@@ -429,6 +501,35 @@ class RelationVerifier:
             return True
         return False
 
+    @staticmethod
+    def _clean_page_title(raw_title: str) -> str:
+        """Reduce a decorated retrieval title to the underlying entity name.
+
+        Retrieval titles arrive dressed by their source: the n8n/Wikipedia
+        adapter emits ``Wikipedia: Microsoft`` and section headings
+        ``Microsoft (Overview)``, while Tavily web results emit
+        ``Web: Microsoft - Wikipedia``. The title is used as the implied SUBJECT
+        of title-anchored passive facts ("Founded in 1975 by ...",
+        "... headquarters in Redmond ..."). Without this cleaning, a Tavily title
+        normalizes to the multi-token ``web microsoft wikipedia`` which the
+        fail-closed name matcher (single-token subjects match only on exact/set
+        equality) can never align with the claim subject ``microsoft`` — so the
+        grounding gate silently misses and the claim falls through to raw NLI
+        (the observed false CONFLICTED / CONTRADICTED path).
+        """
+        title = str(raw_title or "")
+        # 1. Strip a leading source tag: "Web:", "Wikipedia:", "News:", ...
+        title = re.sub(
+            r"^\s*(?:web|wikipedia|wiki|news|source|article|section|result)\s*:\s*",
+            "", title, flags=re.IGNORECASE,
+        )
+        # 2. Drop a trailing section qualifier in parentheses: "Microsoft (Overview)".
+        title = re.sub(r"\s*\([^)]*\)\s*$", "", title)
+        # 3. Drop a trailing site/publisher suffix after a spaced separator:
+        #    "Microsoft - Wikipedia", "Microsoft | HISTORY", "Foo — Britannica".
+        title = re.split(r"\s+[\-|–—]\s+", title)[0]
+        return title.strip()
+
     def _contextual_creation_triples(self, passage: Any) -> List[Triple]:
         """Recover passive creation facts whose subject is supplied by the page.
 
@@ -443,15 +544,15 @@ class RelationVerifier:
         if not raw_title or not snippet:
             return []
 
-        title = re.sub(r"^Wikipedia:\s*", "", raw_title, flags=re.IGNORECASE)
-        title = re.sub(r"\s*\([^)]*\)\s*$", "", title).strip()
+        title = self._clean_page_title(raw_title)
         if not title:
             return []
 
         passive = re.search(
             r"\b(created|developed|invented|built|designed|founded|introduced)"
             r"(?:\s+(?:originally|initially))?"
-            r"(?:\s+in\s+(?:the\s+)?(?:year\s+)?\d{3,4})?"
+            r"(?:\s+(?:in\s+(?:the\s+)?(?:year\s+)?\d{3,4}"
+            r"|on\s+[A-Za-z]+\s+\d{1,2},?\s+\d{4}),?)?"
             r"\s+by\s+([A-Za-z0-9][A-Za-z0-9 .,'&\-]+?)"
             r"(?=\s+(?:to|for|at|in|as|who|which|where)\b|[.;:]|$)",
             snippet,
@@ -473,6 +574,66 @@ class RelationVerifier:
                 raw_text=passive.group(0),
             )
         ]
+
+    def _contextual_location_triples(self, passage: Any) -> List[Triple]:
+        """Recover an organization's location/HQ facts anchored to the page title.
+
+        Encyclopedic leads phrase these with the org as the page subject rather
+        than inline: "Microsoft is a computer technology corporation founded ...
+        in Albuquerque, New Mexico" or "The company is based at Microsoft's
+        headquarters in Redmond, Washington." The inline sentence templates in
+        ``extract_triples`` require the org immediately before the verb, so they
+        miss this construction; the page title supplies the omitted subject here.
+
+        Generic NLI routinely mislabels these TRUE location claims — an off-topic
+        city page reads as a contradiction, and even a directly supporting HQ
+        passage gets a near-zero entailment argmax'd to "contradiction" — so a
+        deterministic (Org, location_of, Place) triple lets the grounding gate
+        settle them. Multi-location safety (started in one city, HQ in another)
+        is handled by the match-first pre-scan in verify_relation, so surfacing a
+        second valid location never manufactures a contradiction.
+        """
+        raw_title = str(getattr(passage, "title", "") or "")
+        snippet = str(getattr(passage, "snippet", "") or "")
+        if not raw_title or not snippet:
+            return []
+        title = self._clean_page_title(raw_title)
+        if not title:
+            return []
+
+        place = r"(?P<place>[A-Za-z][A-Za-z\s\-]+(?:,\s*[A-Za-z][A-Za-z\s\-]+)?)"
+        patterns = (
+            # "... headquarters (are|remain|located|based) in Redmond, Washington"
+            r"(?:headquarters|head\s+office|hq)\s+"
+            r"(?:are|is|were|remain|remains|located|based|situated|stay|stays)?\s*(?:in|at)\s+" + place,
+            # "moved its headquarters (from ...) to Redmond, Washington"
+            r"moved\s+its\s+(?:headquarters|head\s+office|hq)\s+(?:from\s+[A-Za-z\s\-]+\s+)?to\s+" + place,
+            # "founded/started/established/based/headquartered ... in Albuquerque, New Mexico"
+            r"\b(?:founded|started|established|launched|incorporated|based|headquartered|located|situated)\b"
+            r"(?:\s+(?:on|in)\s+[\w\s,]+?)?(?:\s+by\s+[A-Za-z\s\-]+?)?\s+in\s+" + place,
+        )
+        triples: List[Triple] = []
+        for pat in patterns:
+            for m in re.finditer(pat, snippet, re.IGNORECASE):
+                obj = m.group("place").strip()
+                obj = re.split(
+                    r"\b(today|currently|now|where|which|with|and|as|since|until|"
+                    r"while|although|before|after|on|whose)\b",
+                    obj, flags=re.IGNORECASE,
+                )[0].strip(" ,")
+                if len(obj) <= 2:
+                    continue
+                triples.append(
+                    Triple(
+                        subject=self._normalize_name(title),
+                        relation="location_of",
+                        object=self._normalize_name(obj),
+                        qualifiers=["title_anchored", "org_location"],
+                        negated=bool(self._NEGATION_CUE.search(m.group(0))),
+                        raw_text=m.group(0),
+                    )
+                )
+        return triples
 
     def verify_relation(
         self,
@@ -514,6 +675,7 @@ class RelationVerifier:
             text = f"{getattr(p, 'title', '')} {getattr(p, 'snippet', '')}"
             e_triples = self.extract_triples(text)
             e_triples.extend(self._contextual_creation_triples(p))
+            e_triples.extend(self._contextual_location_triples(p))
             all_evidence_triples.extend(e_triples)
 
         if not all_evidence_triples:
@@ -524,7 +686,7 @@ class RelationVerifier:
                 mismatch_detail="No structured relation triples recognized in retrieved evidence",
             )
 
-        # ── Creation / leadership pre-scan (match-first) ──────────────
+        # ── Creation / leadership / location pre-scan (match-first) ───
         # "X is the founder of Y" / "X is the CEO of Y" claims frequently meet
         # evidence naming MULTIPLE valid people (Bill Gates AND Paul Allen).
         # The generic loop below returns on the FIRST subject-matching evidence
@@ -532,7 +694,13 @@ class RelationVerifier:
         # because a different founder's triple was encountered first. Resolve
         # these relations up front: only declare OBJECT_MISMATCH when NO
         # subject-matching evidence triple confirms the claimed person.
-        for rel, noun in (("created_by", "creator"), ("leads", "leader")):
+        #
+        # location_of is included for the SAME multi-valued reason: an
+        # organization legitimately has several locations over time (Microsoft
+        # was started in Albuquerque yet is headquartered in Redmond). Confirming
+        # any one claimed location must win over a second, equally-valid location
+        # that would otherwise be read as a contradiction.
+        for rel, noun in (("created_by", "creator"), ("leads", "leader"), ("location_of", "location")):
             if c_triple.relation != rel:
                 continue
             subj_aligned = [
