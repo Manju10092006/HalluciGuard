@@ -7,7 +7,7 @@
 ---
 
 ## 1. Current Input Contract (`VerifierInputV2`)
-Defined in [`agents/verifier_agent/schemas/models.py`](../agents/verifier_agent/schemas/models.py):
+Defined in [`agents/verifier_agent/schemas/models.py`](../../agents/verifier_agent/schemas/models.py):
 ```python
 class SuspiciousClaim(BaseModel):
     claim_id: str
@@ -22,7 +22,7 @@ class VerifierInputV2(BaseModel):
 ---
 
 ## 2. Current Output Contract (`VerifierOutputV2`)
-Defined in [`agents/verifier_agent/schemas/models.py`](../agents/verifier_agent/schemas/models.py):
+Defined in [`agents/verifier_agent/schemas/models.py`](../../agents/verifier_agent/schemas/models.py):
 ```python
 class VerifierOutputV2(BaseModel):
     query_id: str
@@ -41,7 +41,7 @@ class VerifierOutputV2(BaseModel):
 ---
 
 ## 3. Current Verdict Enum (`VerdictLabel`)
-Defined in [`agents/verifier_agent/schemas/models.py`](../agents/verifier_agent/schemas/models.py):
+Defined in [`agents/verifier_agent/schemas/models.py`](../../agents/verifier_agent/schemas/models.py):
 - `VERIFIED`
 - `LIKELY_HALLUCINATED`
 - `INSUFFICIENT_EVIDENCE`
