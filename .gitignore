@@ -166,3 +166,6 @@ wf_dump/
 auto_crop_boxes.py
 crop_boxes.py
 verify_and_clean_crops.py
+
+# Local-only bin for superseded/scratch files (see useless/README.md). Never pushed.
+/useless/
