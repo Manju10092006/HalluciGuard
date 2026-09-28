@@ -730,15 +730,15 @@ function MatterComparisonSection() {
   const leftPills: PillConfig[] = [
     { text: "Claim", bg: "#14382e", color: "#ffffff", borderColor: "#0e2922" },
     { text: "Evidence", bg: "#2563eb", color: "#ffffff", borderColor: "#1d4ed8" },
-    { text: "Primary Source", bg: "#7c3aed", color: "#ffffff", borderColor: "#6d28d9" },
+    { text: "Primary Source", bg: "#8A7E6B", color: "#ffffff", borderColor: "#6f6553" },
     { text: "Verifier", bg: "#059669", color: "#ffffff", borderColor: "#047857" },
     { text: "Cross-check", bg: "#0d9488", color: "#ffffff", borderColor: "#0f766e" },
     { text: "NLI", bg: "#f59e0b", color: "#1e1b4b", borderColor: "#d97706" },
     { text: "Confidence", bg: "#10b981", color: "#ffffff", borderColor: "#059669" },
-    { text: "Judge", bg: "#4c1d95", color: "#ffffff", borderColor: "#3b0764" },
+    { text: "Judge", bg: "#3a3a36", color: "#ffffff", borderColor: "#1A1A18" },
     { text: "Correction", bg: "#f17f73", color: "#ffffff", borderColor: "#e15b4c" },
     { text: "Re-verification", bg: "#164e63", color: "#ffffff", borderColor: "#083344" },
-    { text: "Provenance", bg: "#4f46e5", color: "#ffffff", borderColor: "#4338ca" },
+    { text: "Provenance", bg: "#1A1A18", color: "#ffffff", borderColor: "#000000" },
     { text: "Verified", bg: "#2e7d63", color: "#ffffff", borderColor: "#1f5845" },
   ]
 

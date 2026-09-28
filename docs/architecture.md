@@ -1,113 +1,84 @@
-# HalluciGuard Verifier V2 — Architecture & Technical Design
+# HalluciGuard architecture
 
-## 1. System Architecture Overview
+## System boundary
 
-HalluciGuard Verifier V2 is an authoritative, multi-stage fact-verification system built to evaluate claims without fabricating evidence, scores, or certainty.
+HalluciGuard is an evidence-grounded control plane around hosted generation and local verification models. The Next.js client calls the FastAPI orchestration API; LangGraph coordinates generation and trust stages; external providers supply generation and retrieval; local models rerank, classify evidence relations, and estimate grounded risk.
 
 ```mermaid
-graph TD
-    A["User Input Claim"] --> B["Claim Normalization & Entity Resolution"]
-    B --> C["Domain Router (General, Healthcare, Cybersecurity, Finance, AI Research)"]
-    C --> D["Bidirectional Query Generation"]
-    D --> E["Primary Authoritative Adapter (Wikipedia / PubMed / NVD / etc.)"]
-    E --> F{"Primary Quality Gate"}
-    F -- "Sufficient (Relevant + Term Coverage)" --> H["Merged Candidate Pool"]
-    F -- "Insufficient / Error" --> G["Tavily Web Search + Page Extraction"]
-    G --> H
-    H --> I["URL & Content Deduplication"]
-    I --> J["BAAI/bge-reranker-large (Cross-Encoder Scoring)"]
-    J --> K{"Relevance Gate (Threshold >= 0.20)"}
-    K -- "Low Relevance" --> L["IRRELEVANT (Weight = 0.0)"]
-    K -- "Relevant" --> M["Deterministic Relation Verification Layer"]
-    M --> N["DeBERTa-v3 NLI Inference (cross-encoder/nli-deberta-v3-base)"]
-    N --> O["Evidence Semantics & Word-Coverage Bypass"]
-    O --> P["Claim-Level Aggregation & Conflict Resolution"]
-    P --> Q["Final Verdict (VERIFIED / CONTRADICTED / UNVERIFIED / CONFLICTED)"]
-    Q --> R["Transparent Citation & Provenance Output"]
+flowchart TB
+    subgraph Client
+      UI[frontend-v2<br/>Next.js 15 / React 19]
+    end
+    subgraph API
+      FA[FastAPI<br/>auth + history + verify]
+    end
+    subgraph Graph[LangGraph supervisor]
+      L[Base LLM]
+      DT[Detector triage]
+      CA[Claim Analyzer]
+      V[Verifier]
+      DG[Grounded Detector]
+      J[Judge]
+      C[Corrector]
+      RV[ReVerifier]
+      M[Memory]
+    end
+    subgraph External
+      HP[Groq / Gemini / OpenRouter]
+      N8[n8n retrieval webhook]
+      SRC[Wikipedia / Tavily / domain sources]
+    end
+    subgraph LocalModels[Local model runtime]
+      HD[detector-best<br/>DeBERTa v3 xsmall]
+      BGE[BAAI bge-reranker-large]
+      NLI[nli-deberta-v3-base]
+      EMB[all-MiniLM-L6-v2 memory embeddings]
+    end
+    UI --> FA --> L
+    L <--> HP
+    L --> DT --> CA --> V
+    V <--> N8
+    N8 <--> SRC
+    V <--> SRC
+    V --> BGE --> NLI
+    V --> DG --> HD
+    DG --> J
+    J --> C --> HP
+    C --> RV --> V
+    J --> M --> EMB
+    M --> FA --> UI
 ```
 
----
+## Control flow
 
-## 2. Pipeline Stages & Architectural Contracts
+The production default verifies every generated response. An evidence-free Detector pass performs only triage. Claim Analyzer then removes non-factual text. Verifier retrieves and scores evidence. A second Detector pass uses those evidence snippets to execute the trained checkpoint. Judge consumes both grounded Detector diagnostics and Verifier verdicts.
 
-### Stage 1: Normalization & Bidirectional Query Generation
-* **Component**: `claims/normalizer.py`, `routers/query_expander.py`
-* **Function**: Normalizes casing, strips rhetorical prefixes, and generates bidirectional search queries:
-  - *Active $\leftrightarrow$ Passive*: `Java was created by James Gosling` $\rightarrow$ `Java created by`, `who created Java`
-  - *Entity-Relationship*: `Chiranjeevi is the father of Allu Arjun` $\rightarrow$ `Allu Arjun father`, `Allu Arjun family`
-  - *Domain Canonicalization*: `CVE-2021-44228` $\rightarrow$ NVD API parameters.
+`ACCEPT` proceeds to Memory. `VERIFY_AGAIN` repeats retrieval within a fixed budget. `CORRECT` authorizes a minimal evidence-bound edit, followed by independent ReVerifier execution. `REJECT` and `ABSTAIN` withhold release. Every terminal path crosses Memory for audit, but only accepted verified facts are written.
 
-### Stage 2: Quality-Gated Multi-Adapter Retrieval
-* **Component**: `adapters/web_enhanced.py`, `adapters/general.py`, `adapters/healthcare.py`, etc.
-* **Retrieval Modes**:
-  - `hybrid` (Default): Primary adapter first; Tavily web search only if quality gate fails.
-  - `primary_only`: Primary adapter only; no web fallback.
-  - `tavily_only` / `--force-tavily`: Diagnostic mode skipping primary adapter.
-* **Quality Gate Policy**:
-  - Evaluates usable passage structure (snippet $\ge 20$ chars, valid URL, valid title).
-  - Assesses pre-ranking relevance signal ($overlap\_ratio \times 0.7 + hint \times 0.3$).
-  - Enforces minimum query-term lexical coverage ($\ge 50\%$).
+## Trust boundaries
 
-### Stage 3: Merge, Deduplication & Cross-Encoder Reranking
-* **Component**: `retrievers/hybrid.py`, `BAAI/bge-reranker-large`
-* **Deduplication**: Normalizes URLs (stripping query parameters, tracking tags, trailing slashes, fragments) and detects text duplicate chunks.
-* **BGE Reranking**: Measures query-passage cross-attention directly, producing continuous logit scores normalized to $[0.0, 1.0]$.
-* **Relevance Gating**: Passages scoring $< 0.20$ are designated `IRRELEVANT` and assigned zero factual weight prior to NLI evaluation.
+| Boundary | Trusted for | Not trusted for |
+|---|---|---|
+| Hosted LLM | Candidate text | Factual certification |
+| n8n | Transport, search brokering, extraction, normalization metadata | Final relevance, entailment or verdict |
+| Reranker | Claim–passage relevance signal | Truth |
+| NLI | Textual support/contradiction signal | Source authenticity or full world knowledge |
+| Detector | Calibrated evidence-conditioned risk | Final release decision |
+| Verifier | Claim-level evidence verdict | Product policy |
+| Judge | Workflow/release policy | Retrieval or fact generation |
+| Memory | Reuse of previously accepted facts | Permanent freshness |
 
-### Stage 4: Deterministic Relation Verification Layer
-* **Component**: `scorers/relation_verifier.py`
-* **Supported Relations**: `capital_of`, `location_of`, `father_of`/`mother_of`/`parent_of`, `created_by`, `associated_with`, `is_a`.
-* **Bypass Invariant**:
-  - When `status == OBJECT_MISMATCH` (e.g. claim asserts Hyderabad is capital of India, but evidence proves Telangana), the check directly triggers refutation.
-  - Bypasses the legacy claim-word-coverage suppression check completely, avoiding the false-token containment bug.
+## Data contracts
 
-### Stage 5: DeBERTa Cross-Encoder NLI & Evidence Semantics
-* **Component**: `nli/robust_entailment.py`, `scorers/evidence_scorer.py`
-* **Model**: `cross-encoder/nli-deberta-v3-base` (3-way: Entailment, Contradiction, Neutral).
-* **Explicit Refutation Logic**: Detects explicit qualification phrases (*"scientifically disproven"*, *"debunked"*, *"untrue"*, *"hoax"*) and marks assertive affirmative claims as `CONTRADICTING`.
+Canonical models are in `orchestration/schemas.py`. `HalluciGuardState` in `orchestration/state.py` carries both canonical outputs and compatibility views, plus request metadata, retry counters, trace, errors, and inter-agent messages.
 
-### Stage 6: Claim-Level Aggregation & Calibration
-* **Component**: `scorers/evidence_scorer.py`, `scorers/conflict_resolver.py`
-* **Public Verdict Contract**:
-  - `VERIFIED`: Substantial supporting evidence ($\ge 0.35$), minimal contradiction ($< 0.15$).
-  - `CONTRADICTED`: Substantial contradicting evidence ($\ge 0.35$), minimal support ($< 0.15$).
-  - `CONFLICTED`: Competing strong support ($\ge 0.35$) and strong contradiction ($\ge 0.35$).
-  - `UNVERIFIED`: Insufficient evidence passing decision-grade relevance threshold.
-* **Public Evidence Classes**: `SUPPORTING`, `CONTRADICTING`, `NEUTRAL`, `IRRELEVANT`.
-* **Honest Confidence Calibration**:
-  $$\text{Confidence} = \max(\text{Support}, \text{Contradict}) \times \text{Decision Grade Weight} \times (1.0 - \text{Conflict Penalty})$$
-  *(Confidence never uses hard-coded source credibility as a substitute for factual alignment).*
+The API returns enough structured state for the frontend to show what executed. Conditional stages are labeled `NOT_REQUIRED` or skipped; they are never represented as successful execution.
 
----
+## Deployment surfaces
 
-## 3. Schemas & Provenance Models
+- `orchestration.api:app`: canonical FastAPI product API.
+- `app.py`: Hugging Face/Gradio-compatible deployment entry point that mounts/uses the backend.
+- `frontend-v2/`: active Vercel-oriented web client.
+- Per-agent APIs: Detector, Verifier, Corrector and Memory expose optional standalone development surfaces.
 
-All pipeline transactions adhere to strict Pydantic models in `schemas/models.py` and `schemas/retrieval_trace.py`:
-
-```python
-class EvidenceItem(BaseModel):
-    title: str
-    source: str
-    url: str
-    publication_date: str
-    snippet: str
-    source_id: str
-    entailment_score: float
-    entailment_label: EntailmentLabel
-    credibility_score: float
-    relevance_score: float
-    source_confidence_hint: float
-    relation_check: Optional[RelationCheckResult]
-
-class VerifierReportV2(BaseModel):
-    claim_id: str
-    claim_text: str
-    verdict: VerdictLabel  # VERIFIED | CONTRADICTED | UNVERIFIED | CONFLICTED
-    confidence_score: float
-    support_score: float
-    contradiction_score: float
-    trust_score: float
-    explanation: str
-    evidence: List[EvidenceItem]
-    retrieval_trace: Dict[str, Any]
-```
+See [project structure](project-structure.md), [API reference](api.md), and [orchestration guide](../orchestration/README.md).

@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "motionsites": {
-      "url": "https://xgdzyqfalbibzelpdpvr.supabase.co/functions/v1/mcp",
-      "type": "sse"
-    }
-  }
-}

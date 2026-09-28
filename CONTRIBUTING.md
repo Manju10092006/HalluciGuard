@@ -1,172 +1,82 @@
-# 🤝 HalluciGuard Team Collaboration & Contribution Guide
+# Contributing to HalluciGuard
 
-Welcome to the **HalluciGuard** project! This guide explains how our 5-agent architecture is structured, how data flows between agents, and the exact step-by-step Git workflow for each team member to work cleanly on their assigned agent without conflicting with others.
+HalluciGuard is a multi-package research engineering project. Changes must preserve evidence provenance, explicit failure states and canonical inter-agent contracts.
 
----
+## Setup
 
-## 🏗️ 1. Architecture & Agent Ownership Overview
-
-HalluciGuard is built as a **5-agent trust layer pipeline** for LLM hallucination detection and correction:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          HalluciGuard Pipeline                          │
-│                                                                         │
-│  ┌──────────────┐   ┌──────────────┐   ┌───────────┐   ┌─────────────┐  │
-│  │   Detector   │──▶│   Verifier   │──▶│   Judge   │──▶│  Corrector  │  │
-│  │    Agent     │   │    Agent     │   │   Agent   │   │    Agent    │  │
-│  │ (Port 8001)  │   │ (Port 8002)  │   │(Port 8003)│   │ (Port 8004) │  │
-│  └──────────────┘   └──────────────┘   └───────────┘   └─────────────┘  │
-│         │                  │                 │                │         │
-│         └──────────────────┴─────────────────┴────────────────┘         │
-│                                    │                                    │
-│                              ┌─────▼─────┐                              │
-│                              │  Memory   │                              │
-│                              │   Agent   │                              │
-│                              │(Port 8005)│                              │
-│                              └───────────┘                              │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### 👥 Team Member Assignments & Directory Boundaries
-
-Each agent lives in its own isolated folder under `agents/`. **You must ONLY modify files inside your assigned folder.**
-
-| Agent | Directory | Assigned Feature Branch | Assigned Port | Status | Responsibilities |
-|-------|-----------|-------------------------|---------------|--------|------------------|
-| 🔍 **Detector Agent** | `agents/detector_agent/` | `detector-agent` | 8001 | 🟡 Open | Extract claims from LLM output, score suspicion, classify domain |
-| ✅ **Verifier Agent** | `agents/verifier_agent/` | `verifier-agent` | 8002 | 🟢 Complete | Multi-source evidence retrieval, DeBERTa NLI scoring, explanations |
-| ⚖️ **Judge Agent** | `agents/judge_agent/` | `judge-agent` | 8003 | 🟡 Open | Risk-weighted accept/reject/flag decision engine |
-| ✏️ **Corrector Agent** | `agents/corrector_agent/` | `corrector-agent` | 8004 | 🟡 Open | Fact-based text rewriter using verified evidence |
-| 🧠 **Memory Agent** | `agents/memory_agent/` | `memory-agent` | 8005 | 🟡 Open | Persistent knowledge graph & cross-session learning |
-
----
-
-## 🚫 2. Rules of Isolation (How Not to Break Other Code)
-
-1. **Strict Folder Boundaries**:
-   - If you are building **Detector Agent**, edit files ONLY inside `agents/detector_agent/`.
-   - Do **NOT** edit files in `agents/verifier_agent/` or root config files unless agreed upon by the team.
-2. **Never Commit Directly to `main`**:
-   - Always work on your assigned feature branch (`detector-agent`, `judge-agent`, etc.).
-3. **Use Shared Contracts (`schemas/models.py`)**:
-   - Communicate between agents using standard JSON payloads over HTTP.
-   - The contract schemas are defined in `agents/verifier_agent/schemas/models.py`.
-4. **Independent Virtual Environments**:
-   - Keep your agent's dependencies inside your agent folder's `requirements.txt`.
-
----
-
-## 🔄 3. Step-by-Step Developer Workflow
-
-### Step 1: Clone the Repository
-```bash
+```powershell
 git clone https://github.com/Manju10092006/HalluciGuard.git
 cd HalluciGuard
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-### Step 2: Switch to Your Agent's Feature Branch
-Depending on your assigned agent, checkout your dedicated branch:
+Frontend development:
 
-```bash
-# If working on Detector Agent:
-git checkout -b detector-agent
-
-# If working on Judge Agent:
-git checkout -b judge-agent
-
-# If working on Corrector Agent:
-git checkout -b corrector-agent
-
-# If working on Memory Agent:
-git checkout -b memory-agent
+```powershell
+cd frontend-v2
+npm install
+npm run dev
 ```
 
-### Step 3: Set Up Your Agent Environment
-Navigate to your agent's directory and create your code structure:
+Never commit `.env`, runtime databases, build output, caches, model downloads, private tunnel configuration or provider credentials.
 
-```bash
-cd agents/<your_agent_directory>
-python -m venv venv
-# On Windows:
-.\venv\Scripts\activate
-# On Linux/macOS:
-source venv/bin/activate
+## Branch and commit workflow
+
+1. Create a focused branch from the current default branch.
+2. Keep changes inside the smallest responsible package.
+3. Update canonical contracts only when the cross-agent API truly changes.
+4. Add focused regression tests before broad integration tests.
+5. Run `git diff --check` and review staged files for secrets.
+6. Use descriptive commits such as `fix(detector): ...`, `docs: ...`, or `test(verifier): ...`.
+7. Push normally and open a pull request; never force-push shared history without explicit repository-owner coordination.
+
+## Architecture rules
+
+- The Base LLM cannot certify its own output.
+- Claim Analyzer classifies checkability, not truth.
+- Detector output is triage, not factual evidence.
+- n8n is a retrieval broker, not the Verifier.
+- Verifier owns claim/evidence verdicts.
+- Judge owns release/correct/retry/reject/abstain policy.
+- Corrector edits only Judge-authorized claims using bound evidence.
+- ReVerifier independently checks corrected content.
+- Memory persists only accepted verified facts.
+- Missing models, evidence or credentials must remain explicit degraded/failure states.
+
+## Tests
+
+Choose suites proportional to the change:
+
+```powershell
+python -m pytest -q halluciguard_detector/tests
+python -m pytest -q orchestration/tests
+python -m pytest -q agents/verifier_agent/tests
+python -m pytest -q agents/judge_agent/tests
+python -m pytest -q agents/corrector_agent/tests
+python -m pytest -q agents/memory_agent/tests
+python -m pytest -q services/tests tests
 ```
 
-### Step 4: Develop Your Agent
-Read the `README.md` inside your agent's folder for exact specifications:
-- `agents/detector_agent/README.md`
-- `agents/judge_agent/README.md`
-- `agents/corrector_agent/README.md`
-- `agents/memory_agent/README.md`
+Network/model tests must identify the credentials and services they require. Do not describe mocked execution as a live model test.
 
-### Step 5: Test Your Agent Locally
-Ensure your agent runs independently on its designated port:
-```bash
-uvicorn api.main:app --port <YOUR_ASSIGNED_PORT> --reload
-```
+## Pull request checklist
 
-### Step 6: Commit and Push Your Changes
-Only stage files inside your agent's directory:
+- [ ] Scope and motivation are clear.
+- [ ] Working imports and public contracts remain compatible or migration is documented.
+- [ ] Evidence, scores and execution flags come from real runtime state.
+- [ ] New failure paths fail closed.
+- [ ] Tests cover the regression or feature.
+- [ ] Documentation reflects actual behavior.
+- [ ] No credentials, personal machine paths, caches, databases or generated logs are staged.
+- [ ] `git diff --check` passes.
 
-```bash
-# Example for Detector Agent:
-git add agents/detector_agent/
-git commit -m "feat(detector): implement perplexity claim extractor and domain router"
+## Documentation truth
 
-# Push to your feature branch on GitHub
-git push -u origin <your_branch_name>
-```
+Do not invent model names, benchmark numbers, sources, provider behavior or production-readiness claims. Cite repository artifacts for measurements and label live demonstrations separately from automated tests.
 
-### Step 7: Create a Pull Request (PR)
-1. Go to [github.com/Manju10092006/HalluciGuard](https://github.com/Manju10092006/HalluciGuard)
-2. Click **Pull Requests** → **New Pull Request**
-3. Select `base: main` ← `compare: <your-branch-name>`
-4. Title your PR clearly (e.g. `feat(detector): implement claim detection engine`)
-5. Request team review before merging into `main`.
+## Security
 
----
-
-## 🔌 4. Inter-Agent Data Flow Contracts
-
-Agents communicate sequentially via HTTP POST endpoints. Below is the contract flow:
-
-```
-[LLM Raw Output]
-       │
-       ▼  (POST http://localhost:8001/detect)
-┌────────────────┐
-│ Detector Agent │  Returns list of SuspiciousClaim: { "claim_id": "c1", "text": "...", "domain": "healthcare" }
-└────────────────┘
-       │
-       ▼  (POST http://localhost:8002/verify)
-┌────────────────┐
-│ Verifier Agent │  Returns VerifierOutputV2: { "claim_evidence": [...], "trust_score": 0.85 }
-└────────────────┘
-       │
-       ▼  (POST http://localhost:8003/judge)
-┌────────────────┐
-│  Judge Agent   │  Returns Verdict: ACCEPT / REJECT / FLAG
-└────────────────┘
-       │
-       ▼  (POST http://localhost:8004/correct)
-┌────────────────┐
-│ Corrector Agent│  Returns Factually Corrected Text + Inline Citations
-└────────────────┘
-```
-
----
-
-## ❓ FAQ & Troubleshooting
-
-- **Q: What if `main` gets updated while I am working?**
-  - Run `git fetch origin` followed by `git rebase origin/main` to get the latest updates without merge conflicts.
-- **Q: Where do I find the Verifier Agent code reference?**
-  - Check `agents/verifier_agent/` — it is fully implemented with 82 files serving as the reference standard for the project architecture.
-- **Q: How do I test the full pipeline?**
-  - Run Verifier Agent on port 8002 (`cd agents/verifier_agent && uvicorn api.main:app --port 8002`) and send HTTP POST requests to `http://localhost:8002/verify`.
-
----
-
-**Happy Coding! Let's build the ultimate AI Trust Layer together! 🛡️**
+Follow [SECURITY.md](SECURITY.md). Suspected credential exposure belongs in a private report, not a public issue.

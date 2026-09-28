@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     max_primary_passages: int = 10
     # Relevance gate for evidence classification: passages with BGE below this are IRRELEVANT
     evidence_relevance_gate: float = 0.20
+    # Confidence ceiling for a VERIFIED verdict that NO structured relation check
+    # could ground (F-1). The entity-grounding gate only recognises a small set
+    # of relation templates; a VERIFIED that rests solely on raw NLI must not be
+    # presented as high-confidence. Caps confidence only — never changes the
+    # verdict, and leaves CONTRADICTED untouched (fail-closed keeps refutations
+    # strong). Env: UNGROUNDED_CONFIDENCE_CEILING.
+    ungrounded_confidence_ceiling: float = 0.70
     # Default retrieval mode: hybrid (primary + fallback), primary_only, tavily_only
     default_retrieval_mode: str = "hybrid"
     # Bounded BGE candidates scored at retrieval quality gate (before Tavily decision)
@@ -73,8 +80,8 @@ class Settings(BaseSettings):
     # contract and hermetic tests. Deployments that have paused n8n disable it
     # explicitly with N8N_RETRIEVAL_ENABLED=false (see render.yaml/.env.example).
     n8n_retrieval_enabled: bool = True
-    n8n_retrieval_webhook_url: str = "https://manju200609.app.n8n.cloud/webhook/halluciguard-verify-v2"
-    n8n_health_webhook_url: str = "https://manju200609.app.n8n.cloud/webhook/halluciguard-health"
+    n8n_retrieval_webhook_url: str = "https://guru-siesta-excusable.ngrok-free.dev/webhook/halluciguard-verify-v2"
+    n8n_health_webhook_url: str = "https://guru-siesta-excusable.ngrok-free.dev/healthz"
     n8n_auth_mode: str = "header"  # "header" (default) or "none"
     n8n_header_name: str = "X-API-Key"
     n8n_webhook_secret: Optional[str] = None

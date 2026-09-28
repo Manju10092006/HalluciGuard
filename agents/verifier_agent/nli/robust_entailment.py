@@ -193,7 +193,7 @@ class NLIEngine:
             return self._neutral()
         try:
             # Premise = evidence, hypothesis = claim.
-            raw = self.pipeline({"text": evidence or "", "text_pair": claim or ""})
+            raw = self.pipeline({"text": (evidence or "")[:1500], "text_pair": (claim or "")[:500]}, truncation=True, max_length=512)
             scores = _normalize_scores(_flatten_predictions(raw), self._get_id2label())
             return _decision(scores) if sum(scores.values()) > 0 else self._neutral()
         except Exception as exc:

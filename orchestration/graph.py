@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import uuid
 from dataclasses import asdict, is_dataclass
 from typing import Any, Callable, Dict, List, Optional
@@ -31,6 +32,67 @@ def _dump(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_dump(v) for v in value]
     return value
+
+
+_QUERY_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "of",
+    "in", "on", "at", "to", "for", "and", "or", "but", "who", "whom", "whose",
+    "what", "which", "when", "where", "why", "how", "that", "this", "these",
+    "those", "it", "its", "as", "by", "from", "with", "about", "into", "do",
+    "does", "did", "can", "could", "will", "would", "should", "has", "have",
+    "had", "there", "their", "his", "her", "you", "your", "i", "me", "my",
+})
+
+
+def _salient_tokens(text: str) -> list[str]:
+    """Lowercased, stopword-filtered content tokens (len>=3), lightly stemmed."""
+    import re
+    raw = re.findall(r"[A-Za-z0-9]+", (text or "").lower())
+    out: list[str] = []
+    for tok in raw:
+        if len(tok) < 3 or tok in _QUERY_STOPWORDS:
+            continue
+        out.append(_stem_token(tok))
+    return out
+
+
+def _stem_token(tok: str) -> str:
+    """Very light suffix stripping so 'founder'/'founded'/'founders' align."""
+    for suffix in ("ers", "er", "ing", "ed", "es", "s"):
+        if tok.endswith(suffix) and len(tok) - len(suffix) >= 3:
+            return tok[: -len(suffix)]
+    return tok
+
+
+def _tokens_match(a: str, b: str) -> bool:
+    """Equal stems, or a shared prefix of >=4 chars (handles minor inflection)."""
+    if a == b:
+        return True
+    n = min(len(a), len(b))
+    return n >= 4 and a[:n] == b[:n]
+
+
+def _answer_addresses_query(query: str, answer: str, threshold: float = 0.6) -> bool:
+    """GENERIC topicality check (Phase-4 invariant, no per-domain rules).
+
+    A correction can be factually true yet answer a DIFFERENT question than the
+    user asked (e.g. query 'Who founded Microsoft?' -> corrected 'Snehith is a
+    Product Manager at Microsoft.'). Such an off-topic repair carries no
+    contradiction and would otherwise sail through the re-verifier gate. We
+    require the corrected answer to still cover the salient topic of the
+    original query. This is purely entity/term coverage — never a hardcoded
+    subject/relation. Returns True (do not block) when the query has no salient
+    tokens to score against, so it can only ever *withhold* an accept, never
+    create one.
+    """
+    q_tokens = _salient_tokens(query)
+    if not q_tokens:
+        return True
+    a_tokens = _salient_tokens(answer)
+    if not a_tokens:
+        return False
+    covered = sum(1 for qt in q_tokens if any(_tokens_match(qt, at) for at in a_tokens))
+    return (covered / len(q_tokens)) >= threshold
 
 
 def _validate_verdict(raw: str) -> str:
@@ -182,7 +244,11 @@ def _generate_route(state: HalluciGuardState) -> str:
 
 
 async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
-    from agents.detector_agent.detector import DetectorAgent
+    # Detector integration seam: the pre-retrieval pass extracts/triages claims.
+    # The evidence-grounded classifier runs only when evidence is available, and
+    # the bridge fails closed (routes to Verify) on any detector runtime failure;
+    # it never fabricates an Accept or silently substitutes a different model.
+    from .detector_bridge import run_detection
 
     node_start = start_timer()
     try:
@@ -191,7 +257,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             raise ValueError("No LLM response available for detection.")
 
         def _run_detect():
-            return DetectorAgent().detect(state["user_query"], llm_resp)
+            return run_detection(state["user_query"], llm_resp)
 
         detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))
@@ -228,7 +294,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         allow_fast_path = os.environ.get("ALLOW_DETECTOR_FAST_PATH", "false").lower() in ("true", "1")
         always_verify = os.environ.get("ALWAYS_VERIFY", "true").lower() in ("true", "1")
         is_stress = state.get("generation_mode") == "stress_test"
-        detector_degraded = str(detector.get("status", "")).lower() in {"failed", "degraded", "fallback", "unavailable"}
+        detector_degraded = bool(detector.get("detector_degraded")) or str(detector.get("status", "")).lower() in {"failed", "degraded", "fallback", "unavailable"}
         should_verify = (
             always_verify
             or not allow_fast_path
@@ -299,13 +365,14 @@ def _detector_route(state: HalluciGuardState) -> str:
 
 
 def _get_verifier_imports():
-    """Import verifier agent classes without sys.path manipulation.
-
-    Uses proper package imports. If the verifier agent package is not
-    installed as a proper module, this raises ImportError.
-    """
-    from agents.verifier_agent.api.pipeline import VerificationPipeline
-    from agents.verifier_agent.schemas.models import SuspiciousClaim, VerifierInputV2
+    """Import verifier agent classes with proper sys.path resolution."""
+    verifier_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
+    )
+    if verifier_dir not in sys.path:
+        sys.path.insert(0, verifier_dir)
+    from api.pipeline import VerificationPipeline
+    from schemas.models import SuspiciousClaim, VerifierInputV2
 
     return VerificationPipeline, SuspiciousClaim, VerifierInputV2
 
@@ -337,17 +404,24 @@ def _build_canonical_verifier_result(
             continue
         c_id = report.get("claim_id", "c1")
         c_text = report.get("claim_text") or report.get("claim", "")
-        verdict_raw = str(report.get("verdict", "")).lower()
+        # Canonicalize enum-repr verdicts ("VerdictLabel.verified") to the bare
+        # value, matching the extraction in _verifier_node. Without use_enum_values
+        # a dumped ClaimReport carries the enum whose str() is the prefixed form.
+        verdict_raw = str(report.get("verdict", "")).strip().lower()
+        if "." in verdict_raw:
+            verdict_raw = verdict_raw.rsplit(".", 1)[-1]
 
         # BUG-002 FIX: Strict verdict validation
         # Only match exact known verdict strings, not prefixes.
         # Unknown strings like "verifed" raise ContractViolation.
-        if verdict_raw in ("verified", "supported", "verdictlabel.verified"):
+        if verdict_raw in ("verified", "supported"):
             c_verdict = CanonicalVerdictLabel.VERIFIED
         elif "contradict" in verdict_raw or "hallucinat" in verdict_raw:
             c_verdict = CanonicalVerdictLabel.CONTRADICTED
         elif "conflict" in verdict_raw:
             c_verdict = CanonicalVerdictLabel.CONFLICTED
+        elif verdict_raw in ("unverified", "unsupported", "unknown"):
+            c_verdict = CanonicalVerdictLabel.UNVERIFIED
         elif verdict_raw == "":
             raise ContractViolation(
                 f"Invalid verifier verdict: received empty string for claim {c_id}",
@@ -405,13 +479,38 @@ def _build_canonical_verifier_result(
     overall_evidence_conf = verifier.get("overall_evidence_confidence")
     overall_conf_raw = verifier.get("overall_confidence", overall_evidence_conf)
     overall_conf = float(overall_conf_raw) if overall_conf_raw is not None else 0.0
+
+    # F2 FIX (was: hardcoded status=ExecutionStatus.COMPLETED).
+    # VerifierOutputV2 has NO top-level status; it exposes per-stage
+    # PipelineStageStatus entries where retrieval is marked "degraded" (zero
+    # passages retrieved) or "failed" (adapter failure) — see
+    # agents/verifier_agent/api/pipeline.py:787-805. Hardcoding COMPLETED told
+    # the Judge and Re-Verifier that an *ungrounded* run was authoritative, so a
+    # claim resting on no real evidence could be ACCEPTed (Judge L266 only
+    # ABSTAINs on "failed") or slip through the Re-Verifier safety gate
+    # (passed = COMPLETED and no contradictions). Derive the canonical status
+    # from the worst stage instead: any failed -> FAILED, any degraded ->
+    # DEGRADED, else COMPLETED. Absence of grounding is never "authoritative".
+    stage_statuses: list[str] = []
+    for stage in verifier.get("pipeline_stages", []) or []:
+        if isinstance(stage, dict):
+            stage_statuses.append(str(stage.get("status", "")).lower())
+        else:
+            stage_statuses.append(str(getattr(stage, "status", "")).lower())
+    if any("failed" in s for s in stage_statuses):
+        derived_status = ExecutionStatus.FAILED
+    elif any("degraded" in s for s in stage_statuses):
+        derived_status = ExecutionStatus.DEGRADED
+    else:
+        derived_status = ExecutionStatus.COMPLETED
+
     return CanonicalVerifierResult(
         query_id=verifier.get("query_id", query_id),
         domain=verifier.get("domain", domain),
         claim_reports=canonical_reports,
         evidence=[ev for r in canonical_reports for ev in r.evidence],
         overall_confidence=overall_conf,
-        status=ExecutionStatus.COMPLETED,
+        status=derived_status,
     )
 
 
@@ -453,6 +552,79 @@ def _aggregate_verification_status(claims: list) -> str:
     return VerificationStatus.UNVERIFIED.value
 
 
+async def _claim_analyzer_node(state: HalluciGuardState) -> dict[str, Any]:
+    """Extract ONLY the factual claims from the whole draft before retrieval.
+
+    This is the single gate between the Base LLM draft and the Verifier. It
+    overwrites ``detected_claims`` with factual-only claims so meta / discourse /
+    opinion / instruction / transition / question spans never reach retrieval or
+    the Verifier. It NEVER decides truth — that remains the Verifier's job.
+
+    Fail-open: any analyzer error leaves the prior ``detected_claims`` untouched
+    so the pipeline still runs; the deterministic fallback inside the analyzer
+    already covers the offline / no-credential case.
+    """
+    node_start = start_timer()
+    try:
+        draft = (
+            state.get("llm_response")
+            or state.get("draft_response")
+            or state.get("user_query")
+            or ""
+        )
+        user_query = state.get("user_query", "")
+        domain = state.get("domain", "general")
+
+        from services.claim_analyzer import ClaimAnalyzer
+
+        analysis = await ClaimAnalyzer().analyze(draft, user_query, domain)
+        factual = analysis.factual_claims
+        detected = [
+            {
+                "claim_id": c.claim_id,
+                "text": c.claim_text,
+                "search_queries": c.search_queries,
+                "claim_type": c.claim_type,
+                "original_sentence": c.original_sentence,
+            }
+            for c in factual
+        ]
+        trace = add_trace(
+            state,
+            "claim_analyzer",
+            "completed",
+            latency_ms=elapsed_ms(node_start),
+            factual_count=len(factual),
+            discarded_count=len(analysis.discarded),
+            source=analysis.source,
+            domain=analysis.domain,
+        )
+        return {
+            "detected_claims": detected,
+            "claims_gated": True,
+            "claim_analysis": analysis.to_dict(),
+            "domain": analysis.domain or domain,
+            "trace": trace,
+            "current_node": "claim_analyzer",
+            "updated_at": utc_now(),
+        }
+    except Exception as exc:
+        # Never block the pipeline on the gate; fall through with existing claims.
+        trace = add_trace(
+            state,
+            "claim_analyzer",
+            "failed",
+            latency_ms=elapsed_ms(node_start),
+            error_type=type(exc).__name__,
+        )
+        return {
+            "trace": trace,
+            "errors": add_error(state, "claim_analyzer", exc, retryable=False),
+            "current_node": "claim_analyzer",
+            "updated_at": utc_now(),
+        }
+
+
 async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
     VerificationPipeline, SuspiciousClaim, VerifierInputV2 = _get_verifier_imports()
     node_start = start_timer()
@@ -472,7 +644,11 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             for index, item in enumerate(detected_claims, start=1)
             if str(item.get("text") or "").strip()
         ]
-        if not suspicious_claims:
+        # Whole-draft fallback is ONLY valid when the Claim Analyzer gate did not
+        # run. Once claims are gated, an empty list means "no checkable factual
+        # claim" — verifying the raw draft would re-introduce the meta-sentence
+        # leak (e.g. "Actually, that isn't correct.") the gate exists to prevent.
+        if not suspicious_claims and not state.get("claims_gated"):
             suspicious_claims = [SuspiciousClaim(claim_id="c1", text=claim_text)]
 
         payload = VerifierInputV2(
@@ -501,7 +677,14 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         claims: list[dict[str, Any]] = []
 
         for report in verifier.get("claim_evidence", []):
-            verdict_raw = str(report.get("verdict", "")).lower()
+            # A ClaimReport dumped without use_enum_values yields the VerdictLabel
+            # enum, whose str() is the repr form "VerdictLabel.verified" (mixin str
+            # enums still use Enum.__str__). Canonicalize to the bare value before the
+            # strict contract check — the same enum-prefixed form _aggregate_verification_status
+            # already defends against. This preserves the Verifier's factual verdict.
+            verdict_raw = str(report.get("verdict", "")).strip().lower()
+            if "." in verdict_raw:
+                verdict_raw = verdict_raw.rsplit(".", 1)[-1]
             # BUG-002 FIX: Validate verdict strictly
             try:
                 clean_verdict = _validate_verdict(verdict_raw)
@@ -592,6 +775,65 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         update = _failure_update(state, "verifier", exc, retryable=True, error_type=type(exc).__name__)
         update["verifier_result"] = _dump(failed_res)
         return update
+
+
+async def _grounded_detector_node(state: HalluciGuardState) -> dict[str, Any]:
+    """Run the trained detector after retrieval and before Judge.
+
+    The first detector pass is necessarily evidence-free triage. This second
+    pass closes the production integration gap: it supplies Verifier passages
+    to the reference-grounded checkpoint, causing real model inference and
+    calibrated sentence-level probabilities. Detector failure is fail-closed
+    but does not discard the independently computed Verifier result.
+    """
+    from .detector_bridge import run_grounded_detection
+
+    node_start = start_timer()
+    llm_response = state.get("llm_response") or state.get("draft_response", "")
+    evidence = list(state.get("retrieved_evidence") or state.get("evidence") or [])
+
+    def _run_detect():
+        return run_grounded_detection(
+            state.get("user_query", ""),
+            llm_response,
+            evidence,
+        )
+
+    detector = _dump(await asyncio.to_thread(_run_detect))
+    status = "completed" if detector.get("inference_executed") else "skipped"
+    bus = add_bus_message(
+        state,
+        source_agent="detector",
+        target_agent="judge",
+        message_type="GROUNDED_DETECTOR_RESULT",
+        payload={
+            "hallucination_probability": detector.get("hallucination_probability"),
+            "risk_level": detector.get("risk_level"),
+            "model_loaded": detector.get("model_loaded", False),
+            "inference_executed": detector.get("inference_executed", False),
+            "evidence_count": len(evidence),
+        },
+    )
+    return {
+        "detector": detector,
+        "detector_result": detector,
+        "hallucination_probability": float(
+            detector.get("hallucination_probability", 0.0)
+        ),
+        "confidence": float(detector.get("confidence_score", 0.0)),
+        "inter_agent_bus": bus,
+        "updated_at": utc_now(),
+        "trace": add_trace(
+            state,
+            "detector_grounded",
+            status,
+            latency_ms=elapsed_ms(node_start),
+            model_loaded=detector.get("model_loaded", False),
+            inference_executed=detector.get("inference_executed", False),
+            evidence_count=len(evidence),
+            risk_level=detector.get("risk_level", "HIGH"),
+        ),
+    }
 
 
 def _verifier_route(state: HalluciGuardState) -> str:
@@ -761,14 +1003,16 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
             )
 
         provider = os.environ.get("HG_CORRECTOR_PROVIDER", "openrouter").strip().lower()
-        if provider == "openrouter":
+        if provider == "local":
+            # Local specialized Corrector (on-disk Qwen LoRA); no remote calls.
+            corr_res = await asyncio.to_thread(CorrectorAgent().correct, corr_req)
+        else:
+            # Any hosted value (openrouter/groq/gemini/hosted) routes through the
+            # multi-provider failover router (Groq -> Gemini -> OpenRouter). Its
+            # output remains untrusted until the dedicated Re-Verifier and Judge pass.
             from services.character_regenerator import CharacterRegenerator
 
-            # Whole-answer regeneration controller.  Its output remains
-            # untrusted until the dedicated Re-Verifier and Judge pass.
             corr_res = await CharacterRegenerator().regenerate(corr_req)
-        else:
-            corr_res = await asyncio.to_thread(CorrectorAgent().correct, corr_req)
         dumped_corr = _dump(corr_res)
 
         attempt_count = int(state.get("correction_attempt_count", 0)) + 1
@@ -787,6 +1031,11 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
             fail_mode = os.environ.get("HG_CORRECTOR_FAIL_MODE", "escalate").strip().lower()
             fail_route = "reject" if fail_mode == "reject" else "human_escalation"
             candidate_text = original_text
+            # Surface the corrector's diagnostic failure category (and which
+            # provider was last attempted) so operators can tell whether the
+            # root cause was LLM provider reliability or claim/span matching.
+            failure_category = dumped_corr.get("failure_category") or "OTHER"
+            provider_used = dumped_corr.get("provider_used")
             bus = add_bus_message(
                 state,
                 source_agent="corrector",
@@ -797,6 +1046,8 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
                     "attempt_count": attempt_count,
                     "fail_mode": fail_mode,
                     "route": fail_route,
+                    "failure_category": failure_category,
+                    "provider_used": provider_used,
                 },
             )
             return {
@@ -816,6 +1067,7 @@ async def _corrector_node(state: HalluciGuardState) -> dict[str, Any]:
                     validation_status=val_status,
                     attempt_count=attempt_count,
                     fail_mode=fail_mode,
+                    failure_category=failure_category,
                 ),
             }
 
@@ -902,6 +1154,7 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
                     "passed": False,
                     "remaining_contradictions": 0,
                     "status": "failed",
+                    "failure_category": "CLAIM_DECOMPOSITION_FAILED",
                 },
                 "reverification_attempt_count": int(state.get("reverification_attempt_count", 0)) + 1,
                 "route": "human_escalation",
@@ -954,22 +1207,56 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             1 for r in canonical_v_res.claim_reports
             if str(getattr(r, "verdict", "")).lower() in ("contradicted", "verdictlabel.contradicted")
         )
-        all_claims_verified = bool(canonical_v_res.claim_reports) and all(
+        positively_verified = bool(canonical_v_res.claim_reports) and all(
             str(getattr(r, "verdict", "")).lower()
-            in ("verified", "verdictlabel.verified")
+            in ("verified", "supported", "verdictlabel.verified")
             for r in canonical_v_res.claim_reports
         )
+        # The ReVerifier is the final safety gate for generated corrections.
+        # Absence of a contradiction is not proof: an UNVERIFIED or CONFLICTED
+        # regeneration must not be released as accepted. Require every corrected
+        # atomic claim to be positively grounded by a completed verifier run.
         passed = (
             canonical_v_res.status == ExecutionStatus.COMPLETED
             and remaining_contradictions == 0
-            and all_claims_verified
+            and positively_verified
         )
+
+        # PHASE-4 INVARIANT (generic, no per-domain rule): a correction may be
+        # factually true yet answer a DIFFERENT question than the user asked. It
+        # then carries no contradiction and would pass the gate on evidence for
+        # an unrelated fact. Before a *corrected* candidate can pass, require it
+        # to still cover the salient topic of the ORIGINAL query. This can only
+        # ever downgrade a pass to human review — it never manufactures an
+        # ACCEPT — so it is safe against false positives on the accept side.
+        off_topic_correction = False
+        if passed and corr_res.get("corrected_text"):
+            original_query = state.get("user_query", "") or state.get("query", "")
+            if original_query and not _answer_addresses_query(original_query, candidate_text):
+                passed = False
+                off_topic_correction = True
+
+        # §25: surface a machine-readable failure class whenever the gate fails.
+        # A remaining contradiction (original unresolved OR newly introduced by the
+        # correction) is distinct from a run that could not re-ground the candidate
+        # at all (DEGRADED/FAILED verifier status, e.g. retrieval returned nothing).
+        failure_category: str | None = None
+        if not passed:
+            if off_topic_correction:
+                failure_category = "CORRECTION_OFF_TOPIC"
+            elif remaining_contradictions > 0:
+                failure_category = "REMAINING_CONTRADICTION"
+            elif canonical_v_res.status == ExecutionStatus.FAILED:
+                failure_category = "VERIFIER_FAILURE"
+            else:
+                failure_category = "DEGRADED_REVERIFICATION"
 
         rev_result = ReverificationResult(
             passed=passed,
             verifier_result=canonical_v_res,
             remaining_contradictions=remaining_contradictions,
             status=ExecutionStatus.COMPLETED if canonical_v_res.status == ExecutionStatus.COMPLETED else ExecutionStatus.FAILED,
+            failure_category=failure_category,
         )
         dumped_rev = _dump(rev_result)
         rev_attempts = int(state.get("reverification_attempt_count", 0)) + 1
@@ -989,7 +1276,11 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
         return {
             "reverification_result": dumped_rev,
             "reverification_attempt_count": rev_attempts,
-            "route": "judge" if passed else "human_escalation",
+            # A completed re-verification ALWAYS returns to the Judge, which is the
+            # sole arbiter of the post-correction outcome (accept / re-correct /
+            # reject) via _evaluate_reverification. Only a crashed or failed verifier
+            # run escalates (handled by _reverifier_route reading the FAILED status).
+            "route": "judge",
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
             "trace": add_trace(
@@ -1077,6 +1368,66 @@ def _judge_route(state: HalluciGuardState) -> str:
     return "human_escalation"
 
 
+def _build_agent_outcomes(
+    state: HalluciGuardState,
+    *,
+    memory_result: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build a non-empty, truthful outcome for every production agent."""
+    latest_trace = {
+        str(event.get("node")): event
+        for event in state.get("trace", [])
+        if isinstance(event, dict) and event.get("node")
+    }
+
+    def outcome(node: str, result: Any, *, reason: str | None = None) -> dict[str, Any]:
+        event = latest_trace.get(node)
+        if event:
+            return {
+                "status": str(event.get("status", "completed")),
+                "executed": True,
+                "reason": reason,
+                "result": result if result not in (None, {}, []) else {"status": event.get("status", "completed")},
+            }
+        return {
+            "status": "not_required",
+            "executed": False,
+            "reason": reason or "conditional stage was not required for this route",
+            "result": {"status": "not_required"},
+        }
+
+    corrector = state.get("correction_result") or state.get("corrector") or {}
+    reverifier = state.get("reverification_result") or {}
+    memory_payload = memory_result or state.get("memory_result") or state.get("memory") or {}
+    return {
+        "base_llm": outcome("base_llm", state.get("base_llm") or {}),
+        "detector": outcome("detector", state.get("detector_result") or state.get("detector") or {}),
+        "claim_analyzer": outcome("claim_analyzer", state.get("claim_analysis") or {}),
+        "verifier": outcome("verifier", state.get("verifier_result") or state.get("verifier") or {}),
+        "judge": outcome("judge", state.get("judge_result") or state.get("judge") or {}),
+        "corrector": outcome(
+            "corrector",
+            corrector,
+            reason=None if corrector else "Judge found no contradicted claim requiring repair",
+        ),
+        "reverifier": outcome(
+            "reverifier",
+            reverifier,
+            reason=(
+                None
+                if reverifier
+                else "No corrected answer was produced, so post-correction verification was unnecessary"
+            ),
+        ),
+        "memory": {
+            "status": str(memory_payload.get("status", "completed")),
+            "executed": True,
+            "reason": memory_payload.get("reason") or memory_payload.get("skipped_reason"),
+            "result": memory_payload,
+        },
+    }
+
+
 async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
     from agents.memory_agent.memory.memory_agent import MemoryAgent
     from agents.memory_agent.schemas.models import StoreFactRequest
@@ -1139,6 +1490,9 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         return {
             "memory": memory,
             "memory_result": _dump(mem_result),
+            "agent_outcomes": _build_agent_outcomes(
+                state, memory_result=_dump(mem_result)
+            ),
             "final_response": state.get("final_response") or state.get("llm_response", ""),
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
@@ -1204,8 +1558,14 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
         stored_count = getattr(batch, "stored", len(stored))
         duplicate_count = getattr(batch, "duplicates", 0)
         failed_count = getattr(batch, "failed", 0)
+        if stored_count > 0:
+            memory_status = MemoryStatus.STORED
+        elif duplicate_count > 0 and failed_count == 0:
+            memory_status = MemoryStatus.DUPLICATE
+        else:
+            memory_status = MemoryStatus.FAILED
         mem_result = MemoryResult(
-            status=MemoryStatus.STORED,
+            status=memory_status,
             stored_count=stored_count,
             duplicate_count=duplicate_count,
             failed_count=failed_count,
@@ -1227,12 +1587,15 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                 "stored_count": stored_count,
                 "duplicate_count": duplicate_count,
                 "failed_count": failed_count,
-                "status": "stored",
+                "status": memory_status.value,
             },
         )
         return {
             "memory": memory,
             "memory_result": _dump(mem_result),
+            "agent_outcomes": _build_agent_outcomes(
+                state, memory_result=_dump(mem_result)
+            ),
             "final_response": state.get("final_response") or state.get("llm_response", ""),
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
@@ -1261,6 +1624,13 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             update["route"] = "memory"  # Stay at memory node, not escalate
             update["terminal_status"] = "accepted"  # Answer remains accepted
             update["verification_status"] = "verified_and_accepted"
+        update["agent_outcomes"] = _build_agent_outcomes(
+            state,
+            memory_result={
+                "status": "failed",
+                "reason": f"{type(exc).__name__}: {str(exc)[:160]}",
+            },
+        )
         return update
 
 
@@ -1340,7 +1710,9 @@ def build_verification_graph(
         "generate": _generate_node,
         "detector": _detector_node,
         "accept": _accept_node,
+        "claim_analyzer": _claim_analyzer_node,
         "verifier": _verifier_node,
+        "grounded_detector": _grounded_detector_node,
         "judge": _judge_node,
         "corrector": _corrector_node,
         "reverifier": _reverifier_node,
@@ -1364,13 +1736,17 @@ def build_verification_graph(
     graph.add_conditional_edges(
         "detector",
         _detector_route,
-        {"verifier": "verifier", "accept": "accept", "human_escalation": "human_escalation"},
+        {"verifier": "claim_analyzer", "accept": "accept", "human_escalation": "human_escalation"},
     )
+    # The Claim Analyzer sits between the Detector and the Verifier: it filters
+    # the draft down to factual claims, then hands off for retrieval + NLI.
+    graph.add_edge("claim_analyzer", "verifier")
     graph.add_conditional_edges(
         "verifier",
         _verifier_route,
-        {"judge": "judge", "human_escalation": "human_escalation"},
+        {"judge": "grounded_detector", "human_escalation": "human_escalation"},
     )
+    graph.add_edge("grounded_detector", "judge")
     graph.add_conditional_edges(
         "judge",
         _judge_route,
@@ -1431,6 +1807,7 @@ async def run_verification(
     active_agents = [
         "base_llm",
         "detector",
+        "claim_analyzer",
         "verifier",
         "judge",
         "corrector",

@@ -18,7 +18,7 @@ The `corrector_agent` is currently implemented as an Android/Kotlin application.
 - We will not alter the corrector agent's external JSON payload structure; it must seamlessly integrate with any existing pipeline interfaces.
 
 ## 3. Dataset Integration Plan
-**Source**: Three dataset files in `C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets` containing ~600 records.
+**Source**: Dataset files under `agents/corrector_agent/training/data` containing approximately 600 records in the referenced planning snapshot.
 **Data Processing**: 
 1. Load, validate, and deduplicate records across the three JSONL files.
 2. Split the ~600 records into `train` (80%), `validation` (10%), and `held-out test` (10%) splits.

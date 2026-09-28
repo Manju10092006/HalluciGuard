@@ -335,6 +335,14 @@ def test_query_expander_relations():
     queries_cap = expander.generate_search_queries("Paris is the capital of France", "general")
     assert any("capital of france" in q.lower() for q in queries_cap)
 
+    # Presentation Markdown from an LLM answer must not leak into retrieval.
+    queries_markdown = expander.generate_search_queries(
+        "Microsoft was founded by **Bill Gates** and **Paul Allen** in April\u202f1975.",
+        "general",
+    )
+    assert all("**" not in q for q in queries_markdown)
+    assert any(q.lower() == "microsoft founded by" for q in queries_markdown)
+
 
 # Test 16: DuplicateRemover URL-less title + source deduplication
 def test_duplicate_remover_title_source_fallback():

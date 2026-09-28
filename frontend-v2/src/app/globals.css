@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -6,93 +6,134 @@
 
 @layer base {
   :root {
-    --bg: #edeef5;
-    --surface: #ffffff;
-    --surface-sunken: #e5e7f0;
-    --surface-raised: #f6f7fb;
-    --border: rgba(20, 22, 40, 0.08);
-    --border-strong: rgba(20, 22, 40, 0.14);
-    --text-primary: #1c1c1e;
-    --text-secondary: #5f6472;
-    --text-muted: #9a9fad;
-    --accent: #6d5ef5;
-    --accent-hover: #5b4ee0;
-    --accent-soft: rgba(109, 94, 245, 0.12);
-    --accent-rgb: 109, 94, 245;
-    --supported: #3fae6a;
-    --supported-tint: #e9f7ef;
-    --contradicted: #e0645a;
-    --contradicted-tint: #fbeae9;
-    --insufficient: #d8a83b;
-    --insufficient-tint: #fbf3e1;
-    --uncertain: #8b7ca8;
-    --uncertain-tint: #f1edf7;
-    --atmosphere: radial-gradient(60% 40% at 50% 0%, rgba(109, 94, 245, 0.08), transparent 70%);
+    /* Neutral Manus/Watermelon editorial palette — Cotton ground, Night ink */
+    --bg: #F6F5F1;              /* Cotton — warm off-white ground */
+    --surface: #FFFFFF;
+    --surface-sunken: #F0EFEA;
+    --surface-raised: #FAF9F5;
+    --surface-hover: #EAE9E3;
+    --border: rgba(26, 26, 24, 0.09);
+    --border-strong: rgba(26, 26, 24, 0.16);
+    --text-primary: #1A1A18;    /* Night */
+    --text-secondary: #6B6B64;  /* Smokey Gray */
+    --text-muted: #9C9C93;      /* Platinum Silver */
+    --accent: #1A1A18;          /* near-black primary actions (no purple) */
+    --accent-hover: #000000;
+    --accent-soft: rgba(26, 26, 24, 0.05);
+    --accent-glow: rgba(26, 26, 24, 0.16);
+    --accent-tint: #8A7E6B;     /* warm editorial highlight for eyebrows/links */
+    --accent-rgb: 26, 26, 24;
+    /* Pastel category badges (Cofounder spec) */
+    --cat-engineering: #8B5CF6;   /* Lavender */
+    --cat-engineering-soft: rgba(139, 92, 246, 0.12);
+    --cat-build: #3B82F6;         /* Sky Blue */
+    --cat-build-soft: rgba(59, 130, 246, 0.12);
+    --cat-design: #10B981;        /* Mint Green */
+    --cat-design-soft: rgba(16, 185, 129, 0.12);
+    --cat-knowledge: #F43F5E;     /* Rose Pink */
+    --cat-knowledge-soft: rgba(244, 63, 94, 0.12);
+    --gold: #E9B51D;              /* Sunflower Gold status */
+    --gold-soft: rgba(233, 181, 29, 0.14);
+    /* Atmospheric shadow layers (Cofounder spec) */
+    --shadow-composer: 0 2px 4px rgba(0,0,0,0.03), 0 10px 28px rgba(0,0,0,0.035);
+    --shadow-pill: 0 1px 3px rgba(0, 0, 0, 0.03);
+    --shadow-hover-lift: 0 4px 12px rgba(0,0,0,0.04);
+    --supported: #3E8E5A;
+    --supported-tint: #ECF3ED;
+    --contradicted: #C2564A;
+    --contradicted-tint: #F6EAE7;
+    --insufficient: #B5862E;
+    --insufficient-tint: #F6F0DF;
+    --uncertain: #6E6E85;
+    --uncertain-tint: #EFEFF2;
+    --atmosphere: none;
     --space-y: 1;
 
-    --background: 232 25% 95%;
-    --foreground: 240 3% 11%;
+    --background: 45 20% 96%;
+    --foreground: 60 4% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 240 3% 11%;
+    --card-foreground: 60 4% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 3% 11%;
-    --primary: 240 3% 11%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 232 25% 92%;
-    --secondary-foreground: 240 3% 11%;
-    --muted: 232 25% 92%;
-    --muted-foreground: 225 9% 41%;
-    --accent-ui: 232 25% 92%;
-    --accent-foreground: 240 3% 11%;
-    --destructive: 4 68% 62%;
+    --popover-foreground: 60 4% 10%;
+    --primary: 60 4% 10%;
+    --primary-foreground: 45 20% 96%;
+    --secondary: 48 14% 93%;
+    --secondary-foreground: 60 4% 10%;
+    --muted: 48 14% 93%;
+    --muted-foreground: 55 5% 41%;
+    --accent-ui: 48 14% 93%;
+    --accent-foreground: 60 4% 10%;
+    --destructive: 6 50% 53%;
     --destructive-foreground: 0 0% 98%;
-    --border-ui: 232 15% 87%;
-    --input: 232 15% 87%;
-    --ring: 247 89% 66%;
+    --border-ui: 48 10% 88%;
+    --input: 48 10% 88%;
+    --ring: 60 4% 10%;
     --radius: 0.75rem;
   }
 
   .dark {
-    --bg: #0e0e13;
-    --surface: #17171f;
-    --surface-sunken: #1f1f29;
-    --surface-raised: #1b1b25;
-    --border: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.14);
-    --text-primary: #f2f2f5;
-    --text-secondary: #a1a1aa;
-    --text-muted: #6b6b76;
-    --accent: #8b7cf6;
-    --accent-hover: #a594ff;
-    --accent-soft: rgba(139, 124, 246, 0.16);
-    --accent-rgb: 139, 124, 246;
-    --supported-tint: rgba(63, 174, 106, 0.12);
-    --contradicted-tint: rgba(224, 100, 90, 0.12);
-    --insufficient-tint: rgba(216, 168, 59, 0.12);
-    --uncertain-tint: rgba(139, 124, 168, 0.14);
-    --atmosphere: radial-gradient(circle at 50% 20%, rgba(120, 90, 220, 0.18), transparent 60%);
+    --bg: #14130F;
+    --surface: #1D1C18;
+    --surface-sunken: #26251F;
+    --surface-raised: #201F1A;
+    --surface-hover: #302E27;
+    --border: rgba(255, 253, 245, 0.09);
+    --border-strong: rgba(255, 253, 245, 0.17);
+    --text-primary: #F4F2EA;
+    --text-secondary: #A8A69B;
+    --text-muted: #6F6D62;
+    --accent: #F4F2EA;
+    --accent-hover: #FFFFFF;
+    --accent-soft: rgba(244, 242, 234, 0.09);
+    --accent-glow: rgba(244, 242, 234, 0.14);
+    --accent-tint: #C9B79A;
+    --accent-rgb: 244, 242, 234;
+    /* Pastel category badges — softened for dark */
+    --cat-engineering: #9B7BD3;
+    --cat-engineering-soft: rgba(155, 123, 211, 0.16);
+    --cat-build: #67B8D4;
+    --cat-build-soft: rgba(103, 184, 212, 0.16);
+    --cat-design: #78C79B;
+    --cat-design-soft: rgba(120, 199, 155, 0.16);
+    --cat-knowledge: #D48CA4;
+    --cat-knowledge-soft: rgba(212, 140, 164, 0.16);
+    --gold: #E9B51D;
+    --gold-soft: rgba(233, 181, 29, 0.18);
+    --shadow-composer: 0 2px 6px rgba(0,0,0,0.4), 0 14px 40px rgba(0,0,0,0.5);
+    --shadow-pill: 0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow-hover-lift: 0 6px 16px rgba(0,0,0,0.5);
+    --supported: #5FBE82;
+    --supported-tint: rgba(95, 190, 130, 0.12);
+    --contradicted: #E27A6E;
+    --contradicted-tint: rgba(226, 122, 110, 0.12);
+    --insufficient: #D6A94A;
+    --insufficient-tint: rgba(214, 169, 74, 0.12);
+    --uncertain: #9A9AB0;
+    --uncertain-tint: rgba(154, 154, 176, 0.12);
+    --atmosphere: radial-gradient(circle at 50% 18%, rgba(255, 250, 240, 0.05), transparent 60%);
 
-    --background: 240 15% 6%;
-    --foreground: 240 10% 95%;
-    --card: 240 15% 11%;
-    --card-foreground: 240 10% 95%;
-    --popover: 240 15% 11%;
-    --popover-foreground: 240 10% 95%;
-    --primary: 240 10% 95%;
-    --primary-foreground: 240 15% 6%;
-    --secondary: 240 14% 14%;
-    --secondary-foreground: 240 10% 95%;
-    --muted: 240 14% 14%;
-    --muted-foreground: 240 5% 64%;
-    --accent-ui: 240 14% 16%;
-    --accent-foreground: 240 10% 95%;
-    --destructive: 4 68% 62%;
+    --background: 45 10% 7%;
+    --foreground: 48 18% 94%;
+    --card: 45 9% 11%;
+    --card-foreground: 48 18% 94%;
+    --popover: 45 9% 11%;
+    --popover-foreground: 48 18% 94%;
+    --primary: 48 18% 94%;
+    --primary-foreground: 45 10% 7%;
+    --secondary: 45 8% 16%;
+    --secondary-foreground: 48 18% 94%;
+    --muted: 45 8% 16%;
+    --muted-foreground: 48 6% 64%;
+    --accent-ui: 45 8% 18%;
+    --accent-foreground: 48 18% 94%;
+    --destructive: 8 62% 66%;
     --destructive-foreground: 0 0% 98%;
-    --border-ui: 240 10% 18%;
-    --input: 240 10% 18%;
-    --ring: 250 88% 73%;
+    --border-ui: 45 8% 20%;
+    --input: 45 8% 20%;
+    --ring: 48 18% 94%;
   }
 
+  /* Optional editorial accent tints (near-neutral, no purple by default) */
   [data-accent="teal"] { --accent: #2ba49a; --accent-hover: #23928a; --accent-soft: rgba(43, 164, 154, 0.14); --accent-rgb: 43, 164, 154; }
   [data-accent="coral"] { --accent: #e0645a; --accent-hover: #cf554b; --accent-soft: rgba(224, 100, 90, 0.14); --accent-rgb: 224, 100, 90; }
   [data-accent="graphite"] { --accent: #4b5563; --accent-hover: #374151; --accent-soft: rgba(75, 85, 99, 0.14); --accent-rgb: 75, 85, 99; }
@@ -105,7 +146,7 @@
     margin: 0;
     background: var(--bg);
     color: var(--text-primary);
-    font-family: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     font-size: 15px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
@@ -124,6 +165,60 @@
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 .hg-atmosphere { background: var(--atmosphere); }
+
+/* ============================================================
+   Architectural Sunlight & Window-Blind Motion Blur Atmosphere
+   (Cofounder / HalluciGuard editorial spec)
+   ============================================================ */
+.shadow-atmosphere {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  filter: blur(8px);
+}
+.shadow-atmosphere .sunlight-svg {
+  width: 110%;
+  height: 110%;
+  margin-top: -5%;
+  margin-left: -5%;
+  opacity: 0.9;
+  animation: motionBlurDrift 28s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+  will-change: transform, filter;
+}
+[data-theme="dark"] .shadow-atmosphere,
+.dark .shadow-atmosphere { opacity: 0.5; }
+
+@keyframes motionBlurDrift {
+  0% {
+    transform: translate(0px, 0px) rotate(0deg) scale(1);
+    filter: drop-shadow(-10px 5px 25px rgba(0,0,0,0.04));
+  }
+  50% {
+    transform: translate(-25px, 15px) rotate(0.8deg) scale(1.025);
+    filter: drop-shadow(-20px 10px 35px rgba(0,0,0,0.06));
+  }
+  100% {
+    transform: translate(-45px, 28px) rotate(1.5deg) scale(1.04);
+    filter: drop-shadow(-35px 18px 45px rgba(0,0,0,0.07));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shadow-atmosphere .sunlight-svg { animation: none; }
+}
+
+/* Pastel category badges */
+.hg-cat-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  border-radius: 999px; padding: 2px 8px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.01em;
+}
+.hg-cat-badge[data-cat="engineering"] { color: var(--cat-engineering); background: var(--cat-engineering-soft); }
+.hg-cat-badge[data-cat="build"] { color: var(--cat-build); background: var(--cat-build-soft); }
+.hg-cat-badge[data-cat="design"] { color: var(--cat-design); background: var(--cat-design-soft); }
+.hg-cat-badge[data-cat="knowledge"] { color: var(--cat-knowledge); background: var(--cat-knowledge-soft); }
+.hg-cat-badge[data-cat="gold"] { color: #7a5e08; background: var(--gold-soft); }
 
 .hg-grain::after {
   content: "";

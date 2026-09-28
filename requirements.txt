@@ -25,6 +25,7 @@ anyio>=4.0.0,<5.0.0
 # Detector and verifier runtime
 torch>=2.1.0
 transformers>=4.36.0,<5.0.0
+typer>=0.12.0,<1.0.0
 sentence-transformers>=2.2.0
 accelerate>=0.21.0
 datasets>=2.14.0
@@ -45,3 +46,6 @@ prometheus-client>=0.17.0
 # the language model cannot be loaded.
 spacy>=3.8.0
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+# Web evidence retrieval
+tavily-python>=0.3.0

@@ -161,7 +161,7 @@ class CorrectorAgent:
         generator: Optional[Generator] = None,
         scorer: Optional[EntailmentScorer] = None,
     ) -> None:
-        self.config = config or CorrectorConfig()
+        self.config = config or CorrectorConfig.from_env()
         self._generator = generator
         self._scorer = scorer
 
@@ -260,4 +260,4 @@ def run_correction(
     request: RequestLike, config: Optional[CorrectorConfig] = None
 ) -> CorrectionResult:
     """Module-level convenience wrapper around ``CorrectorAgent.correct``."""
-    return CorrectorAgent(config).correct(request)
+    return CorrectorAgent(config or CorrectorConfig.from_env()).correct(request)

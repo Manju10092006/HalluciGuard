@@ -176,14 +176,41 @@ async def test_request_payload_serialization():
         call_kwargs = mock_post.call_args.kwargs
         payload = call_kwargs.get("json")
 
-        assert payload == {
-            "claim": "The Eiffel Tower is in Paris.",
-            "domain": "geography",
+    assert payload == {
+        "claim": "The Eiffel Tower is in Paris.",
+        "domain": "geography",
             "retrieval_mode": "hybrid",
             "force_tavily": False,
             "max_results": 3,
-            "request_id": "req-custom-99",
-        }
+        "request_id": "req-custom-99",
+    }
+
+
+@pytest.mark.asyncio
+async def test_request_payload_includes_deduplicated_search_queries():
+    """Verifier-generated factual queries reach n8n instead of being discarded."""
+    client = N8NRetrievalClient(auth_mode="none")
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = httpx.Response(200, json={"evidence": []})
+
+        await client.retrieve_evidence(
+            claim="Snehith is the founder of Microsoft.",
+            queries=[
+                "Snehith is the founder of Microsoft.",
+                "Microsoft founder",
+                "Microsoft founder",
+                "Who founded Microsoft?",
+                "ignored fourth query",
+            ],
+        )
+
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["queries"] == [
+            "Snehith is the founder of Microsoft.",
+            "Microsoft founder",
+            "Who founded Microsoft?",
+        ]
 
 
 @pytest.mark.asyncio
@@ -365,9 +392,16 @@ async def test_pipeline_uses_n8n_evidence_and_runs_python_bge_nli():
             )
         ],
     )
+    isolated_adapter = MagicMock()
+    isolated_adapter.name = "isolated-test-adapter"
+    isolated_adapter.last_retrieval_trace = None
+    isolated_adapter.search = AsyncMock(return_value=[])
+    isolated_registry = MagicMock()
+    isolated_registry.get_adapter.return_value = isolated_adapter
 
     with patch.object(pipeline.cache, "get", new_callable=AsyncMock, return_value=None), \
-         patch.object(pipeline.n8n_client, "retrieve_evidence", new_callable=AsyncMock) as mock_retrieve:
+         patch.object(pipeline.n8n_client, "retrieve_evidence", new_callable=AsyncMock) as mock_retrieve, \
+         patch("api.pipeline.get_registry", return_value=isolated_registry):
         mock_retrieve.return_value = mock_n8n_result
 
         payload = VerifierInputV2(

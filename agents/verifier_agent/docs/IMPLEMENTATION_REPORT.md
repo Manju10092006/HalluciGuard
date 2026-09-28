@@ -373,7 +373,7 @@ The framework is shared, but each domain has independent routing metadata.
 
 Source file:
 
-- `C:\Users\S.Manjunath Reddy\.codex\attachments\e3e45b46-78e3-455b-9275-5c88b46bf9b3\pasted-text.txt`
+- Repository-owner project specification supplied during implementation (local attachment path intentionally omitted)
 
 Used for:
 
@@ -391,7 +391,7 @@ Used for:
 
 Source file:
 
-- `C:\Users\S.Manjunath Reddy\Downloads\Browse APIs.txt`
+- Repository-owner API notes supplied during implementation (local path intentionally omitted)
 
 Used for official source/API selection, especially:
 
@@ -416,7 +416,7 @@ Used for official source/API selection, especially:
 
 Source file:
 
-- `C:\Users\S.Manjunath Reddy\Downloads\Hugging Face's logo.txt`
+- Repository-owner Hugging Face model notes supplied during implementation (local path intentionally omitted)
 
 Used for model selection, especially:
 

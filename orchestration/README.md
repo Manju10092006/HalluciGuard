@@ -1,348 +1,74 @@
-# 🕸️ HalluciGuard LangGraph Orchestration
+# LangGraph orchestration
 
-> **FastAPI → Base LLM → LangGraph Supervisor → Agents → Structured Result**
+`orchestration/` is HalluciGuard's control plane. It owns execution order, canonical state, bounded retries, terminal routing, errors, trace events, and the product FastAPI surface. It does not decide factual truth by itself.
 
-The `orchestration/` package is the control plane of HalluciGuard. It coordinates agent execution, shared state, conditional routing, retries, failures, observability and inter-agent communication.
-
-**LangGraph is the workflow runtime. It is not the Judge Agent.**
-
----
-
-## 🎯 Current Active Path
-
-The production-safe default runs every generated answer through the evidence pipeline:
+## Actual production graph
 
 ```mermaid
 flowchart TD
-    START([START]) --> G[OpenRouter draft]
-    G --> D[Detector]
-    D --> V[Verifier]
-    V --> J[Judge]
-    J -->|ACCEPT| M[Memory boundary]
-    J -->|CORRECT| C[Corrector]
-    C --> R[Re-verifier]
-    R --> J
-    J -->|REJECT| X[Reject]
-    J -->|ABSTAIN| H[Human review]
-    X --> M
+    START --> G[generate]
+    G -->|success| DT[detector: pre-retrieval triage]
+    G -->|failure| H[human_escalation]
+    DT -->|verify, production default| CA[claim_analyzer]
+    DT -->|explicit fast path| A[accept]
+    CA --> V[verifier]
+    V -->|success| DG[grounded_detector]
+    V -->|failure| H
+    DG --> J[judge]
+    J -->|ACCEPT| M[memory]
+    J -->|VERIFY_AGAIN, budget available| V
+    J -->|CORRECT| C[corrector]
+    J -->|REJECT| R[reject]
+    J -->|ABSTAIN / exhausted retry| H
+    C -->|candidate| RV[reverifier]
+    C -->|failure| R
+    RV -->|executed| J
+    RV -->|failure| H
+    A --> M
+    R --> M
     H --> M
-    M --> E([END])
+    M --> END
 ```
 
-### Active components
+The Detector executes twice. Before retrieval it performs sentence triage and routes factual content without inventing a truth probability. After Verifier evidence exists, `grounded_detector` loads `artifacts/detector-best`, executes calibrated inference, and replaces the triage result before Judge.
 
-- OpenRouter Base LLM / draft generation.
-- Detector Agent.
-- Verifier Agent.
-- Judge Agent.
-- Corrector Agent (OpenRouter-backed by default).
-- Re-verifier.
-- Memory Agent.
-- LangGraph Supervisor.
-- Structured Inter-Agent Bus.
+## Package map
 
-The n8n retrieval workflow is currently paused. Retrieval, reranking, NLI, and
-scoring run through the Python Verifier path. A detector fast path exists only
-as an explicit operator opt-in; production defaults to full verification.
+| File | Responsibility |
+|---|---|
+| `graph.py` | Nodes, conditional edges, retries, correction/reverification loop, terminal state |
+| `state.py` | `HalluciGuardState`, trace, error and inter-agent bus helpers |
+| `schemas.py` | Canonical Detector, Verifier, Judge, Corrector, ReVerifier and Memory contracts |
+| `detector_bridge.py` | Single adapter for triage and grounded trained-model execution |
+| `api.py` | Authentication, history, health, `/verify`, and `/api/v1/verify` |
+| `auth.py` | SQLite account/history support and JWT handling |
+| `runtime_validation.py` | Configuration, detector artifact and verifier runtime checks |
+| `intent.py` | Query intent/domain support |
+| `scripts/verify_e2e.py` | Command-line E2E helper |
+| `tests/` | Graph, contract, failure, retry and integration regressions |
 
----
+## State and contracts
 
-## 🧠 What the Supervisor Does
+`HalluciGuardState` carries request IDs, query, candidate response, claim analysis, detector results, Verifier reports, Judge decision, correction/reverification state, memory result, retry counters, errors, bus messages and trace events.
 
-The Supervisor answers:
+Pydantic contracts in `schemas.py` are the authoritative inter-agent boundary. Legacy dictionaries remain for compatibility and human-readable display. Unknown verdicts and invalid states fail closed rather than being converted into success.
 
-> **“Which component should execute next?”**
+## Routing invariants
 
-It controls:
+- `ALWAYS_VERIFY=true` is the production default.
+- A Detector fast path requires `ALLOW_DETECTOR_FAST_PATH=true` and `ALWAYS_VERIFY=false`.
+- `VERIFY_AGAIN` is bounded by `max_retries`.
+- `CORRECT` is bounded by the correction attempt budget.
+- Corrected content must pass ReVerifier before Judge may accept it.
+- Every terminal route crosses Memory, but Memory writes only Judge-accepted verified facts.
+- Model and retrieval failures end in rejection or human review, never a verified-looking result.
 
-- lifecycle routing;
-- conditional transitions;
-- retry budget;
-- failure handling;
-- terminal state;
-- execution trace.
+## API
 
-It does **not** determine whether a factual claim is true.
-
-That job belongs to the Verifier and Judge.
-
----
-
-## 🔄 Shared State
-
-`orchestration.state.HalluciGuardState` is the common contract between nodes.
-
-It carries information such as:
-
-```text
-execution_id
-request_id
-user_query
-draft_response
-generation metadata
-detector output
-claims
-evidence
-retrieved / ranked evidence
-NLI results
-memory output
-retry state
-errors
-trace
-inter-agent bus
-terminal status
+```powershell
+uvicorn orchestration.api:app --host 0.0.0.0 --port 8000
 ```
 
-The goal is to prevent agents from passing unstructured one-off dictionaries directly to one another.
+The product request accepts a `user_query`, `generation_mode`, and optional domain/history fields. Supplying an existing `llm_response` remains a compatibility/testing path; the query-only demo invokes the Base LLM normally.
 
----
-
-## 🔄 Inter-Agent Communication Bus
-
-`orchestration/interbus.py` provides a lightweight in-process event/message layer backed by the shared graph state.
-
-Each message contains:
-
-```text
-message_id
-execution_id
-source_agent
-target_agent
-message_type
-payload
-timestamp
-status
-```
-
-Example:
-
-```json
-{
-  "source_agent": "detector",
-  "target_agent": "verifier",
-  "message_type": "SUSPICIOUS_CLAIMS",
-  "payload": {
-    "risk_level": "HIGH",
-    "hallucination_probability": 0.91
-  }
-}
-```
-
-This provides a traceable communication contract without introducing distributed brokers that the current project does not need.
-
----
-
-## 🧩 Current Graph Semantics
-
-### Generation
-
-The Base LLM produces the candidate draft.
-
-A generation failure must stop the trust pipeline cleanly. Detector must never receive an empty/fake response.
-
-### Detector
-
-The existing `DetectorAgent.detect(user_query, draft_response)` contract is reused.
-
-- All risk levels → Verifier by default.
-- A LOW-risk fast path is available only when `ALLOW_DETECTOR_FAST_PATH=true`
-  and `ALWAYS_VERIFY=false` are both set deliberately.
-
-### Verifier
-
-The existing `VerificationPipeline.verify(...)` is reused. Its retrieval, ranking, NLI and evidence logic stay inside the Verifier.
-
-### Memory
-
-Memory can persist appropriate verified facts and preserve system history.
-
-Unverified/degraded content must not silently become trusted factual knowledge.
-
----
-
-## 🔁 Retry Logic
-
-Retries are bounded by configuration.
-
-Conceptually:
-
-```text
-Judge requests another verification
-      ↓
-retry_count < MAX_RETRIES ?
-      ├── yes → Verifier again
-      └── no  → human review
-```
-
-There must never be an infinite verification loop.
-
----
-
-## 🚨 Failure Semantics
-
-A failed component must stay failed.
-
-Examples:
-
-```text
-LLM unavailable       → generation_failed
-Detector unavailable  → detector_failed
-Verifier unavailable  → bounded retry / failure
-NLI unavailable       → degraded NLI, never fake evidence
-Memory write failure  → preserve error / partial state
-```
-
-Do not replace an exception with an artificial success result.
-
----
-
-## 📊 Observability
-
-Each important node should contribute trace information such as:
-
-```text
-node
-status
-timestamp
-latency_ms
-retry_count
-details
-```
-
-The execution should also expose:
-
-- `execution_id`;
-- `request_id`;
-- structured errors;
-- bus messages;
-- terminal status.
-
-This trace is the backend source for the authenticated frontend verification view.
-
----
-
-## 🔌 API
-
-The orchestration layer is exposed through FastAPI.
-
-Canonical endpoint:
-
-```text
-POST /verify
-```
-
-A compatibility `/api/v1/verify` route may call the same backend implementation when required by the frontend contract.
-
-Example product request:
-
-```json
-{
-  "user_query": "What is the capital of France?",
-  "generation_mode": "normal"
-}
-```
-
-Backward-compatible internal testing can supply an existing `llm_response` instead of invoking the Base LLM.
-
-The response includes structured generation, Detector, Verifier, Judge,
-Corrector, Re-verifier, and Memory information plus trace/error metadata.
-
----
-
-## 🧪 Testing Strategy
-
-Separate these categories:
-
-```text
-Unit Tests
-Contract Tests
-Model Runtime Tests
-Agent Integration Tests
-Real E2E Tests
-Browser E2E Tests
-```
-
-A deterministic routing test is not a real production E2E test.
-
-The strongest real E2E milestone for the current active graph is:
-
-```text
-Base LLM → Detector → Verifier → Judge
-                              ├─ ACCEPT → Memory
-                              └─ CORRECT → Corrector → Re-verifier → Judge
-```
-
----
-
-## 🗺️ Active Architecture
-
-```text
-Base LLM
-   ↓
-Detector
-   ↓
-Verifier
-   ↓
-Judge
-   ├── ACCEPT
-   ├── VERIFY_AGAIN
-   ├── CORRECT
-   ├── REJECT
-   └── ESCALATE_HUMAN
-          ↓
-      Corrector / Human
-          ↓
-        Memory
-```
-
-Judge and Corrector are active. Their failures and exhausted retry budgets fail
-closed to rejection or human review, and every terminal outcome crosses the
-Memory boundary for audit without persisting unverified facts.
-
----
-
-## 📂 Package Map
-
-```text
-orchestration/
-├── graph.py                 # StateGraph and active node wiring
-├── state.py                 # Shared typed state / trace helpers
-├── supervisor.py            # Control-plane routing
-├── interbus.py              # Structured inter-agent messages
-├── api.py                   # FastAPI endpoints
-├── runtime_validation.py    # Startup/model checks
-├── scripts/                 # E2E and utility scripts
-└── tests/                   # Contract / execution / validation tests
-```
-
----
-
-## 🚦 Current Status
-
-```text
-Shared State             ✅
-Supervisor               ✅
-Inter-Agent Bus          ✅
-Bounded Retry            ✅
-Trace / Audit             ✅
-Active Detector           ✅
-Active Verifier           ✅
-Active Judge              ✅
-Active Corrector          ✅ OpenRouter generator
-Active Re-verifier        ✅
-Active Memory             ✅
-Base LLM integration      ✅ OpenRouter configuration required
-Frontend integration      ✅ marketing + authenticated chat workspace
-n8n retrieval             ⏸ paused
-```
-
----
-
-## 🔗 Related Documentation
-
-- [Root HalluciGuard README](../README.md)
-- [Detector Agent](../agents/detector_agent/README.md)
-- [Verifier Agent](../agents/verifier_agent/README.md)
-- [Judge Agent](../agents/judge_agent/README.md)
-- [Corrector Agent](../agents/corrector_agent/README.md)
-- [Memory Agent](../agents/memory_agent/README.md)
+See [`../docs/api.md`](../docs/api.md) and [`../docs/architecture.md`](../docs/architecture.md).

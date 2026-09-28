@@ -23,6 +23,23 @@ export function VerificationComposer({ onSend, busy, variant = "hero", initialTe
 
   useEffect(() => { if (initialText) { setText(initialText); ref.current?.focus(); } }, [initialText]);
   useEffect(() => {
+    const handleSetDraft = (e) => {
+      if (e.detail?.text) {
+        setText(e.detail.text);
+        setTimeout(() => ref.current?.focus(), 50);
+      }
+    };
+    const handleFocus = () => {
+      ref.current?.focus();
+    };
+    window.addEventListener("hg:set-composer-draft", handleSetDraft);
+    window.addEventListener("hg:focus-composer", handleFocus);
+    return () => {
+      window.removeEventListener("hg:set-composer-draft", handleSetDraft);
+      window.removeEventListener("hg:focus-composer", handleFocus);
+    };
+  }, []);
+  useEffect(() => {
     if (text) return undefined;
     const t = setInterval(() => setPh((p) => (p + 1) % PLACEHOLDERS.length), 4200);
     return () => clearInterval(t);

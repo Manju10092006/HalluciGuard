@@ -8,7 +8,15 @@ import os
 import json
 import io
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+# Force UTF-8 so the ✅/emoji output renders on a Windows console when this file
+# is run standalone (`python test_judge.py`). Use reconfigure(), NOT a fresh
+# TextIOWrapper around sys.stdout.buffer: under pytest's output capture sys.stdout
+# is not a real reconfigurable stream, and wrapping its buffer closes the
+# underlying file and crashes capture teardown for the whole session.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
@@ -220,16 +228,31 @@ assert len(cr5.contradictory_evidence) == 1
 assert "Modify only the 1 claim(s)" in cr5.correction_instructions
 print("✅ PASSED — CorrectionRequest payload conforms strictly to Pydantic schema.")
 
-# TEST 7 (Test H): Reverification Gate Evaluation
-print("\n[TEST 7] Reverification Gate Evaluation (passed=True vs passed=False)")
+# TEST 7 (Test H): Reverification Gate Evaluation — bounded-retry semantics.
+# A passed re-verification (no remaining contradiction) ACCEPTs. A FAILED
+# re-verification does NOT hard-REJECT on the spot: while the correction retry
+# budget remains it routes back to CORRECT for one more bounded repair pass, and
+# only once the budget (max_verification_retries) is exhausted does it REJECT and
+# roll back to the safe blocked outcome. That bounded loop is what stops the
+# pipeline from either looping forever or slamming a still-fixable answer straight
+# to rejection / endless human review.
+print("\n[TEST 7] Reverification Gate Evaluation (pass -> ACCEPT; fail -> retry then REJECT)")
 rev_pass = ReverificationResult(passed=True, verifier_result=vr1, remaining_contradictions=0)
 r_pass = judge.evaluate(verifier_result=vr1, reverification_result=rev_pass)
 assert str_val(r_pass.decision) == "ACCEPT", f"Expected ACCEPT for passed reverification, got {r_pass.decision}"
 
 rev_fail = ReverificationResult(passed=False, verifier_result=vr2, remaining_contradictions=1)
-r_fail = judge.evaluate(verifier_result=vr2, reverification_result=rev_fail)
-assert str_val(r_fail.decision) == "REJECT", f"Expected REJECT for failed reverification, got {r_fail.decision}"
-print(f"✅ PASSED — Reverification Pass: {str_val(r_pass.decision)} | Fail: {str_val(r_fail.decision)}")
+# Budget remaining (retry_count=0 < max_verification_retries) -> another bounded correction pass.
+r_fail_retry = judge.evaluate(verifier_result=vr2, reverification_result=rev_fail, retry_count=0)
+assert str_val(r_fail_retry.decision) == "CORRECT", f"Expected CORRECT (retry) while budget remains, got {r_fail_retry.decision}"
+assert r_fail_retry.correction_request is not None, "A retry pass must carry a CorrectionRequest"
+
+# Budget exhausted (retry_count == max_verification_retries) -> safe REJECT.
+exhausted = judge.config.max_verification_retries
+r_fail_final = judge.evaluate(verifier_result=vr2, reverification_result=rev_fail, retry_count=exhausted)
+assert str_val(r_fail_final.decision) == "REJECT", f"Expected REJECT once retry budget is exhausted, got {r_fail_final.decision}"
+assert r_fail_final.correction_request is None
+print(f"✅ PASSED — Pass: {str_val(r_pass.decision)} | Fail(retry): {str_val(r_fail_retry.decision)} | Fail(exhausted): {str_val(r_fail_final.decision)}")
 
 # TEST 8: Invalid Input / Safe Failure Handling
 print("\n[TEST 8] Safe Failure Handling on Invalid / Null VerifierResult")

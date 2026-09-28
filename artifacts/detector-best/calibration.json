@@ -1,0 +1,5 @@
+{
+  "temperature": 0.7586129307746887,
+  "hallucination_threshold": 0.6216216216216217,
+  "max_length": 256
+}

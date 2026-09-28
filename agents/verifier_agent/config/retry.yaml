@@ -20,6 +20,15 @@ adapters:
   arxiv:
     max_retries: 3
     timeout_seconds: 8.0
+  semanticscholar:
+    # Keyless Semantic Scholar shares a tiny public rate-limit pool and 429s
+    # constantly. Retrying inside a single request never clears it (the window
+    # is seconds-to-minutes) and just multiplies latency across every expanded
+    # query, so treat 429 as non-retryable here and fail fast to the other
+    # research sources. A short circuit-breaker in the adapter stops repeat calls.
+    max_retries: 1
+    timeout_seconds: 6.0
+    retry_on_status: [500, 502, 503, 504]
   mitre_attack:
     max_retries: 2
     timeout_seconds: 15.0

@@ -9,35 +9,48 @@ VERIFIER_DIR = Path(__file__).resolve().parents[2] / "agents" / "verifier_agent"
 if str(VERIFIER_DIR) not in sys.path:
     sys.path.insert(0, str(VERIFIER_DIR))
 
-from agents.detector_agent.halueval_inference import validate_halueval_model_reference
+from orchestration.runtime_validation import validate_detector_model_reference
 from agents.verifier_agent.nli.entailment import NLIEngine
 from agents.verifier_agent.api.pipeline import VerificationPipeline
 from agents.verifier_agent.schemas.models import Passage
 
 
-def test_detector_model_validation_rejects_missing_local_path(tmp_path):
-    missing = tmp_path / "missing-detector"
-    with pytest.raises(
-        FileNotFoundError, match="HaluEval detector model directory not found"
-    ):
-        validate_halueval_model_reference(str(missing))
+def test_detector_model_validation_ok_when_artifact_complete():
+    """The package and every required local model artifact must be present."""
+    result = validate_detector_model_reference()
+    assert result.ok is True
+    assert result.component == "detector"
+    md = result.metadata
+    assert md["detector"] == "halluciguard_detector"
+    assert md["model_source"] == "local_safetensors"
+    assert md["grounding_required"] is True
+    assert md["missing_files"] == []
 
 
-def test_detector_model_validation_rejects_incomplete_local_path(tmp_path):
-    model_dir = tmp_path / "detector"
-    model_dir.mkdir()
-    (model_dir / "config.json").write_text("{}")
-    with pytest.raises(
-        FileNotFoundError, match="Missing required Hugging Face artifact"
-    ):
-        validate_halueval_model_reference(str(model_dir))
+def test_detector_model_validation_fails_closed_when_artifact_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("HALLUCIGUARD_DETECTOR_MODEL", str(tmp_path))
+    result = validate_detector_model_reference()
+    assert result.ok is False
+    assert result.component == "detector"
+    assert "incomplete" in result.detail.lower()
+    assert "model.safetensors" in result.metadata["missing_files"]
 
 
-def test_detector_model_validation_accepts_huggingface_identifier():
-    assert (
-        validate_halueval_model_reference("hf://org/halluciguard-detector")
-        == "org/halluciguard-detector"
-    )
+def test_detector_model_validation_fails_closed_when_package_unimportable(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kwargs):
+        if name == "halluciguard_detector" or name.startswith("halluciguard_detector."):
+            raise ImportError("simulated missing halluciguard_detector package")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    result = validate_detector_model_reference()
+    assert result.ok is False
+    assert result.component == "detector"
+    assert "not importable" in result.detail.lower()
 
 
 def test_nli_unavailable_is_degraded_not_uniform_success(monkeypatch):

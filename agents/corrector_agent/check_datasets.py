@@ -2,7 +2,7 @@ import json
 import os
 import glob
 
-DATASETS_DIR = r"C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets"
+DATASETS_DIR = "agents/corrector_agent/training/data"
 
 print(f"Files in {DATASETS_DIR}:")
 for filepath in glob.glob(os.path.join(DATASETS_DIR, '*.jsonl')):

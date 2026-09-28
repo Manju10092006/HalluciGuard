@@ -2,7 +2,7 @@ import os
 import json
 import random
 
-DATASETS_DIR = r"C:\Users\PENDYAL GAURAV\Documents\SDC-II\Datasets"
+DATASETS_DIR = "agents/corrector_agent/training/data"
 OUTPUT_DIR = "training/data"
 
 def process_datasets():

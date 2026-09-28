@@ -6,7 +6,7 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"Instrument Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ['"Inter"', "ui-sans-serif", "system-ui", "sans-serif"],
         serif: ['"Instrument Serif"', "Georgia", "serif"],
         mono: ['"JetBrains Mono"', "ui-monospace", "monospace"],
       },
@@ -41,8 +41,10 @@ module.exports = {
       },
       borderRadius: { lg: "var(--radius)", md: "calc(var(--radius) - 2px)", sm: "calc(var(--radius) - 4px)" },
       boxShadow: {
-        hg: "0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)",
+        hg: "0 2px 4px rgba(0,0,0,0.03), 0 10px 28px rgba(0,0,0,0.035)",
         "hg-lg": "0 2px 4px rgba(0,0,0,0.05), 0 24px 64px rgba(0,0,0,0.10)",
+        "hg-pill": "0 1px 3px rgba(0,0,0,0.03)",
+        "hg-lift": "0 4px 12px rgba(0,0,0,0.04)",
       },
       keyframes: {
         "accordion-down": { from: { height: "0" }, to: { height: "var(--radix-accordion-content-height)" } },

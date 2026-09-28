@@ -452,6 +452,26 @@ class JudgeResult(BaseModel):
         default=None,
         description="Targeted correction payload if decision == CORRECT, else None.",
     )
+    decision_basis: str = Field(
+        default="",
+        description=(
+            "Machine-readable reason code identifying the precedence rule that "
+            "produced this decision (e.g. CONTRADICTION_PRESENT, "
+            "ALL_CLAIMS_VERIFIED, PERIPHERAL_UNVERIFIED_TOLERATED, "
+            "CORE_UNVERIFIED_RETRY, CORE_UNVERIFIED_ABSTAIN). Stable for metrics "
+            "and audit; never a factual claim about the response."
+        ),
+    )
+    decision_metrics: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Structured, machine-readable counts backing the decision (spec §3/§25): "
+            "verified_claims, contradicted_claims, unverified_claims, "
+            "material_contradictions, material_unknowns, and detector_role "
+            "('triage_only' — the detector is never factual evidence). Purely "
+            "observational; the decision itself is produced by the precedence tree."
+        ),
+    )
     status: ExecutionStatus = Field(
         default=ExecutionStatus.COMPLETED,
         description="Status of the judge agent evaluation.",
@@ -491,6 +511,18 @@ class CorrectionResult(BaseModel):
         default=ExecutionStatus.COMPLETED,
         description="Overall execution status of the corrector.",
     )
+    failure_category: Optional[str] = Field(
+        default=None,
+        description=(
+            "When status=FAILED, the diagnostic class of the failure: "
+            "LLM_PROVIDER_FAILURE, NO_LOCATABLE_CLAIM, MODEL_ECHO, NO_OP_MATCH, "
+            "or OTHER. None on success."
+        ),
+    )
+    provider_used: Optional[str] = Field(
+        default=None,
+        description="Hosted LLM provider that served the correction, if any.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -517,6 +549,15 @@ class ReverificationResult(BaseModel):
     status: ExecutionStatus = Field(
         default=ExecutionStatus.COMPLETED,
         description="Status of the reverification process.",
+    )
+    failure_category: Optional[str] = Field(
+        default=None,
+        description=(
+            "When passed=False, the machine-readable class of the re-verification "
+            "failure (spec §25): REMAINING_CONTRADICTION, DEGRADED_REVERIFICATION "
+            "(retrieval could not re-ground the corrected answer), "
+            "CLAIM_DECOMPOSITION_FAILED, or VERIFIER_FAILURE. None when passed."
+        ),
     )
 
 

@@ -477,6 +477,64 @@ def test_preserved_claims_are_located_before_targeting():
     assert "S2" in plan.locked_sentence_ids
 
 
+def test_colocated_different_assertions_still_correct():
+    """Contract example — a DIFFERENT preserved assertion sharing one sentence
+    with an authorized correction must NOT suppress the correction.
+
+    "Java was created by Snehith in 1995." carries a contradicted creator
+    (authorized for correction) and a verified year (authorized for
+    preservation) in a single sentence. The coarse sentence span is shared, but
+    correction authorization must win: the target survives and the sentence is
+    NOT reported as locked (so reconstruction can splice it).
+    """
+    text = "Java was created by Snehith in 1995."
+    plan = _plan(
+        text,
+        correct=[_claim("c-creator", "Java was created by Snehith")],
+        preserve=[_claim("p-year", "Java was released in 1995", "verified")],
+    )
+    assert [t.sentence_id for t in plan.targets] == ["S1"]
+    assert "S1" not in plan.locked_sentence_ids
+    assert not any(
+        s.reason == SkipReason.SPAN_LOCKED_BY_PRESERVED_CLAIM.value
+        for s in plan.skipped_claims
+    )
+
+
+def test_colocated_same_assertion_text_stays_locked():
+    """The SAME assertion (identical normalized text) in both lists on one
+    sentence is a Judge contradiction the Corrector must not resolve: it stays
+    locked and is skipped, even though the claim_ids differ."""
+    text = "The sky is blue. Grass is green."
+    plan = _plan(
+        text,
+        correct=[_claim("cX", "The sky is blue.")],
+        preserve=[_claim("cY", "The sky is blue.", "verified")],
+    )
+    assert plan.targets == []
+    assert plan.locked_sentence_ids == ["S1"]
+    assert (
+        plan.skipped_claims[0].reason
+        == SkipReason.SPAN_LOCKED_BY_PRESERVED_CLAIM.value
+    )
+
+
+def test_colocated_correction_leaves_other_locked_sentences_intact():
+    """Unlocking a co-located sentence must not leak into unrelated locked
+    sentences: a preserved-only sentence elsewhere stays locked and untargeted."""
+    text = "Java was created by Snehith in 1995. Python is interpreted."
+    plan = _plan(
+        text,
+        correct=[_claim("c-creator", "Java was created by Snehith")],
+        preserve=[
+            _claim("p-year", "Java was released in 1995", "verified"),
+            _claim("p-py", "Python is interpreted.", "verified"),
+        ],
+    )
+    assert [t.sentence_id for t in plan.targets] == ["S1"]
+    assert plan.locked_sentence_ids == ["S2"]
+
+
 # ---------------------------------------------------------------------------
 # Multiple claims / merging / plan integrity
 # ---------------------------------------------------------------------------

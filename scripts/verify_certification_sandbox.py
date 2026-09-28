@@ -10,7 +10,7 @@ line per case.
 
 Use it as an instant "are the guards wired correctly" check before the full
 Windows live validation. It proves the guard *logic*; it does NOT prove real
-model execution (that requires the live A-H run in LIVE_VALIDATION_WINDOWS.md).
+model execution (that requires the live A-H run in docs/reports/LIVE_VALIDATION_WINDOWS.md).
 
     python scripts/verify_certification_sandbox.py
 

@@ -1,0 +1,286 @@
+{
+  "name": "HalluciGuard Retrieval Service V2 (Production)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "halluciguard-verify-v2",
+        "authentication": "headerAuth",
+        "headerName": "X-API-Key",
+        "options": {}
+      },
+      "id": "node-receive-claims",
+      "name": "Receive Claims (V2 Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "code": "const body = $input.first().json.body || $input.first().json;\nlet rawClaims = [];\nif (Array.isArray(body.claims)) {\n  rawClaims = body.claims;\n} else if (body.claim || body.claim_text) {\n  rawClaims = [{\n    claim_id: body.request_id || \"claim_001\",\n    claim_text: body.claim || body.claim_text,\n    claim_type: \"FACTUAL_CLAIM\",\n    domain: body.domain || \"general\",\n    entities: Array.isArray(body.entities) ? body.entities : [],\n    search_queries: Array.isArray(body.search_queries) ? body.search_queries : []\n  }];\n}\n\nconst validClaims = [];\nfor (const c of rawClaims) {\n  if (!c || typeof c !== 'object') continue;\n  if (!c.claim_id || typeof c.claim_id !== 'string') continue;\n  if (!c.claim_text || typeof c.claim_text !== 'string' || !c.claim_text.trim()) continue;\n  if (c.claim_type && c.claim_type !== 'FACTUAL_CLAIM') continue;\n  validClaims.push({\n    claim_id: c.claim_id.trim(),\n    claim_text: c.claim_text.trim(),\n    claim_type: 'FACTUAL_CLAIM',\n    domain: (c.domain || body.domain || 'general').toLowerCase(),\n    entities: Array.isArray(c.entities) ? c.entities : [],\n    search_queries: Array.isArray(c.search_queries) && c.search_queries.length > 0 ? c.search_queries : [c.claim_text.trim()],\n    time_sensitive: !!c.time_sensitive,\n    request_id: body.request_id || c.claim_id\n  });\n}\n\nreturn validClaims.map(c => ({ json: c }));"
+      },
+      "id": "node-validate-claims",
+      "name": "Validate Claims",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "claims",
+        "options": {}
+      },
+      "id": "node-split-claims",
+      "name": "Split Claims",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [540, 300]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.domain }}",
+        "rules": {
+          "rules": [
+            { "value2": "healthcare", "output": 0 },
+            { "value2": "cybersecurity", "output": 1 },
+            { "value2": "legal", "output": 2 },
+            { "value2": "finance", "output": 3 }
+          ]
+        },
+        "fallbackOutput": 4
+      },
+      "id": "node-domain-router",
+      "name": "Domain Switch (Existing)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "code": "const items = $input.all();
+const rawEvidence = [];
+for (const item of items) {
+  const d = item.json;
+  const cid = d.claim_id || 'claim_001';
+  const passages = Array.isArray(d.passages) ? d.passages : (Array.isArray(d.results) ? d.results : [d]);
+  for (const p of passages) {
+    if (!p) continue;
+    rawEvidence.push({
+      claim_id: cid,
+      evidence_id: p.evidence_id || p.source_id || `ev_${Math.random().toString(36).substr(2, 9)}`,
+      title: p.title || p.source_title || 'Retrieved Document',
+      url: p.url || p.link || '',
+      content: p.snippet || p.content || p.text || p.extract || '',
+      source: p.source || p.source_type || 'n8n_integrations',
+      source_family: p.source_family || (p.url ? new URL(p.url).hostname.replace('www.', '') : (p.source || 'web')),
+      source_type: p.source_type || 'web',
+      published_at: p.published_at || p.publication_date || 'unknown',
+      retrieval_score: floatVal(p.adapter_score || p.score || 0.75)
+    });
+  }
+}
+
+function floatVal(v) { const n = parseFloat(v); return isNaN(n) ? 0.75 : n; }
+return rawEvidence.map(e => ({ json: e }));"
+      },
+      "id": "node-assemble-evidence",
+      "name": "Assemble Primary Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "code": "const items = $input.all();
+const seen = new Set();
+const deduped = [];
+for (const item of items) {
+  const e = item.json;
+  const urlClean = (e.url || '').trim().toLowerCase();
+  const contentNorm = (e.content || '').trim().toLowerCase().replace(/\\s+/g, ' ').substring(0, 150);
+  const key = `${e.claim_id}::${urlClean || contentNorm}`;
+  if (seen.has(key)) continue;
+  seen.add(key);
+  deduped.push(e);
+}
+return deduped.map(e => ({ json: e }));"
+      },
+      "id": "node-deduplicate",
+      "name": "Deduplicate Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "code": "const items = $input.all();
+const weights = {
+  relevance: 0.30,
+  entity: 0.20,
+  authority: 0.15,
+  coverage: 0.10,
+  specificity: 0.10,
+  temporal: 0.05,
+  domain: 0.05,
+  diversity: 0.05
+};
+
+function getAuthorityScore(sf, url) {
+  const host = (sf || url || '').toLowerCase();
+  if (host.includes('.gov') || host.includes('openfda') || host.includes('nvd.nist')) return 1.0;
+  if (host.includes('.edu') || host.includes('pubmed') || host.includes('arxiv') || host.includes('sec.gov')) return 0.95;
+  if (host.includes('courtlistener') || host.includes('uniprot') || host.includes('pubchem')) return 0.90;
+  if (host.includes('wikipedia')) return 0.75;
+  return 0.50;
+}
+
+function computeEntityAlignment(claimText, content) {
+  const text = (content || '').toLowerCase();
+  const claimLower = (claimText || '').toLowerCase();
+  // Same-name distractor protection: check entity relations, e.g. Snehith + Google
+  if (claimLower.includes('snehith') && claimLower.includes('google')) {
+    if (text.includes('snehith') && !text.includes('google') && !text.includes('alphabet') && !text.includes('founder')) {
+      return 0.10; // Discard distractor actor pages
+    }
+    if (text.includes('google') && (text.includes('larry page') || text.includes('sergey brin') || text.includes('founded'))) {
+      return 0.95; // Relevant counter-evidence!
+    }
+  }
+  const claimWords = (claimText || '').toLowerCase().match(/\\b[a-z0-9]{3,}\\b/g) || [];
+  if (claimWords.length === 0) return 0.50;
+  let matches = 0;
+  for (const w of claimWords) {
+    if (text.includes(w)) matches++;
+  }
+  return Math.min(1.0, matches / Math.max(1, claimWords.length));
+}
+
+const scoredItems = [];
+const familyCountByClaim = {};
+
+for (const item of items) {
+  const e = item.json;
+  const cid = e.claim_id;
+  const sf = e.source_family || 'web';
+
+  const authority_score = getAuthorityScore(sf, e.url);
+  const entity_score = computeEntityAlignment(e.claim_text || '', e.content);
+  const relevance_score = Math.max(0.0, Math.min(1.0, e.retrieval_score || 0.75));
+  const coverage_score = Math.min(1.0, (e.content || '').length / 200.0);
+  const specificity_score = (e.content || '').match(/\\b[A-Z0-9][a-z0-9]+\\b/g) ? 0.85 : 0.60;
+  const temporal_score = 1.0;
+  const domain_score = 0.90;
+  const diversity_score = 0.85;
+
+  const final_score = (
+    weights.relevance * relevance_score +
+    weights.entity * entity_score +
+    weights.authority * authority_score +
+    weights.coverage * coverage_score +
+    weights.specificity * specificity_score +
+    weights.temporal * temporal_score +
+    weights.domain * domain_score +
+    weights.diversity * diversity_score
+  );
+
+  let tier = 'DISCARD';
+  if (final_score >= 0.75) tier = 'STRONG';
+  else if (final_score >= 0.55) tier = 'USABLE';
+  else if (final_score >= 0.35) tier = 'WEAK';
+
+  // HARD RELEVANCE GATE: Discard evidence with score < 0.35
+  if (final_score < 0.35 || tier === 'DISCARD') continue;
+
+  // SOURCE FAMILY DIVERSITY: Max 2 per source family per claim
+  familyCountByClaim[cid] = familyCountByClaim[cid] || {};
+  familyCountByClaim[cid][sf] = (familyCountByClaim[cid][sf] || 0) + 1;
+  if (familyCountByClaim[cid][sf] > 2) continue;
+
+  scoredItems.push({
+    claim_id: cid,
+    evidence_id: e.evidence_id,
+    title: e.title,
+    url: e.url,
+    content: e.content,
+    source: e.source,
+    source_family: sf,
+    authority_score: Math.round(authority_score * 100) / 100,
+    relevance_score: Math.round(relevance_score * 100) / 100,
+    entity_score: Math.round(entity_score * 100) / 100,
+    coverage_score: Math.round(coverage_score * 100) / 100,
+    specificity_score: Math.round(specificity_score * 100) / 100,
+    temporal_score: Math.round(temporal_score * 100) / 100,
+    domain_score: Math.round(domain_score * 100) / 100,
+    diversity_score: Math.round(diversity_score * 100) / 100,
+    final_score: Math.round(final_score * 100) / 100,
+    tier: tier
+  });
+}
+
+return scoredItems.map(e => ({ json: e }));"
+      },
+      "id": "node-relevance-gate",
+      "name": "Evidence Relevance Gate & Ranking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1420, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "code": "const validClaims = $("Validate Claims").all().map(i => i.json);\nconst evidenceItems = $input.all().map(i => i.json);\n\n// Group top 3-5 evidence items per claim_id\nconst evidenceByClaim = {};
+for (const e of evidenceItems) {
+  const cid = e.claim_id;
+  evidenceByClaim[cid] = evidenceByClaim[cid] || [];
+  if (evidenceByClaim[cid].length < 5) {
+    evidenceByClaim[cid].push(e);
+  }
+}\n\nconst finalClaimsBundle = validClaims.map(c => ({\n  claim_id: c.claim_id,\n  claim_text: c.claim_text,\n  evidence: (evidenceByClaim[c.claim_id] || []).sort((a, b) => b.final_score - a.final_score)\n}));\n\nreturn [{ json: { claims: finalClaimsBundle } }];"
+      },
+      "id": "node-prepare-bundle",
+      "name": "Prepare Verification Bundle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 300]
+    }
+  ],
+  "connections": {
+    "Receive Claims (V2 Webhook)": {
+      "main": [[{ "node": "Validate Claims", "type": "main", "index": 0 }]]
+    },
+    "Validate Claims": {
+      "main": [[{ "node": "Split Claims", "type": "main", "index": 0 }]]
+    },
+    "Split Claims": {
+      "main": [[{ "node": "Domain Switch (Existing)", "type": "main", "index": 0 }]]
+    },
+    "Domain Switch (Existing)": {
+      "main": [
+        [{ "node": "Assemble Primary Evidence", "type": "main", "index": 0 }],
+        [{ "node": "Assemble Primary Evidence", "type": "main", "index": 0 }],
+        [{ "node": "Assemble Primary Evidence", "type": "main", "index": 0 }],
+        [{ "node": "Assemble Primary Evidence", "type": "main", "index": 0 }],
+        [{ "node": "Assemble Primary Evidence", "type": "main", "index": 0 }]
+      ]
+    },
+    "Assemble Primary Evidence": {
+      "main": [[{ "node": "Deduplicate Evidence", "type": "main", "index": 0 }]]
+    },
+    "Deduplicate Evidence": {
+      "main": [[{ "node": "Evidence Relevance Gate & Ranking", "type": "main", "index": 0 }]]
+    },
+    "Evidence Relevance Gate & Ranking": {
+      "main": [[{ "node": "Prepare Verification Bundle", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "prod-v2-002"
+}

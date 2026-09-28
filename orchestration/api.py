@@ -96,6 +96,34 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def _log_llm_provider_config() -> None:
+    """Log the multi-provider LLM router config at startup (secret-free).
+
+    Emits the failover order and, per provider, the model, base URL, and whether
+    a key is configured. API keys themselves are never read into the log.
+    """
+    try:
+        status = BaseLLMService().provider_status()
+    except Exception as exc:  # pragma: no cover - defensive; never block startup
+        logger.warning("LLM provider config unavailable at startup: %s", exc)
+        return
+    if status.get("mode") != "multi":
+        logger.info("LLM router in legacy single-provider mode.")
+        return
+    order = ",".join(status.get("order", []))
+    logger.info("LLM router ready. Failover order: %s", order)
+    for name in status.get("order", []):
+        p = status.get("providers", {}).get(name, {})
+        logger.info(
+            "  provider=%s model=%s key_configured=%s base_url=%s",
+            name,
+            p.get("model"),
+            p.get("key_configured"),
+            p.get("base_url"),
+        )
+
+
 def _get_auth_user(authorization: Optional[str] = Header(None)) -> Optional[Dict[str, Any]]:
     """
     Extract and validate the authenticated user from the Authorization header.
@@ -378,13 +406,17 @@ async def _execute_verification(
         )
         verifier_view = _final_verifier_view(result)
         claims_ev = verifier_view.get("claim_evidence", [])
-        if claims_ev:
+        pipeline_ver_status = result.get("verification_status")
+
+        if pipeline_ver_status in {"human_review_required", "verified_and_accepted", "rejected", "rejected_by_judge", "agent_failed", "detector_safe_fast_path"}:
+            derived_status = pipeline_ver_status
+        elif claims_ev:
             has_c = any("contradict" in str(c.get("verdict", "")).lower() or "hallucinat" in str(c.get("verdict", "")).lower() for c in claims_ev)
             has_v = any(str(c.get("verdict", "")).lower() in ("verified", "supported", "verdictlabel.verified") or (str(c.get("verdict", "")).lower().startswith("verif") and "unverif" not in str(c.get("verdict", "")).lower()) for c in claims_ev)
             has_conf = any("conflict" in str(c.get("verdict", "")).lower() for c in claims_ev)
             derived_status = "contradicted" if has_c else "conflicted" if has_conf else "verified" if has_v else "unverified"
         else:
-            derived_status = result.get("verification_status", "unverified")
+            derived_status = pipeline_ver_status or "unverified"
 
         resp = {
             "execution_id": result.get("execution_id"),
@@ -416,6 +448,7 @@ async def _execute_verification(
             "correction_result": result.get("correction_result"),
             "reverification_result": result.get("reverification_result"),
             "memory_result": result.get("memory_result"),
+            "agent_outcomes": result.get("agent_outcomes", {}),
             "retry_count": result.get("retry_count", 0),
             "correction_attempt_count": result.get("correction_attempt_count", 0),
             "reverification_attempt_count": result.get("reverification_attempt_count", 0),

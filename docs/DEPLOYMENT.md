@@ -6,13 +6,17 @@
 - Next.js proxies authentication, verification, health, and history to FastAPI.
 - Render starts `orchestration.api:app` from the repository-root `render.yaml`.
 - Render mounts `/var/data` so accounts and verification history survive deploys.
-- OpenRouter and every model credential remain server-side.
+- Every LLM provider credential (Groq, Gemini, OpenRouter) remains server-side; the frontend never sees a provider key.
 - n8n retrieval is paused (`N8N_RETRIEVAL_ENABLED=false`); the Verifier uses its
   Python retrieval adapters.
 
 ## Required Render secrets
 
 ```env
+# At least one LLM provider key (failover order: groq,gemini,openrouter).
+# Providers without a key are skipped at runtime.
+GROQ_API_KEY=<secret>
+GEMINI_API_KEY=<secret>
 OPENROUTER_API_KEY=<secret>
 JWT_SECRET=<at-least-32-random-characters>
 ```
@@ -36,7 +40,7 @@ the backend origin changes.
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export OPENROUTER_API_KEY=<secret>
+export GROQ_API_KEY=<secret>            # primary LLM provider (or GEMINI_/OPENROUTER_)
 export JWT_SECRET=<at-least-32-random-characters>
 uvicorn orchestration.api:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -58,6 +62,7 @@ cd frontend-v2 && npm ci && npm run build
 curl -fsS https://halluciguard-api-okvo.onrender.com/health?deep=true
 ```
 
-Deep health is ready only when OpenRouter, Detector, Verifier, Judge, Corrector,
-Re-verifier, and Memory checks are healthy. A missing model/key is reported as
-degraded; the API must never substitute a fake successful result.
+Deep health is ready only when the LLM router (Groq → Gemini → OpenRouter),
+Detector, Verifier, Judge, Corrector, Re-verifier, and Memory checks are
+healthy. A missing model/key is reported as degraded; the API must never
+substitute a fake successful result.

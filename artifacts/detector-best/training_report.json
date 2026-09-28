@@ -1,0 +1,19 @@
+{
+  "device": "cuda",
+  "base_model": "microsoft/deberta-v3-xsmall",
+  "temperature": 0.7586129307746887,
+  "best_threshold": 0.6216216216216217,
+  "history": [
+    {
+      "accuracy": 0.8102639565897176,
+      "precision": 0.3159457167090755,
+      "recall": 0.6234309623430963,
+      "f1": 0.4193639178159302,
+      "roc_auc": 0.8161907998211878,
+      "ece": 0.16133663901944592,
+      "threshold": 0.5,
+      "epoch": 1,
+      "train_loss": 0.7401809585078473
+    }
+  ]
+}

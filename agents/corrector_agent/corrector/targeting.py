@@ -199,18 +199,32 @@ def _locate_preserved(
     claims: Sequence[InternalClaim],
     spans: Sequence[SentenceSpan],
     cfg: CorrectorConfig,
-) -> Tuple[Set[str], List[SkippedClaim]]:
+) -> Tuple[Set[str], Dict[str, Set[str]], List[SkippedClaim]]:
     """Resolve preserved claims to the sentence_ids that must stay locked.
+
+    Returns ``(locked_ids, preserved_texts_by_sentence, unlocated)`` where
+    ``preserved_texts_by_sentence`` maps each locked sentence_id to the set of
+    NORMALIZED preserved claim texts that landed on it. That map lets the caller
+    tell apart two co-location cases that share one coarse sentence span:
+        * the SAME assertion authorized for both correction and preservation
+          (a Judge contradiction the Corrector must not resolve — lock wins);
+        * a DIFFERENT preserved assertion that merely shares the sentence with an
+          authorized correction (the correction may proceed).
 
     A preserved claim that cannot be located is REPORTED, not ignored: later
     steps must be able to see that a lock could not be positioned.
     """
     locked: Set[str] = set()
+    preserved_texts_by_sentence: Dict[str, Set[str]] = {}
     unlocated: List[SkippedClaim] = []
     for claim in claims:
         match = match_claim_to_span(claim.claim_text, spans, cfg)
         if match.matched and match.span is not None:
-            locked.add(match.span.sentence_id)
+            sid = match.span.sentence_id
+            locked.add(sid)
+            norm = normalize_whitespace_case(claim.claim_text)
+            if norm:
+                preserved_texts_by_sentence.setdefault(sid, set()).add(norm)
         else:
             reason = match.skip_reason or SkipReason.CLAIM_NOT_FOUND
             unlocated.append(
@@ -221,7 +235,7 @@ def _locate_preserved(
                     detail=match.detail,
                 )
             )
-    return locked, unlocated
+    return locked, preserved_texts_by_sentence, unlocated
 
 
 def build_correction_plan(
@@ -256,10 +270,45 @@ def build_correction_plan(
             integrity_verified=False,
         )
 
-    locked_ids, unlocated_preserved = _locate_preserved(
+    locked_ids, preserved_texts_by_sentence, unlocated_preserved = _locate_preserved(
         request.claims_to_preserve, spans, cfg
     )
     preserved_claim_ids = {c.claim_id for c in request.claims_to_preserve}
+
+    # Co-location resolution: a preserved claim locking a whole sentence must not
+    # silently suppress an authorized correction of a DIFFERENT assertion that
+    # lands on that SAME sentence (e.g. "Java was created by <wrong> in <right
+    # year>." — the wrong creator authorized for correction, the right year
+    # authorized for preservation, one sentence). Sentence spans are coarser than
+    # atomic claims, so a lone-sentence lock would silently drop a legitimate
+    # repair. For such a co-located sentence correction authorization wins; the
+    # verified content on it is protected by the downstream validation gates
+    # (original-preservation, numbers, dates, entities), never by refusing to
+    # correct.
+    #
+    # The SAME assertion in both lists is a different matter: that is a Judge-level
+    # contradiction (Requirement 11) the Corrector must never resolve, so it stays
+    # locked and is skipped below. "Same assertion" is detected two ways — the same
+    # claim_id in both lists (handled in the loop), and the same normalized claim
+    # text resolving to the same sentence (detected here).
+    correction_sentence_ids: Set[str] = set()
+    for claim in request.claims_to_correct:
+        if claim.claim_id in preserved_claim_ids:
+            continue
+        pre_match = match_claim_to_span(claim.claim_text, spans, cfg)
+        if not pre_match.matched or pre_match.span is None:
+            continue
+        sid = pre_match.span.sentence_id
+        if sid not in locked_ids:
+            continue
+        # Only unlock when this correction is a DIFFERENT assertion than every
+        # preserved claim on that sentence. An identical (normalized) text is the
+        # same-assertion conflict and must remain locked.
+        norm_claim = normalize_whitespace_case(claim.claim_text)
+        preserved_here = preserved_texts_by_sentence.get(sid, set())
+        if norm_claim and norm_claim not in preserved_here:
+            correction_sentence_ids.add(sid)
+    effective_locked_ids = locked_ids - correction_sentence_ids
 
     targets_by_sentence: Dict[str, CorrectionTarget] = {}
     ordered_sentence_ids: List[str] = []
@@ -293,7 +342,7 @@ def build_correction_plan(
             continue
 
         span = match.span
-        if span.sentence_id in locked_ids:
+        if span.sentence_id in effective_locked_ids:
             skipped.append(
                 SkippedClaim(
                     claim_id=claim.claim_id,
@@ -341,7 +390,7 @@ def build_correction_plan(
             return CorrectionPlan(
                 spans=spans,
                 targets=[],
-                locked_sentence_ids=sorted(locked_ids),
+                locked_sentence_ids=sorted(effective_locked_ids),
                 skipped_claims=skipped
                 + [
                     SkippedClaim(
@@ -358,11 +407,11 @@ def build_correction_plan(
                 unlocated_preserved_claims=unlocated_preserved,
                 integrity_verified=False,
             )
-        if target.sentence_id in locked_ids:  # pragma: no cover - unreachable guard
+        if target.sentence_id in effective_locked_ids:  # pragma: no cover - unreachable guard
             return CorrectionPlan(
                 spans=spans,
                 targets=[],
-                locked_sentence_ids=sorted(locked_ids),
+                locked_sentence_ids=sorted(effective_locked_ids),
                 skipped_claims=skipped
                 + [
                     SkippedClaim(
@@ -380,7 +429,7 @@ def build_correction_plan(
     return CorrectionPlan(
         spans=spans,
         targets=targets,
-        locked_sentence_ids=sorted(locked_ids),
+        locked_sentence_ids=sorted(effective_locked_ids),
         skipped_claims=skipped,
         unlocated_preserved_claims=unlocated_preserved,
         integrity_verified=True,
