@@ -46,6 +46,11 @@ def _failclosed(reason: str) -> dict[str, Any]:
         "verification_reason": "detector_failure",
         "degraded_reason": reason,
         "per_claim_results": [],
+        "claim_count": 0,
+        "supported_count": 0,
+        "contradicted_count": 0,
+        "unknown_count": 0,
+        "non_factual_count": 0,
     }
 
 
@@ -86,6 +91,10 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
                 "requires_verification": bool(
                     claim.get("requires_verification", overall_verify)
                 ),
+                "supported_probability": claim.get("supported_probability", 0.0),
+                "contradicted_probability": claim.get("contradicted_probability", 0.0),
+                "unknown_probability": claim.get("unknown_probability", 0.0),
+                "non_factual": bool(claim.get("non_factual", False)),
             }
         )
 
@@ -112,6 +121,11 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         "diagnostics": diagnostics,
         "warnings": result.get("warnings") or [],
         "per_claim_results": per_claim_results,
+        "claim_count": result.get("claim_count", len(per_claim_results)),
+        "supported_count": result.get("supported_count", 0),
+        "contradicted_count": result.get("contradicted_count", 0),
+        "unknown_count": result.get("unknown_count", 0),
+        "non_factual_count": result.get("non_factual_count", 0),
     }
 
 

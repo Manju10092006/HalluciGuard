@@ -91,12 +91,23 @@ class DetectorAgent:
                         key.value: value for key, value in sentence.probabilities.items()
                     },
                     "risk_level": sentence.risk.value,
-                    "requires_verification": sentence.label.value != "SUPPORTED",
-                    "evidence_snippets": sentence.evidence_snippets,
+                    "requires_verification": (
+                        getattr(sentence, "label", None).value != "SUPPORTED"
+                        if getattr(sentence, "label", None) is not None
+                        else True
+                    ),
+                    "evidence_snippets": getattr(sentence, "evidence_snippets", []),
+                    "supported_probability": getattr(sentence, "supported_probability", 0.0),
+                    "contradicted_probability": getattr(
+                        sentence, "contradicted_probability", 0.0
+                    ),
+                    "unknown_probability": getattr(sentence, "unknown_probability", 0.0),
+                    "non_factual": bool(getattr(sentence, "non_factual", False)),
                 }
             )
         confidence = max(
-            max(sentence.probabilities.values()) for sentence in grounded.sentences
+            max(sentence.probabilities.values(), default=0.0)
+            for sentence in grounded.sentences
         )
         return {
             "hallucination_probability": grounded.probability,
@@ -114,14 +125,28 @@ class DetectorAgent:
             "detector_degraded": False,
             "grounded": True,
             "probability_semantics": (
-                "max over sentences of calibrated P(CONTRADICTED)+P(NOT_ENOUGH_INFO)"
+                "max over claims of calibrated P(CONTRADICTED)+P(NOT_ENOUGH_INFO); "
+                "per-class probabilities are kept separate on each claim"
             ),
             "verification_reason": (
                 "one_or_more_claims_not_supported" if grounded.requires_verification else None
             ),
             "claims": claims,
-            "warnings": grounded.warnings,
-            "diagnostics": {"degraded_reason": None, "evidence_count": len(evidence_texts)},
+            "warnings": getattr(grounded, "warnings", []),
+            "claim_count": getattr(grounded, "claim_count", len(claims)),
+            "supported_count": getattr(grounded, "supported_count", 0),
+            "contradicted_count": getattr(grounded, "contradicted_count", 0),
+            "unknown_count": getattr(grounded, "unknown_count", 0),
+            "non_factual_count": getattr(grounded, "non_factual_count", 0),
+            "diagnostics": {
+                "degraded_reason": None,
+                "evidence_count": len(evidence_texts),
+                "claim_count": getattr(grounded, "claim_count", len(claims)),
+                "supported_count": getattr(grounded, "supported_count", 0),
+                "contradicted_count": getattr(grounded, "contradicted_count", 0),
+                "unknown_count": getattr(grounded, "unknown_count", 0),
+                "non_factual_count": getattr(grounded, "non_factual_count", 0),
+            },
         }
 
     def _pre_verification_result(self, user_query: str, answer: str) -> dict[str, Any]:
@@ -161,6 +186,11 @@ class DetectorAgent:
             "warnings": [
                 "Pre-retrieval triage only; n8n/Verifier must retrieve and evaluate evidence."
             ],
+            "claim_count": len(claims),
+            "supported_count": 0,
+            "contradicted_count": 0,
+            "unknown_count": 0,
+            "non_factual_count": 0,
             "diagnostics": {
                 "degraded_reason": None,
                 "mode": "pre_verification_triage",
