@@ -79,3 +79,43 @@ def has_entity_conflict(claim: str, evidence: str) -> bool:
         and (claim_entities - evidence_entities)
         and (evidence_entities - claim_entities)
     )
+
+
+_QUANTITY = re.compile(r"(\d[\d,.]*)\s*(%|percent|million|billion|trillion|m|bn|k)?\b", re.IGNORECASE)
+_YEAR = re.compile(r"\b(1[89]\d\d|20\d\d)\b")
+
+
+def numeric_consistency(claim: str, evidence: str) -> list[str]:
+    """Report lightweight number/date/percent mismatches between claim and evidence.
+
+    Conservative by design (no giant rule engine): it fires only when BOTH sides
+    use the same quantity unit (percent, million, billion, ...) with different
+    values, or when both mention years and the year sets are disjoint. Raw
+    numbers without a mismatching unit/context are ignored so dates, IDs and
+    naturally different statistics are not treated as contradictions.
+    """
+    conflicts: list[str] = []
+
+    def quantities(text: str) -> list[tuple[str, str]]:
+        lowered = text.lower()
+        return [
+            (num.replace(",", ""), (unit or "unit").lower())
+            for num, unit in _QUANTITY.findall(lowered)
+            if not (len(num) == 4 and num.isdigit())
+        ]
+
+    claim_q = quantities(claim)
+    evidence_q = quantities(evidence)
+    units_in_claim = {unit for _, unit in claim_q}
+    for num, unit in evidence_q:
+        if unit in units_in_claim:
+            claim_nums = {n for n, u in claim_q if u == unit}
+            if claim_nums and num not in claim_nums:
+                conflicts.append(f"conflicting {unit or 'quantity'}: '{num} {unit}' vs claim")
+
+    claim_years = set(_YEAR.findall(claim))
+    evidence_years = set(_YEAR.findall(evidence))
+    if claim_years and evidence_years and not (claim_years & evidence_years):
+        conflicts.append(f"conflicting years: {','.join(sorted(evidence_years))} vs claim")
+
+    return conflicts

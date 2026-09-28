@@ -38,7 +38,18 @@ class SentenceResult(BaseModel):
     probabilities: dict[ClaimLabel, float]
     hallucination_probability: float
     risk: RiskLevel
-    evidence_snippets: list[str]
+    evidence_snippets: list[str] = Field(default_factory=list)
+    # ------------------------------------------------------------------
+    # Claim-level evidence verification fields (additive, backward compatible).
+    # ``hallucination_probability`` above is retained (documented/deprecated);
+    # these separate the three calibrated classes so NOT_ENOUGH_INFO is never
+    # folded into CONTRADICTED.
+    # ------------------------------------------------------------------
+    supported_probability: float = 0.0
+    contradicted_probability: float = 0.0
+    unknown_probability: float = 0.0
+    requires_verification: bool = True
+    non_factual: bool = False
 
 
 class DetectResponse(BaseModel):
@@ -49,3 +60,13 @@ class DetectResponse(BaseModel):
     sentences: list[SentenceResult]
     model_version: str
     warnings: list[str] = Field(default_factory=list)
+    # ------------------------------------------------------------------
+    # Answer-level claim aggregation (claim_count + per-class counts). The
+    # Detector is a triage layer; the Judge makes the final decision using
+    # these counts alongside independent Verifier verdicts.
+    # ------------------------------------------------------------------
+    claim_count: int = 0
+    supported_count: int = 0
+    contradicted_count: int = 0
+    unknown_count: int = 0
+    non_factual_count: int = 0
