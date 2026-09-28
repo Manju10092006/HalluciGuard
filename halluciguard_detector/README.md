@@ -1,15 +1,17 @@
 # HalluciGuard Detector Agent
 
-A reference-grounded, sentence-level hallucination detector. It accepts a draft LLM answer and evidence, labels each sentence as `SUPPORTED`, `CONTRADICTED`, or `NOT_ENOUGH_INFO`, and returns an answer-level hallucination risk.
+A reference-grounded hallucination detector that verifies the draft LLM answer **at atomic-claim level**. It decomposes the answer into factual claims, retrieves and reranks evidence for each claim (reusing the Verifier's production stack), labels each claim `SUPPORTED`, `CONTRADICTED`, or `NOT_ENOUGH_INFO`, and returns an answer-level aggregation of claim counts plus the hallucination risk.
 
-This detector does **not** pretend that truth can be inferred from wording alone. Evidence is mandatory. `NOT_ENOUGH_INFO` means the supplied evidence is insufficient; it does not mean a claim is globally false.
+This detector does **not** pretend that truth can be inferred from wording alone. Evidence is mandatory. `NOT_ENOUGH_INFO` is a first-class class: it means the supplied evidence is insufficient, not that a claim is globally false, and it is never folded into the contradiction rate.
 
 ## Design
 
 - **Training data:** RAGTruth human span annotations, converted to sentence labels.
-- **Model:** compact DeBERTa-v3 cross-encoder over `(evidence, sentence)`.
+- **Model:** compact DeBERTa-v3 cross-encoder over `(best_evidence, claim)`.
+- **Claim decomposition:** reuses the Verifier's `ClaimDecomposer` for atomic claims (compound predicates split, non-factual content filtered); falls back to deterministic sentence spans when unavailable.
+- **Evidence selection:** reuses the Verifier's `HybridRetriever` (BM25 + dense/FAISS rank fusion) and cross-encoder `Reranker`, reranking on the real claim. Falls back to deterministic lexical selection offline.
 - **Leakage control:** train/dev partitioning is grouped by source document; the official RAGTruth test split is untouched.
-- **Outputs:** per-sentence calibrated probabilities, exact character offsets, evidence snippets, aggregate risk, and a verifier-routing flag.
+- **Outputs:** per-claim calibrated probabilities with `SUPPORTED`/`CONTRADICTED`/`NOT_ENOUGH_INFO` kept separate, exact character offsets, evidence snippets, answer-level claim counts (`claim_count`, `supported_count`, `contradicted_count`, `unknown_count`, `non_factual_count`), and a verifier-routing flag. `hallucination_probability` is retained for backward compatibility and documented/deprecated semantics.
 - **Calibration:** temperature scaling and the decision threshold are fitted only on dev predictions.
 
 The implementation borrows the reference-conditioned checking formulation from MiniCheck and RefChecker, but contains original HalluciGuard code. RAGTruth is MIT licensed; MiniCheck is Apache-2.0 licensed. Their repositories are retained under `third_party/` for provenance.
@@ -25,21 +27,22 @@ The production graph uses two calls through `orchestration/detector_bridge.py`:
 
 ```mermaid
 flowchart LR
-    Q[Query + candidate] --> S[Sentence spans]
-    S --> T[Pre-retrieval triage]
+    Q[Query + candidate] --> D[ClaimDecomposer<br/>atomic claims + spans]
+    D --> T[Pre-retrieval triage]
     T --> R[Verifier retrieval]
-    R --> X[Lexical evidence selection]
-    X --> TOK[DeBERTa tokenizer<br/>evidence, sentence]
+    R --> H[Shared HybridRetriever<br/>BM25 + dense/FAISS, pool]
+    H --> CR[Cross-encoder rerank on real claim]
+    CR --> TOK[DeBERTa tokenizer<br/>best evidence, claim]
     TOK --> M[detector-best checkpoint]
     M --> L[Three-class logits]
     L --> C[Temperature scaling]
-    C --> P[P contradicted + P not-enough-info]
-    P --> K[Risk, routing and sentence contract]
+    C --> P[P supported / P contradicted / P not-enough-info]
+    P --> K[Claim counts + risk, routing and claim contract]
 ```
 
 ## Input and output contract
 
-Grounded input requires `user_query`, a non-empty candidate answer, and non-empty evidence. Runtime output includes probability, confidence, risk, action, model source/status, degradation reason, model load and inference proof, model/calibrator versions, calibration status, per-sentence spans/labels/probabilities, warnings and diagnostics. The canonical supervisor contract is smaller; the bridge retains these operational fields for audit.
+Grounded input requires `user_query`, a non-empty candidate answer, and non-empty evidence. Runtime output includes probability, confidence, risk, action, model source/status, degradation reason, model load and inference proof, model/calibrator versions, calibration status, per-claim spans/labels/separate class probabilities/evidence snippets, answer-level claim counts, warnings and diagnostics. The canonical supervisor contract is smaller; the bridge retains these operational fields for audit.
 
 ## Training record
 
@@ -60,7 +63,7 @@ The artifact report does not record every possible command-line override. Missin
 
 ## Calibration and held-out evaluation
 
-Temperature scaling is fitted only on development logits. The persisted temperature is `0.7586129308` and the dev-selected hallucination threshold is `0.6216216216`. Hallucination probability is calibrated `P(CONTRADICTED) + P(NOT_ENOUGH_INFO)`, not a raw logit.
+Temperature scaling is fitted only on development logits. The persisted temperature is `0.7586129308` and the dev-selected hallucination threshold is `0.6216216216`. Hallucination probability is calibrated `P(CONTRADICTED) + P(NOT_ENOUGH_INFO)`, not a raw logit. The three class probabilities (`supported`, `contradicted`, `unknown`) are always reported separately so `NOT_ENOUGH_INFO` can never masquerade as a contradiction.
 
 | Metric | Value |
 |---|---:|
@@ -74,15 +77,24 @@ Temperature scaling is fitted only on development logits. The persisted temperat
 | False-positive rate | 0.1053 |
 | False-negative rate | 0.4668 |
 
-Confusion counts: TN 15,441; FP 1,817; FN 709; TP 810 over 18,777 sentences. The runtime entity-conflict guard is excluded from these figures.
+Confusion counts: TN 15,441; FP 1,817; FN 709; TP 810 over 18,777 sentences. The runtime entity-conflict and numeric-mismatch guards are excluded from these figures.
+
+## Claim-level guards
+
+Secondary signals reinforce the model without inventing probabilities:
+
+- **Entity-conflict guard:** fires only when claim and evidence share a named anchor and each names a different extra entity (e.g. "Java created by Snehith" vs evidence naming James Gosling). It modestly re-normalizes contradiction confidence toward the model's own output; it never overwrites to hard-coded `0.05/0.90/0.05`.
+- **Numeric/date/percent checks:** a conservative quantity-unit + year mismatch check emits a warning, so a model that missed the numeric relation still surfaces the discrepancy to the Judge as a secondary signal.
+- **Opinion / non-factual handling:** with no LLM, non-factual content is filtered by the shared decomposer's checkable-content rule. Non-factual claims are never turned into hallucination: they are marked `non_factual`, excluded from the claim counts, and do not reach NLI.
 
 ## Failure behavior
 
 - Missing evidence: honest triage result, no inference, force verification.
 - Missing/corrupt artifact or inference exception: degraded, risk `HIGH`, action `Verify`, reason retained.
 - Model/calibration failure never silently substitutes another Detector.
+- Shared Verifier stack unavailable: evidence selection degrades to deterministic lexical selection; the trained model still runs on the best lexical evidence.
 - `NOT_ENOUGH_INFO` means the supplied evidence is inadequate, not that the claim is globally false.
-- Judge treats Detector output as triage and consumes independent Verifier verdicts.
+- The Judge consumes the Detector output as triage (alongside claim counts) and makes the final decision from independent Verifier verdicts.
 
 ## Install and reproduce
 
@@ -132,7 +144,7 @@ POST /v1/detect
 
 ## Operational boundary
 
-This component is a triage detector, not the final Judge. Route `CONTRADICTED` and `NOT_ENOUGH_INFO` claims to HalluciGuard's evidence Verifier. Metrics are dataset-specific and must not be described as proof that the model "works perfectly" on open-world facts.
+This component is a triage detector, not the final Judge. Route `CONTRADICTED` and `NOT_ENOUGH_INFO` claims to HalluciGuard's evidence Verifier; the answer-level counts help the Judge aggregate, but the final decision relies on independent Verifier verdicts. Metrics are dataset-specific and must not be described as proof that the model "works perfectly" on open-world facts.
 
 ## Research basis
 
