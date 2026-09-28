@@ -239,7 +239,7 @@ class BaseLLMDetectorVerifierService:
             )
             pipeline = self._verifier_pipeline or VerificationPipelineClass()
 
-            from claims.claim_decomposer import ClaimDecomposer
+            from agents.verifier_agent.claims.claim_decomposer import ClaimDecomposer
             decomposer = ClaimDecomposer()
             sub_claims = decomposer.decompose(draft_response)
             if not sub_claims:

@@ -707,7 +707,7 @@ class VerificationPipeline:
 
                     with tracker.track(PipelineStage.RERANKING):
                         reranked_passages = self.reranker.rerank(
-                            relevance_query,
+                            sub_claim,
                             hybrid_passages,
                             k=6,
                             model_name=route.reranker_model,

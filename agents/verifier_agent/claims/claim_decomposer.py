@@ -128,6 +128,30 @@ _COARSE_SPLIT_RE = re.compile(r"[;\n]+|(?:^|\s)\d+\.\s+")
 
 _MAX_CLAIMS = 5
 
+# ---------------------------------------------------------------------------
+# Passivized compound-predicate splitting.
+#
+#     "Salesforce was founded in 1999 and acquired by Google in 2018."
+#
+# The two conjoined past participles share one subject AND one auxiliary
+# (`was`), so each is a complete, independently-verifiable proposition:
+#     "Salesforce was founded in 1999."
+#     "Salesforce was acquired by Google in 2018."
+#
+# This split is deliberately CONSERVATIVE and fires only when BOTH sides of
+# "and" are passivized VBN past participles from a curated set (so we NEVER
+# split coordinate modifiers like "a major technological and commercial hub",
+# which the regression suite pins to a single claim).
+# ---------------------------------------------------------------------------
+_COMPOUND_PASSIVE_PARTICIPLES = {
+    "acquired", "founded", "established", "created", "released", "merged",
+    "purchased", "bought", "built", "launched", "formed", "sold", "awarded",
+    "granted", "joined", "led", "hired", "replaced", "renamed", "developed",
+    "introduced", "published", "written", "known", "designed", "approved",
+}
+_COMPOUND_AUX = {"was", "were"}
+_COMPOUND_MAX_AUX_DISTANCE = 8  # tokens between auxiliary and its VBN
+
 
 class ClaimDecomposer:
     """Decomposes an LLM response into atomic, complete factual propositions.
@@ -236,7 +260,11 @@ class ClaimDecomposer:
             if not segment:
                 continue
 
-            for sent in nlp(segment).sents:
+            sentences = []
+            for piece in self._split_compound_predicates(segment):
+                sentences.extend(nlp(piece).sents)
+
+            for sent in sentences:
                 stripped = self._strip_prefix(sent.text)
                 if not stripped or self._normalize_key(stripped) in _FILLER_EXACT:
                     continue
@@ -383,6 +411,89 @@ class ClaimDecomposer:
         return [t for t in node.subtree if t not in excluded]
 
     # ------------------------------------------------------------------
+    # Passivized compound-predicate pre-splitting
+    # ------------------------------------------------------------------
+    def _split_compound_predicates(self, text: str) -> List[str]:
+        """Split passivized compound predicates into separate atomic sentences.
+
+        Returns a list of complete, independently-understandable sentences.
+        If no candidate "and" exists (or the split would produce a fragment),
+        the input is returned unchanged so downstream logic is unaffected.
+        """
+        seen = 0
+        pending: List[str] = [text.strip()]
+        out: List[str] = []
+        while pending:
+            sentence = pending.pop(0)
+            if not sentence:
+                continue
+            first, second = self._split_once(sentence)
+            if first is None:
+                out.append(sentence)
+                continue
+            seen += 1
+            # Re-process both halves: a second compound predicate can chain.
+            pending[:0] = [first, second]
+            if seen >= 4:  # hard safety cap per input sentence
+                out.extend(pending)
+                pending = []
+        return [piece for piece in out if piece] or [text.strip()]
+
+    @staticmethod
+    def _split_once(sentence: str):
+        """Return ``(first_clause, second_clause)`` or ``(None, None)``.
+
+        The split happens at the first "and" where the token right after it is
+        a curated passivized participle AND a passive auxiliary earlier in the
+        sentence governs a same-set participle immediately before the "and".
+        The second clause reuses the shared subject+auxiliary prefix so it is
+        independently complete: "Salesforce was founded in 1999 and acquired
+        by Google in 2018" -> ("Salesforce was founded in 1999",
+        "Salesforce was acquired by Google in 2018").
+        """
+        if not sentence or " and " not in f" {sentence} ":
+            return None, None
+        tokens = sentence.split()
+        for i in range(1, len(tokens) - 1):
+            if tokens[i].lower() != "and":
+                continue
+            right_lead = tokens[i + 1].strip(".,!?;:").lower()
+            if right_lead not in _COMPOUND_PASSIVE_PARTICIPLES:
+                continue
+
+            left = tokens[:i]
+            vbn_index = ClaimDecomposer._leftmost_governed_passive(left)
+            if vbn_index is None:
+                continue
+
+            # Reuse the shared subject + auxiliary prefix so the second clause
+            # is independently complete: "Salesforce was acquired by Google in 2018".
+            prefix = " ".join(left[:vbn_index]).strip()
+            first_clause = " ".join(left)
+            second_clause = " ".join(
+                ([prefix] if prefix else []) + tokens[i + 1:]
+            ).strip()
+            return first_clause, second_clause
+        return None, None
+
+    @staticmethod
+    def _leftmost_governed_passive(left: List[str]) -> Optional[int]:
+        """Index in ``left`` of a passivized VBN governed by a nearby auxiliary.
+
+        Searches right-to-left for the closest curated participle that is
+        governed by a ``was/were`` within ``_COMPOUND_MAX_AUX_DISTANCE`` tokens.
+        Returns ``None`` when no such participial construction precedes "and".
+        """
+        for idx in range(len(left) - 1, -1, -1):
+            word = left[idx].strip(".,!?;:").lower()
+            if word not in _COMPOUND_PASSIVE_PARTICIPLES:
+                continue
+            window = left[max(0, idx - _COMPOUND_MAX_AUX_DISTANCE): idx]
+            if any(t.strip(".,!?;:").lower() in _COMPOUND_AUX for t in window):
+                return idx
+        return None
+
+    # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
     @staticmethod
@@ -408,7 +519,11 @@ class ClaimDecomposer:
         last_subject: Optional[str] = None
 
         for segment in _COARSE_SPLIT_RE.split(text):
+            raw_sentences = []
             for raw in re.split(r"(?<=[.!?])\s+", segment.strip()):
+                raw_sentences.extend(self._split_compound_predicates(raw))
+
+            for raw in raw_sentences:
                 stripped = self._strip_prefix(raw)
                 if not stripped:
                     continue
