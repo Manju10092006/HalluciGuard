@@ -16,7 +16,14 @@ class FakeDetector:
     def __init__(self, result: DetectionResult) -> None:
         self.result = result
 
-    def detect(self, *, user_query: str, llm_response: str) -> DetectionResult:
+    def detect(
+        self,
+        *,
+        user_query: str,
+        llm_response: str,
+        domain: str = "general",
+        documents=None,
+    ) -> DetectionResult:
         return self.result
 
 

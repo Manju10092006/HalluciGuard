@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import sys
 import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
@@ -15,13 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 def _load_verifier_imports():
-    verifier_dir = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
-    )
-    if verifier_dir not in sys.path:
-        sys.path.insert(0, verifier_dir)
-    from api.pipeline import VerificationPipeline
-    from schemas.models import SuspiciousClaim, VerifierInputV2
+    """Import the verifier pipeline classes via the canonical package path."""
+    from agents.verifier_agent.api.pipeline import VerificationPipeline
+    from agents.verifier_agent.schemas.models import SuspiciousClaim, VerifierInputV2
 
     return VerificationPipeline, SuspiciousClaim, VerifierInputV2
 
@@ -29,12 +24,7 @@ def _load_verifier_imports():
 def _load_certification():
     """Import the (lightweight) certification helpers without importing the
     heavy verifier pipeline. Safe to call before deciding whether to verify."""
-    verifier_dir = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
-    )
-    if verifier_dir not in sys.path:
-        sys.path.insert(0, verifier_dir)
-    from api.certification import (
+    from agents.verifier_agent.api.certification import (
         enforce_detector,
         certification_enabled_from_env,
         CertificationError,
@@ -229,7 +219,7 @@ class BaseLLMDetectorVerifierService:
             )
             pipeline = self._verifier_pipeline or VerificationPipelineClass()
 
-            from claims.claim_decomposer import ClaimDecomposer
+            from agents.verifier_agent.claims.claim_decomposer import ClaimDecomposer
             decomposer = ClaimDecomposer()
             sub_claims = decomposer.decompose(draft_response)
             if not sub_claims:
