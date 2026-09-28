@@ -213,6 +213,12 @@ class HaluEvalInference:
             padding=True,
         )
 
+        # DistilBERT does not accept the BERT-family ``token_type_ids`` kwarg;
+        # some Hub tokenizers still emit it for this architecture. Remove it so
+        # a real forward pass runs instead of crashing the legacy path.
+        if getattr(getattr(self._model, "config", None), "model_type", "") == "distilbert":
+            inputs.pop("token_type_ids", None)
+
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         with torch.no_grad():

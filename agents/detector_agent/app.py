@@ -27,9 +27,11 @@ app = FastAPI(
     title="HalluciGuard Detector Agent API",
     description=(
         "First agent in the HalluciGuard multi-agent pipeline. "
-        "Estimates LLM response hallucination risk using a HaluEval-trained classifier."
+        "Estimates LLM response hallucination risk using a HaluEval-trained "
+        "classifier, with optional claim-level hybrid evidence verification "
+        "when a context/evidence corpus is supplied (retrieval -> rerank -> NLI)."
     ),
-    version="1.1.0",
+    version="1.2.0",
 )
 
 # Initialize DetectorAgent instance (model loads lazily on first request).
@@ -60,6 +62,7 @@ def detect_hallucination(payload: DetectionInput) -> DetectionResult:
         return agent.detect(
             user_query=payload.user_query,
             llm_response=payload.llm_response,
+            documents=payload.context,
         )
     except FileNotFoundError as exc:
         raise HTTPException(

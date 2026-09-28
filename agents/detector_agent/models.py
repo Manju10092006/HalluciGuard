@@ -38,6 +38,17 @@ class DetectionInput(BaseModel):
         min_length=1,
         examples=["The capital of France is Paris."]
     )
+    context: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Optional evidence/provenance corpus (document snippets, retrieved "
+            "passages). When provided, the detector performs claim-level hybrid "
+            "evidence verification (retrieval -> rerank -> NLI) and labels each "
+            "claim VERIFIED / CONTRADICTED / INSUFFICIENT. When absent, claims "
+            "are left UNVERIFIED for the Verifier Agent (default legacy triage)."
+        ),
+        examples=[["Paris is the capital city of France."]],
+    )
 
 
 class ClaimRisk(BaseModel):
@@ -56,6 +67,31 @@ class ClaimRisk(BaseModel):
     requires_verification: bool
     classifier_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     token_surprisal_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+    # --- Claim-level hybrid evidence verification (additive; safe defaults) ---
+    claim_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "Deterministic claim type used to decide evidence needs: "
+            "FACTUAL | NUMERICAL | TEMPORAL | ENTITY | RELATIONAL | "
+            "COMPARATIVE | OPINION."
+        ),
+    )
+    verification_status: Optional[str] = Field(
+        default=None,
+        description=(
+            "Evidence-based label for this claim where verified against "
+            "documents: 'VERIFIED' | 'CONTRADICTED' | 'INSUFFICIENT' | "
+            "'UNVERIFIED' | 'SKIPPED' (opinion) | 'NOT_EVALUATED'. Only the "
+            "Verifier Agent is allowed to finalize a truth verdict."
+        ),
+    )
+    supported_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    contradicted_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    unknown_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    evidence_snippets: List[str] = Field(default_factory=list)
+    retrieval_method: Optional[str] = Field(default=None)
+    nli_degraded: bool = Field(default=False)
 
 
 class DetectionResult(BaseModel):
@@ -132,6 +168,37 @@ class DetectionResult(BaseModel):
     )
     evaluator_inference_executed: bool = Field(default=False)
     evaluator_model_source: str = Field(default="")
+
+    # --- Claim-level evidence verification summary (additive; safe defaults) ---
+    claim_count: int = Field(default=0)
+    supported_count: int = Field(default=0)
+    contradicted_count: int = Field(default=0)
+    unknown_count: int = Field(default=0)
+    unverified_count: int = Field(default=0)
+    opinion_count: int = Field(default=0)
+    requires_verification: bool = Field(
+        default=False,
+        description=(
+            "Answer-level flag: True when at least one factual claim still needs "
+            "evidence verification (equivalent to next_action == Verify)."
+        ),
+    )
+    evidence_available: bool = Field(
+        default=False,
+        description="True when the detector was given evidence documents to verify claims against.",
+    )
+    verification_risk: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Evidence-based verification risk (probability the response contains "
+            "a hallucinated claim). Non-calibrated signal, not a truth verdict."
+        ),
+    )
+    nli_engine_loaded: bool = Field(default=False)
+    nli_inference_executed: bool = Field(default=False)
+    nli_degraded: bool = Field(default=False)
 
     class Config:
         json_schema_extra = {
