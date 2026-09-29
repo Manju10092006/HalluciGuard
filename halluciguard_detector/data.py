@@ -24,6 +24,17 @@ decomposer produces, and this conversion cannot recover atomisation. Span-level
 examples are therefore a closer match than sentence-level ones but still not
 identical to runtime claims; the split counts in ``stats.json`` quantify how
 much of the data is sentence-level versus span-level.
+
+**Evidence shape** is the other half of the train/runtime contract. The claim
+labels above are unchanged by it, but the *evidence* a label is attached to is
+not: the detector is served one reranked snippet and used to be trained on up
+to six lexical snippets joined into one string. The shape is therefore an
+explicit parameter (``evidence_shape``, defaulting to the production arm) so
+the released ``lexical_joined`` baseline stays reproducible for comparison
+instead of being quietly overwritten. Every emitted row records which route
+selected its evidence and whether that selection was degraded, so a training
+set built on a fail-soft fallback can never be mistaken for one built on real
+production selection.
 """
 
 import json
@@ -31,9 +42,10 @@ import random
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
-from .text import lexical_evidence, sentence_spans
+from .evidence_shapes import PRODUCTION_SHAPE, shape_record
+from .text import sentence_spans
 
 
 LABEL_TO_ID = {"SUPPORTED": 0, "CONTRADICTED": 1, "NOT_ENOUGH_INFO": 2}
@@ -256,35 +268,94 @@ def _regions(start: int, end: int, annotations: list[dict], text: str) -> list[t
 
 
 
-def iter_ragtruth_examples(dataset_dir: Path, split: str, stats: Counter | None = None) -> Iterable[dict]:
+def _load_sources(dataset_dir: Path) -> dict[str, dict[str, str]]:
+    """Load ``source_id -> {"source_info", "task_type"}`` once, coercing text.
+
+    ``source_info`` is a plain string for prose sources and a JSON object for
+    the Data2txt/QA records. The object form is serialised with sorted keys,
+    exactly as the original per-row conversion did, so the bytes fed to the
+    evidence selector are unchanged.
+    """
+    sources: dict[str, dict[str, str]] = {}
+    with (dataset_dir / "source_info.jsonl").open(encoding="utf-8") as handle:
+        for line in handle:
+            row = json.loads(line)
+            source_info = row.get("source_info")
+            if not isinstance(source_info, str):
+                source_info = json.dumps(source_info, ensure_ascii=False, sort_keys=True)
+            sources[str(row["source_id"])] = {
+                "source_info": source_info,
+                "task_type": str(row.get("task_type") or ""),
+            }
+    return sources
+
+
+def _evidence_for(
+    claim: str,
+    sources: dict[str, dict[str, str]],
+    source_id: str,
+    evidence_shape: str,
+    pool_k: int | None,
+    stats: Counter | None,
+) -> Any:
+    """Select this arm's evidence for a claim and tally what it cost.
+
+    The ``source_id -> source`` map is threaded through instead of being
+    reloaded per row: ``prepare_ragtruth`` iterates ~125k examples, and the
+    production arm calls into hybrid retrieval per claim, so re-reading a
+    15 MB JSONL for every sentence would dominate preparation time.
+    """
+    source = sources.get(str(source_id)) or {}
+    record = shape_record(
+        claim,
+        source.get("source_info", ""),
+        evidence_shape,
+        pool_k=pool_k,
+    )
+    if stats is not None:
+        stats[f"evidence_route:{record.route}"] += 1
+        if record.degraded:
+            stats["evidence_degraded_examples"] += 1
+        if not record.evidence:
+            stats["evidence_empty_examples"] += 1
+    return record
+
+
+def iter_ragtruth_examples(
+    dataset_dir: Path,
+    split: str,
+    stats: Counter | None = None,
+    *,
+    evidence_shape: str = PRODUCTION_SHAPE,
+    sources: dict[str, dict[str, str]] | None = None,
+    pool_k: int | None = None,
+) -> Iterable[dict]:
     """Yield claim examples for one split.
 
     A uniformly annotated sentence yields one sentence-level example. A mixed
     sentence yields one example per annotated region, which is the closest
     claim-level labelling the span annotations support. ``stats`` (if given)
     accumulates the counters reported in ``stats.json``.
+
+    ``evidence_shape`` selects which evidence policy builds the evidence string;
+    it does not touch label derivation, which stays exactly as PR #53 defined
+    it. Pass ``sources`` to reuse an already-loaded source map across splits.
     """
-    sources = {}
-    with (dataset_dir / "source_info.jsonl").open(encoding="utf-8") as handle:
-        for line in handle:
-            row = json.loads(line)
-            sources[str(row["source_id"])] = row
+    sources = _load_sources(dataset_dir) if sources is None else sources
     with (dataset_dir / "response.jsonl").open(encoding="utf-8") as handle:
         for line in handle:
             row = json.loads(line)
             if row["split"] != split or row["quality"] != "good":
                 continue
-            source = sources[str(row["source_id"])]
-            source_info = source["source_info"]
-            if not isinstance(source_info, str):
-                source_info = json.dumps(source_info, ensure_ascii=False, sort_keys=True)
+            task_type = (sources.get(str(row["source_id"])) or {}).get("task_type", "")
             annotations = row.get("labels") or []
             for vocabulary in unknown_label_types(annotations):
                 if stats is not None:
                     stats[f"unknown_label_type:{vocabulary or '<empty>'}"] += 1
             for span in sentence_spans(row["response"]):
-                snippets = lexical_evidence(span.text, [source_info])
-                evidence = " ".join(snippets)
+                record = _evidence_for(
+                    span.text, sources, row["source_id"], evidence_shape, pool_k, stats
+                )
                 label = _uniform_sentence_label(span.start, span.end, annotations)
                 if label is not None:
                     if stats is not None:
@@ -292,8 +363,12 @@ def iter_ragtruth_examples(dataset_dir: Path, split: str, stats: Counter | None 
                     yield {
                         "id": f"{row['id']}:{span.start}-{span.end}",
                         "source_id": str(row["source_id"]),
-                        "task_type": source["task_type"],
-                        "evidence": evidence,
+                        "task_type": task_type,
+                        "evidence": record.evidence,
+                        "evidence_shape": evidence_shape,
+                        "evidence_route": record.route,
+                        "evidence_degraded": record.degraded,
+                        "evidence_snippet_count": record.snippet_count,
                         "claim": span.text,
                         "label": label,
                         "label_id": LABEL_TO_ID[label],
@@ -315,16 +390,24 @@ def iter_ragtruth_examples(dataset_dir: Path, split: str, stats: Counter | None 
                 for index, (region_text, region_label) in enumerate(regions):
                     if stats is not None:
                         stats["span_level_examples"] += 1
+                    region = _evidence_for(
+                        region_text, sources, row["source_id"], evidence_shape, pool_k, stats
+                    )
                     yield {
                         "id": f"{row['id']}:{span.start}-{span.end}#{index}",
                         "source_id": str(row["source_id"]),
-                        "task_type": source["task_type"],
-                        "evidence": " ".join(lexical_evidence(region_text, [source_info])),
+                        "task_type": task_type,
+                        "evidence": region.evidence,
+                        "evidence_shape": evidence_shape,
+                        "evidence_route": region.route,
+                        "evidence_degraded": region.degraded,
+                        "evidence_snippet_count": region.snippet_count,
                         "claim": region_text,
                         "label": region_label,
                         "label_id": LABEL_TO_ID[region_label],
                         "granularity": "span",
                     }
+
 
 
 
@@ -334,12 +417,33 @@ def prepare_ragtruth(
     seed: int = 42,
     dev_fraction: float = 0.1,
     max_supported_ratio: float = 2.0,
+    *,
+    evidence_shape: str = PRODUCTION_SHAPE,
+    pool_k: int | None = None,
 ) -> dict:
-    """Create leakage-safe splits grouped by source document."""
+    """Create leakage-safe splits grouped by source document.
+
+    ``evidence_shape`` defaults to the production arm so the generated
+    training pairs match what the detector is served. ``"lexical_joined"``
+    reproduces the pre-alignment baseline byte-for-byte, which is what makes
+    the Experiment A/B comparison a controlled one rather than a comparison of
+    two codebases that drifted.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     counters: Counter = Counter()
-    train_all = list(iter_ragtruth_examples(dataset_dir, "train", counters))
-    test = list(iter_ragtruth_examples(dataset_dir, "test", counters))
+    sources = _load_sources(dataset_dir)
+    train_all = list(
+        iter_ragtruth_examples(
+            dataset_dir, "train", counters,
+            evidence_shape=evidence_shape, sources=sources, pool_k=pool_k,
+        )
+    )
+    test = list(
+        iter_ragtruth_examples(
+            dataset_dir, "test", counters,
+            evidence_shape=evidence_shape, sources=sources, pool_k=pool_k,
+        )
+    )
     source_ids = sorted({x["source_id"] for x in train_all})
     rng = random.Random(seed)
     rng.shuffle(source_ids)
@@ -366,7 +470,13 @@ def prepare_ragtruth(
             "total": len(records),
             "labels": dict(Counter(x["label"] for x in records)),
             "granularity": dict(Counter(x.get("granularity", "sentence") for x in records)),
+            "evidence_route": dict(
+                Counter(x.get("evidence_route", "unknown") for x in records)
+            ),
+            "degraded_evidence": sum(1 for x in records if x.get("evidence_degraded")),
+            "empty_evidence": sum(1 for x in records if not x.get("evidence")),
         }
+    stats["evidence_shape"] = evidence_shape
     stats["label_noise_controls"] = {
         "full_coverage_threshold": FULL_COVERAGE,
         "known_label_markers": sorted(marker for marker, _ in _MARKER_PAIRS),
