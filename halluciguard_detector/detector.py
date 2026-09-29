@@ -1,11 +1,10 @@
 import inspect
-import json
 from pathlib import Path
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from .calibration import apply_temperature
+from .calibration import DEFAULT_MAX_LENGTH, apply_temperature, load_calibration
 from .evidence import ClaimEvidenceEngine
 from .schemas import ClaimLabel, DetectResponse, RiskLevel, SentenceResult
 from .text import (
@@ -79,15 +78,17 @@ class Detector:
         selected = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(selected)
         self.model.to(self.device).eval()
-        calibration_path = model_path / "calibration.json"
-        calibration = (
-            json.loads(calibration_path.read_text(encoding="utf-8"))
-            if calibration_path.exists()
-            else {}
-        )
+        calibration = load_calibration(model_path / "calibration.json")
         self.temperature = float(calibration.get("temperature", 1.0))
-        self.threshold = float(calibration.get("hallucination_threshold", 0.5))
-        self.max_length = int(calibration.get("max_length", 384))
+        # Two thresholds for two different questions. The near-tie guard below
+        # resolves SUPPORTED-vs-CONTRADICTED disagreement, so it must be driven
+        # by the contradiction threshold. Reading the verification-risk value
+        # here is what previously let a triage score act as a falsity cut-off.
+        self.contradiction_threshold = float(calibration.get("contradiction_threshold", 0.5))
+        self.verification_risk_threshold = float(calibration.get("verification_risk_threshold", 0.5))
+        # Deprecated alias retained for any caller still reading ``threshold``.
+        self.threshold = self.verification_risk_threshold
+        self.max_length = int(calibration.get("max_length", DEFAULT_MAX_LENGTH))
         self.version = model_path.name
         self.evidence = evidence or ClaimEvidenceEngine()
 
@@ -183,7 +184,10 @@ class Detector:
         margin = supported - contradicted
         if margin <= 0.0:
             return False
-        fraction = 0.75 if margin < self.threshold else 0.25
+        # The near-tie band is measured on P(CONTRADICTED), so it uses the
+        # contradiction threshold. A wider SUPPORTED-vs-CONTRADICTED gap is
+        # treated as a decisive call that a secondary check may only nudge.
+        fraction = 0.75 if margin < self.contradiction_threshold else 0.25
         delta = fraction * margin
         guard[ClaimLabel.SUPPORTED] = supported - delta
         guard[ClaimLabel.CONTRADICTED] = contradicted + delta

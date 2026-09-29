@@ -47,12 +47,17 @@ def make_detector(monkeypatch, classify=None, claims=None, evidence_stub=None):
     decomposition. When neither is given, the real (lazy, model-free) code paths
     are used, which is what the evidence-selection tests exercise.
     """
+    from halluciguard_detector.calibration import DEFAULT_MAX_LENGTH
     from halluciguard_detector.detector import Detector
 
     detector = Detector.__new__(Detector)
     detector.temperature = 1.0
-    detector.threshold = 0.5
-    detector.max_length = 384
+    # Separate thresholds: the near-tie guard must be driven by the contradiction
+    # threshold, never by the verification-risk cut-off.
+    detector.contradiction_threshold = 0.5
+    detector.verification_risk_threshold = 0.5
+    detector.threshold = detector.verification_risk_threshold
+    detector.max_length = DEFAULT_MAX_LENGTH
     detector.version = "test"
     detector.evidence = evidence_stub or EvidenceStub()
     if claims is not None:

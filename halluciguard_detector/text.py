@@ -12,6 +12,9 @@ class Span:
 _BOUNDARY = re.compile(r"(?<=[.!?])(?:[\"')\]]*)\s+(?=[\"'(\[]*[A-Z0-9])")
 _TOKEN = re.compile(r"[A-Za-z0-9]+")
 _ENTITY = re.compile(r"\b(?:[A-Z][A-Za-z0-9'-]*)(?:\s+[A-Z][A-Za-z0-9'-]*)*\b")
+#: Words that genuinely start lowercase; used to tell a real proper noun from a
+#: sentence-initial capitalised common word (see ``shared_relation``).
+_LOWERCASE_WORD = re.compile(r"(?<![A-Za-z'])([a-z][A-Za-z0-9'-]*)")
 _ENTITY_STOP = {"The", "A", "An", "It", "This", "That", "In", "On", "At", "By"}
 _NON_TERMINAL = re.compile(
     r"^(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e|[A-Z]|\d+)\.$",
@@ -97,7 +100,17 @@ def shared_relation(claim: str, evidence: str) -> set[str]:
     # them would make every entity conflict look like a shared relation. Bare
     # numbers are excluded too: those are quantities, handled by
     # ``numeric_consistency``, not relations.
-    entity_words = _entity_tokens(claim) | _entity_tokens(evidence)
+    #
+    # A capitalised word is only a proper noun if it never occurs in lowercase.
+    # The entity vocabulary is shared across both texts, so one spurious hit
+    # erases the word from *both* sides: "Released in 1995." reads "Released" as
+    # a name, and the shared predicate "released" then vanishes, hiding a real
+    # 1995-vs-1996 conflict. "Company A" / "Company B" stay excluded because
+    # "company" is only ever capitalised.
+    lowercase_seen: set[str] = set()
+    for text in (claim, evidence):
+        lowercase_seen.update(_LOWERCASE_WORD.findall(text))
+    entity_words = (_entity_tokens(claim) | _entity_tokens(evidence)) - lowercase_seen
     claim_words = {
         w
         for w in _TOKEN.findall(claim.lower())
@@ -134,20 +147,41 @@ _YEAR = re.compile(r"\b(1[89]\d\d|20\d\d)\b")
 def numeric_consistency(claim: str, evidence: str) -> list[str]:
     """Report lightweight number/date/percent mismatches between claim and evidence.
 
-    Conservative by design (no giant rule engine): it fires only when BOTH sides
-    use the same quantity unit (percent, million, billion, ...) with different
-    values, or when both mention years and the year sets are disjoint. Raw
-    numbers without a mismatching unit/context are ignored so dates, IDs and
-    naturally different statistics are not treated as contradictions.
+    Conservative by design (no giant rule engine). Every reported mismatch must
+    clear two bars:
+
+    1. Both texts must share a relation word once named entities and bare
+       numbers are removed, so the two statements are about a comparable
+       predicate. Without this, "Tesla was founded in 2003" against "Tesla
+       went public in 2018" looks like a year conflict even though they are
+       different facts about different events, and a plain year disagreement
+       would manufacture contradiction mass.
+    2. For quantities, both sides must use the same unit, so a percentage is
+       never compared against a raw count.
+
+    Raw numbers with no mismatching unit/context are ignored, so dates, IDs and
+    naturally different statistics are not treated as contradictions. This is a
+    secondary signal only: it may resolve a near-tie and never overturn a
+    decisive model call.
     """
     conflicts: list[str] = []
 
+    # Comparability gate. A disagreement about numbers or years only speaks to
+    # the claim's truth when both texts are talking about the same relation.
+    if not shared_relation(claim, evidence):
+        return conflicts
+
     def quantities(text: str) -> list[tuple[str, str]]:
+        # A unit is required. Unitless numbers are deliberately ignored: giving
+        # them a placeholder unit made *any* two differing bare integers in a
+        # comparable sentence a "conflict", so identifiers ("record id 12345"
+        # vs "98765") and plain counts were reported as contradictions. Years
+        # are handled separately below, where 1995-vs-1996 really is a clash.
         lowered = text.lower()
         return [
-            (num.replace(",", ""), (unit or "unit").lower())
+            (num.replace(",", ""), (unit or "").lower())
             for num, unit in _QUANTITY.findall(lowered)
-            if not (len(num) == 4 and num.isdigit())
+            if unit and not (len(num) == 4 and num.isdigit())
         ]
 
     claim_q = quantities(claim)
@@ -157,7 +191,7 @@ def numeric_consistency(claim: str, evidence: str) -> list[str]:
         if unit in units_in_claim:
             claim_nums = {n for n, u in claim_q if u == unit}
             if claim_nums and num not in claim_nums:
-                conflicts.append(f"conflicting {unit or 'quantity'}: '{num} {unit}' vs claim")
+                conflicts.append(f"conflicting {unit}: '{num} {unit}' vs claim")
 
     claim_years = set(_YEAR.findall(claim))
     evidence_years = set(_YEAR.findall(evidence))
