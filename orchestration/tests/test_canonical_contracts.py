@@ -115,6 +115,71 @@ def test_invalid_probability_values():
         )
 
 
+def test_detector_result_carries_both_triage_and_refutation_scores():
+    """The canonical contract must carry the correctly-named detector fields.
+
+    ``verification_risk`` (triage: contradicted OR unverified) and
+    ``contradiction_mass`` (refutation only) must survive the contract so a
+    consumer cannot mistake "unverified" for "false". The deprecated
+    ``hallucination_probability`` stays required for backward compatibility.
+    """
+    detector = DetectorResult(
+        hallucination_probability=0.95,
+        verification_risk=0.95,
+        contradiction_mass=0.90,
+        confidence_score=0.85,
+        risk_level=RiskLevel.HIGH,
+        next_action=NextAction.VERIFY,
+    )
+    assert detector.verification_risk == 0.95
+    assert detector.contradiction_mass == 0.90
+
+
+def test_detector_result_legacy_field_still_optional_augmentation():
+    """Existing producers that only send the legacy field must still validate."""
+    detector = DetectorResult(
+        hallucination_probability=0.40,
+        confidence_score=0.85,
+        risk_level=RiskLevel.MEDIUM,
+        next_action=NextAction.VERIFY,
+    )
+    assert detector.hallucination_probability == 0.40
+    # The new fields are optional, so no producer is forced to change.
+    assert detector.verification_risk is None
+    assert detector.contradiction_mass is None
+
+
+def test_detector_result_legacy_field_is_not_documented_as_falsity():
+    """The contract must not teach the falsity reading of the triage score."""
+    field = DetectorResult.model_fields["hallucination_probability"]
+    description = (field.description or "").lower()
+    assert "deprecated" in description
+    assert "verification_risk" in description
+    # It must no longer be *asserted* as a probability of hallucination: the
+    # phrase may only appear inside an explicit negation.
+    assert "not the probability that the response contains hallucinations" in description
+    assert "estimated probability that the response contains hallucinations" not in description
+
+
+def test_detector_result_rejects_out_of_range_new_scores():
+    with pytest.raises(ValidationError):
+        DetectorResult(
+            hallucination_probability=0.20,
+            verification_risk=1.5,
+            confidence_score=0.85,
+            risk_level=RiskLevel.LOW,
+            next_action=NextAction.ACCEPT,
+        )
+    with pytest.raises(ValidationError):
+        DetectorResult(
+            hallucination_probability=0.20,
+            contradiction_mass=-0.1,
+            confidence_score=0.85,
+            risk_level=RiskLevel.LOW,
+            next_action=NextAction.ACCEPT,
+        )
+
+
 # ---------------------------------------------------------------------------
 # 3. Evidence Contract Tests
 # ---------------------------------------------------------------------------

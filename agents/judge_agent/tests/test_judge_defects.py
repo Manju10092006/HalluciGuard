@@ -357,3 +357,82 @@ def test_decision_metrics_are_structured_and_detector_triage_only():
         {"verified_claims", "contradicted_claims", "unverified_claims",
          "material_contradictions", "material_unknowns", "detector_role"}
     )
+
+
+# ---------------------------------------------------------------------------
+# Detector score semantics at the Judge boundary.
+#
+# The detector's headline score is an operational triage prior,
+# P(CONTRADICTED) + P(NOT_ENOUGH_INFO) — "how urgently does this need
+# verification" — not "the probability this answer is false". These tests pin the
+# two ways that distinction used to be lost.
+# ---------------------------------------------------------------------------
+
+
+def test_normalizer_prefers_canonical_verification_risk_over_legacy_alias():
+    """A detector that emits only the canonical name must not read as 0.0."""
+    norm = JudgeAgent()._normalize_detector_result
+    out = norm(
+        {
+            "verification_risk": 0.85,
+            "confidence_score": 0.9,
+            "risk_level": "HIGH",
+            "next_action": "Verify",
+            "status": "completed",
+        }
+    )
+    assert out is not None
+    assert _str(out.next_action).upper() == "VERIFY"
+    assert out.hallucination_probability == 0.85
+
+
+def test_normalizer_still_accepts_the_legacy_alias():
+    """Backward compatibility: the deprecated field alone must still be honoured."""
+    norm = JudgeAgent()._normalize_detector_result
+    out = norm({"hallucination_probability": 0.85, "confidence_score": 0.9})
+    assert out is not None
+    assert out.hallucination_probability == 0.85
+    assert _str(out.next_action).upper() == "VERIFY"
+
+
+def test_unknown_only_detector_result_is_never_accepted():
+    """High verification_risk driven purely by NOT_ENOUGH_INFO must not ACCEPT.
+
+    The score is high because the evidence was insufficient, not because the
+    answer was refuted. Accepting on that score would treat missing evidence as
+    proof of correctness.
+    """
+    norm = JudgeAgent()._normalize_detector_result
+    out = norm(
+        {
+            "verification_risk": 0.25,
+            "contradiction_mass": 0.0,
+            "confidence_score": 0.9,
+            "contradicted_count": 0,
+            "unknown_count": 3,
+            "risk_level": "LOW",
+            "next_action": "Accept",
+            "status": "completed",
+        }
+    )
+    assert out is not None
+    assert _str(out.next_action).upper() == "VERIFY"
+
+
+def test_fully_supported_detector_result_still_accepts():
+    """The unverified-only guard must not block a genuinely verified answer."""
+    norm = JudgeAgent()._normalize_detector_result
+    out = norm(
+        {
+            "verification_risk": 0.05,
+            "contradiction_mass": 0.0,
+            "confidence_score": 0.9,
+            "contradicted_count": 0,
+            "unknown_count": 0,
+            "risk_level": "LOW",
+            "next_action": "Accept",
+            "status": "completed",
+        }
+    )
+    assert out is not None
+    assert _str(out.next_action).upper() == "ACCEPT"

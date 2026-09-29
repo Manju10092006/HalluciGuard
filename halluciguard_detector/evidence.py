@@ -197,7 +197,9 @@ def select_evidence(
             k=pool_k,
             dense_model=dense_model,
         )
-        ranked = _reranker.rerank(claim, merged[: pool_k + 1], k=rerank_top)
+        # The shared retriever already returns at most ``pool_k`` fused
+        # candidates, so the slice is a no-op guard rather than an extra slot.
+        ranked = _reranker.rerank(claim, merged[:pool_k], k=rerank_top)
         snippets = [p.snippet for p in ranked if p.snippet and p.snippet.strip()]
         if snippets:
             _record_route(trace, "hybrid", False)

@@ -101,12 +101,39 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    # The refutation signal is derived, never invented. Prefer the canonical
+    # answer-level field; otherwise fall back to the claim-level
+    # P(CONTRADICTED) values. When the detector produced no probability at all
+    # there is no refutation evidence, so it stays None: a 0.0 would falsely
+    # assert that nothing was refuted.
+    if not probability_available:
+        contradiction_mass: float | None = None
+    elif result.get("contradiction_mass") is not None:
+        contradiction_mass = float(result["contradiction_mass"] or 0.0)
+    else:
+        contradiction_mass = max(
+            (
+                float(claim["contradicted_probability"] or 0.0)
+                for claim in per_claim_results
+                if not claim["non_factual"]
+            ),
+            default=0.0,
+        )
+
     diagnostics = result.get("diagnostics") or {}
     return {
+        # Kept under the historical key for backward compatibility. The value is
+        # the detector's operational verification risk (P(CONTRADICTED) +
+        # P(NOT_ENOUGH_INFO)), NOT a probability that the answer is false;
+        # ``verification_risk`` below is the canonical name.
         "hallucination_probability": probability,
         "verification_risk": float(
             result.get("verification_risk", probability) or 0.0
         ),
+        # The only signal about actual refutation, kept separate from the
+        # verification risk so downstream cannot mistake "unverified" for
+        # "refuted". Verifier and Judge read this alongside the claim counts.
+        "contradiction_mass": contradiction_mass,
         "probability_available": probability_available,
         "confidence_score": confidence,
         "risk_level": risk_level,
