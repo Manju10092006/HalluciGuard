@@ -6,58 +6,16 @@ monkeypatched. They lock in the behavioral guarantees the feature shipped with.
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
+from helpers import EvidenceStub, make_detector, mapping
 
-from halluciguard_detector.detector import Detector
+from halluciguard_detector.detector import Detector  # noqa: F401
 from halluciguard_detector.evidence import select_evidence
 from halluciguard_detector.schemas import ClaimLabel
 from halluciguard_detector.text import numeric_consistency
 
-
-class EvidenceStub:
-    def __init__(self, decomposed=None, checkable=True, snippets=None):
-        self._decomposed = decomposed
-        self._checkable = checkable
-        self._snippets = snippets or {}
-
-    def decompose(self, text):
-        return list(self._decomposed or [])
-
-    def checkable(self, text):
-        return bool(self._checkable)
-
-    def select(self, claim, evidence_texts):
-        if claim in self._snippets:
-            return list(self._snippets[claim])
-        return list(evidence_texts)
-
-
-def make_detector(monkeypatch, classify=None, claims=None, evidence_stub=None):
-    detector = Detector.__new__(Detector)
-    detector.temperature = 1.0
-    detector.threshold = 0.5
-    detector.max_length = 384
-    detector.version = "test"
-    detector.evidence = evidence_stub or EvidenceStub()
-    if claims is not None:
-        monkeypatch.setattr(detector, "_atomic_claims", lambda answer: list(claims))
-    if classify is not None:
-        monkeypatch.setattr(detector, "_classify", classify)
-    return detector
-
-
 CLAIM = "Java was created by Snehith in 1995."
 EVIDENCE = ["Java was created by James Gosling in 1995."]
-
-
-def mapping(supported, contradicted, unknown):
-    return {
-        ClaimLabel.SUPPORTED: supported,
-        ClaimLabel.CONTRADICTED: contradicted,
-        ClaimLabel.NOT_ENOUGH_INFO: unknown,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -125,10 +83,10 @@ def test_separate_class_probabilities_round_trip(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Test 5: numeric/date/percent mismatch is a warning + secondary signal, never
-# an invented 0.05/0.90/0.05.
+# Test 5: a same-unit quantity / year mismatch reinforces contradiction
+# (bounded) so a topic-similar but numerically-wrong claim is not left SUPPORTED.
 # ---------------------------------------------------------------------------
-def test_numeric_mismatch_primes_warning_without_inventing_probs(monkeypatch):
+def test_numeric_mismatch_reinforces_contradiction_without_inventing_probs(monkeypatch):
     detector = make_detector(monkeypatch, classify=lambda c, e: mapping(0.85, 0.05, 0.10))
     detector._atomic_claims = lambda a: [("Released in 1995.", (0, 17))]
     result = detector.detect(
@@ -137,8 +95,12 @@ def test_numeric_mismatch_primes_warning_without_inventing_probs(monkeypatch):
     )
     item = result.sentences[0]
     assert any("Number/date mismatch" in w for w in result.warnings)
-    assert item.supported_probability == pytest.approx(0.85)
-    assert item.label == ClaimLabel.SUPPORTED
+    # Contradiction rises above its floor but stays below an absolute 0.90
+    # overwrite; supported drops correspondingly and the mass still sums to 1.
+    assert item.contradicted_probability > 0.05
+    assert item.contradicted_probability < 0.90
+    total = item.supported_probability + item.contradicted_probability + item.unknown_probability
+    assert total == pytest.approx(1.0)
 
 
 def test_numeric_consistency_detects_year_conflict():
