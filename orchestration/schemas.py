@@ -214,7 +214,33 @@ class DetectorResult(BaseModel):
         ...,
         ge=0.0,
         le=1.0,
-        description="Estimated probability that the response contains hallucinations (0.0 to 1.0).",
+        description=(
+            "DEPRECATED alias of verification_risk, kept for backward "
+            "compatibility. The detector reports P(CONTRADICTED) + "
+            "P(NOT_ENOUGH_INFO): an operational triage score for how urgently "
+            "the claim needs verification. It is NOT the probability that the "
+            "response contains hallucinations. Use verification_risk and "
+            "contradiction_mass in new code."
+        ),
+    )
+    verification_risk: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Operational triage score P(CONTRADICTED) + P(NOT_ENOUGH_INFO): how "
+            "strongly this output still needs verification. Not a probability of "
+            "falsity. Rises for contradicted AND merely unverified claims."
+        ),
+    )
+    contradiction_mass: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Max P(CONTRADICTED) over assessed claims: the only signal that the "
+            "evidence refutes the claim. NOT_ENOUGH_INFO never contributes to it."
+        ),
     )
     confidence_score: float = Field(
         ...,

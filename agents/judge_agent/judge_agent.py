@@ -1028,7 +1028,16 @@ class JudgeAgent:
                 return DetectorResult.model_validate(detector_result)
             except Exception:
                 from orchestration.schemas import RiskLevel, NextAction
-                prob = float(detector_result.get("hallucination_probability", 0.0))
+                # The detector score is an operational TRIAGE prior
+                # (P(CONTRADICTED) + P(NOT_ENOUGH_INFO)), not the probability
+                # that the response is false. Read the canonical name first and
+                # keep the deprecated alias as a fallback, so a detector that
+                # stops emitting the alias is not silently read as 0.0 (which
+                # would launder a real signal into an Accept).
+                raw_prob = detector_result.get("verification_risk")
+                if raw_prob is None:
+                    raw_prob = detector_result.get("hallucination_probability", 0.0)
+                prob = float(raw_prob)
                 conf = float(detector_result.get("confidence_score", 0.8))
                 # Honesty gate: a degraded / non-completed detector run has no
                 # trustworthy probability, so we must NOT derive Accept/LOW from it
@@ -1045,11 +1054,21 @@ class JudgeAgent:
                         status=ExecutionStatus.DEGRADED,
                     )
                 risk = RiskLevel.HIGH if prob >= 0.7 else (RiskLevel.MEDIUM if prob >= 0.4 else RiskLevel.LOW)
+                # A response whose claims are merely NOT_ENOUGH_INFO is not
+                # evidence of falsehood, but it is also not verified: a low
+                # triage score driven only by unverified claims must not be
+                # accepted. Only contradiction justifies a high risk band.
+                contradicted = int(detector_result.get("contradicted_count") or 0)
+                unknown = int(detector_result.get("unknown_count") or 0)
+                unverified_only = unknown > 0 and contradicted == 0
+                next_action = NextAction.ACCEPT
+                if prob >= 0.3 or unverified_only:
+                    next_action = NextAction.VERIFY
                 return DetectorResult(
                     hallucination_probability=prob,
                     confidence_score=conf,
                     risk_level=risk,
-                    next_action=NextAction.VERIFY if prob >= 0.3 else NextAction.ACCEPT,
+                    next_action=next_action,
                     status=ExecutionStatus.COMPLETED
                 )
         return None

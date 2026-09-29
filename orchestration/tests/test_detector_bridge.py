@@ -1,6 +1,8 @@
 """Tests for the single HalluciGuard detector integration seam."""
 from __future__ import annotations
 
+import pytest
+
 from orchestration import detector_bridge as db
 
 
@@ -54,6 +56,98 @@ def test_grounded_result_maps_claims(monkeypatch):
     assert out["per_claim_results"][0]["claim_id"] == "c1"
     assert out["per_claim_results"][0]["label"] == "CONTRADICTED"
     assert out["per_claim_results"][1]["requires_verification"] is False
+
+
+def test_bridge_forwards_refutation_signal_separately(monkeypatch):
+    """contradiction_mass must survive the seam so Verifier/Judge can see it."""
+    payload = _grounded(
+        hallucination_probability=0.95,
+        verification_risk=0.95,
+        contradiction_mass=0.90,
+        unknown_count=1,
+    )
+    monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(payload))
+    out = db.run_detection("q", "r")
+    # The triage score and the refutation signal are both present and distinct
+    # in meaning: a high verification_risk with a low contradiction_mass means
+    # "unverified", NOT "false".
+    assert out["verification_risk"] == 0.95
+    assert out["contradiction_mass"] == 0.90
+    assert out["hallucination_probability"] == 0.95  # legacy alias preserved
+
+
+def test_bridge_derives_contradiction_mass_from_claims_when_absent(monkeypatch):
+    """An older payload without the answer-level field is still refutation-honest."""
+    payload = _grounded()
+    payload["claims"] = [
+        {
+            "claim_id": 1, "text": "Claim one.", "span": [0, 10], "claim_risk": 0.72,
+            "label": "CONTRADICTED", "risk_level": "HIGH", "requires_verification": True,
+            "contradicted_probability": 0.61,
+        },
+        {
+            "claim_id": 2, "text": "Claim two.", "span": [11, 21], "claim_risk": 0.10,
+            "label": "SUPPORTED", "risk_level": "LOW", "requires_verification": False,
+            "contradicted_probability": 0.02,
+        },
+    ]
+    monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(payload))
+    out = db.run_detection("q", "r")
+    # Max P(CONTRADICTED) across assessed claims, exactly as the agent computes.
+    assert out["contradiction_mass"] == pytest.approx(0.61)
+
+
+def test_bridge_excludes_non_factual_from_derived_contradiction_mass(monkeypatch):
+    """An opinion claim must not contribute to the refutation signal."""
+    payload = _grounded()
+    payload["claims"] = [
+        {
+            "claim_id": 1, "text": "Best language ever.", "claim_risk": 0.5,
+            "label": "NOT_ENOUGH_INFO", "contradicted_probability": 0.9,
+            "non_factual": True, "requires_verification": False,
+        },
+    ]
+    monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(payload))
+    out = db.run_detection("q", "r")
+    assert out["contradiction_mass"] == pytest.approx(0.0)
+
+
+def test_bridge_defaults_contradiction_mass_when_absent(monkeypatch):
+    """A grounded run that reports no refutation means exactly zero mass."""
+    monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(_grounded()))
+    out = db.run_detection("q", "r")
+    assert out["contradiction_mass"] == 0.0
+
+
+def test_bridge_never_fabricates_refutation_evidence_on_pre_verification(monkeypatch):
+    """No detector probability => no refutation claim (None, not a fake 0.0)."""
+    payload = _grounded()
+    payload["hallucination_probability"] = None
+    payload["verification_risk"] = None
+    payload["contradiction_mass"] = None
+    monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(payload))
+    out = db.run_detection("q", "r")
+    assert out["probability_available"] is False
+    assert out["contradiction_mass"] is None
+    # Still fails closed to verification.
+    assert out["next_action"] == "Verify"
+
+
+def test_bridge_keeps_unknown_out_of_contradiction(monkeypatch):
+    """An unverified-only answer must not present a refutation signal."""
+    payload = _grounded(
+        hallucination_probability=0.90,
+        verification_risk=0.90,
+        contradiction_mass=0.0,
+        contradicted_count=0,
+        unknown_count=2,
+    )
+    monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(payload))
+    out = db.run_detection("q", "r")
+    assert out["contradiction_mass"] == 0.0
+    assert out["unknown_count"] == 2
+    # Still routed to verification, because unverified is not accepted.
+    assert out["next_action"] == "Verify"
 
 
 def test_grounded_production_entrypoint_passes_verifier_evidence(monkeypatch):

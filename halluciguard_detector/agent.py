@@ -129,11 +129,29 @@ class DetectorAgent:
                 getattr(grounded, "probability", 0.0),
             )
         )
+        # Max P(CONTRADICTED) over assessed claims. This is the only field that
+        # speaks about falsehood, so it is forwarded separately from
+        # verification_risk to keep "refuted" and "still needs checking" apart.
+        contradiction_mass = float(
+            getattr(
+                grounded,
+                "contradiction_mass",
+                max(
+                    (
+                        getattr(sentence, "contradicted_probability", 0.0)
+                        for sentence in grounded.sentences
+                        if not getattr(sentence, "non_factual", False)
+                    ),
+                    default=0.0,
+                ),
+            )
+        )
         return {
             # Legacy field retained; semantically the operational verification
             # risk (P(CONTRADICTED) + P(NOT_ENOUGH_INFO)), not P(hallucinated).
             "hallucination_probability": grounded.probability,
             "verification_risk": verification_risk,
+            "contradiction_mass": contradiction_mass,
             "confidence_score": float(confidence),
             "risk_level": grounded.risk.value,
             "next_action": "Verify" if grounded.requires_verification else "Accept",
@@ -152,7 +170,8 @@ class DetectorAgent:
                 "conflicts, NOT_ENOUGH_INFO=insufficient evidence (never folded "
                 "into contradiction); verification_risk=operational triage score "
                 "P(CONTRADICTED)+P(NOT_ENOUGH_INFO), not a probability the claim "
-                "is false; final decision belongs to the Judge"
+                "is false; contradiction_mass=max P(CONTRADICTED), the only "
+                "refutation signal; final decision belongs to the Judge"
             ),
             "verification_reason": (
                 "one_or_more_claims_not_supported" if grounded.requires_verification else None
@@ -204,6 +223,7 @@ class DetectorAgent:
         return {
             "hallucination_probability": None,
             "verification_risk": None,
+            "contradiction_mass": None,
             "confidence_score": None,
             "risk_level": "HIGH",
             "next_action": "Verify",

@@ -189,6 +189,35 @@ class Detector:
         guard[ClaimLabel.CONTRADICTED] = contradicted + delta
         return True
 
+    @staticmethod
+    def _normalize_class_mapping(mapping: dict[ClaimLabel, float]) -> dict[ClaimLabel, float]:
+        """Coerce a classifier output into a complete, well-formed distribution.
+
+        Every downstream score assumes three explicit class probabilities that
+        sum to 1. An absent class is never a soft signal to be guessed: a missing
+        CONTRADICTED probability means *no refutation was found*, so it must read
+        as exactly 0.0 rather than as a weak contradiction. Renormalizing across
+        the classes that are present preserves the sum-to-1 invariant without
+        inventing any probability.
+        """
+        values: dict[ClaimLabel, float] = {}
+        for label in LABELS:
+            raw = mapping.get(label) if mapping else None
+            try:
+                value = float(raw) if raw is not None else 0.0
+            except (TypeError, ValueError):
+                value = 0.0
+            values[label] = min(1.0, max(0.0, value))
+        total = sum(values.values())
+        if total <= 0.0:
+            # Nothing usable was reported: stay conservative and unverified.
+            return {
+                ClaimLabel.SUPPORTED: 0.0,
+                ClaimLabel.CONTRADICTED: 0.0,
+                ClaimLabel.NOT_ENOUGH_INFO: 1.0,
+            }
+        return {label: value / total for label, value in values.items()}
+
     def _guard_signals(
         self,
         claim: str,
@@ -307,7 +336,7 @@ class Detector:
                 # pair stays within max_length; the fuller snippet list is kept
                 # on the result for inspection.
                 best = snippets[0]
-                mapping = self._classify(claim_text, best)
+                mapping = self._normalize_class_mapping(self._classify(claim_text, best))
                 mapping, item_warnings = self._guard_signals(claim_text, best, mapping)
 
             label = max(mapping, key=mapping.get) if mapping else ClaimLabel.NOT_ENOUGH_INFO

@@ -17,12 +17,14 @@ These lock in the fixes for the "remaining issues" pass:
 """
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
 from helpers import EvidenceStub, make_detector
 
 import halluciguard_detector.evidence as evidence_module
+from halluciguard_detector.detector import Detector
 from halluciguard_detector.evidence import ClaimEvidenceEngine, select_evidence
 from halluciguard_detector.schemas import ClaimLabel
 from halluciguard_detector.text import (
@@ -34,6 +36,131 @@ from halluciguard_detector.text import (
 S = ClaimLabel.SUPPORTED
 C = ClaimLabel.CONTRADICTED
 N = ClaimLabel.NOT_ENOUGH_INFO
+
+
+# ---------------------------------------------------------------------------
+# Canonical supported / contradicted / unknown cases.
+# ---------------------------------------------------------------------------
+def test_supported_claim(monkeypatch):
+    claim = "The Earth orbits the Sun."
+    detector = make_detector(
+        monkeypatch,
+        claims=[(claim, (0, len(claim)))],
+        classify=lambda c, e: {S: 0.92, C: 0.04, N: 0.04},
+        evidence_stub=EvidenceStub(snippets={claim: ["The Earth revolves around the Sun."]}),
+    )
+    result = detector.detect(
+        draft_answer=claim,
+        evidence=["The Earth revolves around the Sun."],
+    )
+    assert result.sentences[0].label == S
+    assert result.supported_count == 1
+    assert result.contradicted_count == 0
+    assert result.unknown_count == 0
+    assert result.contradiction_mass == pytest.approx(0.04)
+    assert result.requires_verification is False
+    assert result.label == "NO_HALLUCINATION"
+
+
+def test_contradicted_claim(monkeypatch):
+    claim = "The Earth is the center of the solar system."
+    detector = make_detector(
+        monkeypatch,
+        claims=[(claim, (0, len(claim)))],
+        classify=lambda c, e: {S: 0.03, C: 0.94, N: 0.03},
+        evidence_stub=EvidenceStub(snippets={claim: ["The Earth orbits the Sun."]}),
+    )
+    result = detector.detect(
+        draft_answer=claim,
+        evidence=["The Earth orbits the Sun."],
+    )
+    assert result.sentences[0].label == C
+    assert result.contradicted_count == 1
+    assert result.contradiction_mass == pytest.approx(0.94)
+    assert result.label == "HALLUCINATION"
+
+
+def test_unknown_claim_with_only_related_evidence(monkeypatch):
+    claim = "The company generated $5 billion revenue."
+    detector = make_detector(
+        monkeypatch,
+        claims=[(claim, (0, len(claim)))],
+        classify=lambda c, e: {S: 0.06, C: 0.05, N: 0.89},
+        evidence_stub=EvidenceStub(snippets={claim: ["The company operates globally."]}),
+    )
+    result = detector.detect(
+        draft_answer=claim,
+        evidence=["The company operates globally."],
+    )
+    assert result.sentences[0].label == N
+    assert result.unknown_count == 1
+    # Insufficient evidence carries NO refutation signal at all.
+    assert result.contradiction_mass == pytest.approx(0.05)
+    assert result.contradicted_count == 0
+    assert result.requires_verification is True
+    assert result.label == "NO_HALLUCINATION"
+
+
+def test_class_mapping_normalization_keeps_the_sum_to_one_invariant():
+    """A partial or malformed classifier output is coerced, never trusted raw.
+
+    The three class probabilities are read as a distribution everywhere
+    downstream, so a head that omits a class (or reports values that do not sum
+    to 1) must be normalized rather than crashing or skewing the scores.
+    """
+    normalize = Detector._normalize_class_mapping
+
+    # Missing CONTRADICTED becomes exactly 0.0, and the rest still sum to 1.
+    mapping = normalize({S: 0.2, N: 0.8})
+    assert mapping[C] == pytest.approx(0.0)
+    assert sum(mapping.values()) == pytest.approx(1.0)
+
+    # Values that do not sum to 1 are renormalized over the classes present.
+    mapping = normalize({S: 0.5, N: 0.5})
+    assert mapping[S] == pytest.approx(0.5)
+    assert mapping[C] == pytest.approx(0.0)
+    assert sum(mapping.values()) == pytest.approx(1.0)
+
+    # Out-of-range and non-numeric input is clamped rather than trusted.
+    mapping = normalize({S: 5.0, C: "nope", N: -2.0})
+    assert all(0.0 <= v <= 1.0 for v in mapping.values())
+    assert sum(mapping.values()) == pytest.approx(1.0)
+
+    # Nothing usable at all: stay conservative and unverified rather than
+    # defaulting to a distribution that implies support.
+    mapping = normalize({})
+    assert mapping[N] == pytest.approx(1.0)
+    assert mapping[C] == pytest.approx(0.0)
+    assert mapping[S] == pytest.approx(0.0)
+
+
+def test_absent_contradiction_probability_yields_zero_contradiction_mass(monkeypatch):
+    """The exact invariant: no refutation probability -> contradiction_mass == 0.
+
+    ``contradiction_mass`` is max(P(CONTRADICTED)). When the classifier assigns
+    no contradiction probability at all, that maximum is exactly zero -- it must
+    not be borrowed from the unknown mass or defaulted to a small positive
+    number that would read as a weak refutation.
+    """
+    claim = "The company operates globally."
+    detector = make_detector(
+        monkeypatch,
+        claims=[(claim, (0, len(claim)))],
+        classify=lambda c, e: {S: 0.10, N: 0.90},
+        evidence_stub=EvidenceStub(snippets={claim: ["The company operates in 50+ countries."]}),
+    )
+    result = detector.detect(
+        draft_answer=claim,
+        evidence=["The company operates in more than 50 countries."],
+    )
+    assert result.sentences[0].label == N
+    assert result.sentences[0].contradicted_probability == pytest.approx(0.0)
+    assert result.contradiction_mass == pytest.approx(0.0)
+    assert result.contradicted_count == 0
+    # Zero refutation is NOT acceptance: the claim is still merely unverified.
+    assert result.requires_verification is True
+    assert result.verification_risk == pytest.approx(0.90)
+    assert result.label == "NO_HALLUCINATION"
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +188,11 @@ def test_unknown_only_answer_is_not_labeled_hallucination(monkeypatch):
     assert result.requires_verification is True
     assert result.unknown_count == 1
     assert result.contradicted_count == 0
+    # An unknown-dominated answer carries no refutation signal whatsoever.
+    assert result.contradiction_mass < 0.10
+    # The operational triage score is nevertheless high, because the claim is
+    # unverified. This is the exact reason it must not be read as falsity.
+    assert result.verification_risk > 0.85
 
 
 def test_verification_risk_present_and_separate_from_contradiction(monkeypatch):
@@ -414,6 +546,27 @@ def test_hybrid_path_uses_shared_stack_and_reranks_on_real_claim(monkeypatch):
     assert rerank_calls[0][1] == claim
     # Returned evidence is capped by rerank_top.
     assert len(snippets) <= 2
+
+
+def test_retrieval_config_is_honest(monkeypatch):
+    """No dead knobs: pool_k is the retriever's k, rerank_top caps the output.
+
+    The shared HybridRetriever exposes a single fused top-k cap and derives its
+    own per-backend candidate window, so a separate ``candidate_k`` would be
+    configuration that silently does nothing. Guard against it returning.
+    """
+    assert not hasattr(ClaimEvidenceEngine, "candidate_k")
+    assert "candidate_k" not in inspect.signature(ClaimEvidenceEngine).parameters
+    assert "candidate_k" not in inspect.signature(select_evidence).parameters
+
+    retriever = _FakeRetriever()
+    reranker = _FakeReranker()
+    _install_fake_shared_stack(monkeypatch, retriever, reranker)
+    engine = ClaimEvidenceEngine(pool_k=7, rerank_top=2)
+    engine.select("The Earth orbits the Sun.", ["a", "b", "c", "d", "e", "f", "g", "h"])
+    # pool_k is actually forwarded as the retriever's k, not silently ignored.
+    assert retriever.calls[0][2] == 7
+    assert reranker.calls[0][2] == 2
 
 
 def test_lexical_fallback_when_shared_stack_unavailable(monkeypatch):

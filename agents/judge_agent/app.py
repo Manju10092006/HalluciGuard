@@ -445,7 +445,7 @@ function renderResults(d) {
       <div class="section-title">Detector Agent Signal (Input)</div>
       <div class="metrics-grid" style="grid-template-columns:1fr 1fr">
         <div class="metric-card">
-          <div class="metric-label">Hallucination Probability</div>
+          <div class="metric-label">Verification Risk (triage, not falsity)</div>
           <div class="metric-value" style="color:${d.detector_signal.hallucination_probability>=0.5?'var(--red)':d.detector_signal.hallucination_probability>=0.3?'var(--yellow)':'var(--green)'}">${(d.detector_signal.hallucination_probability*100).toFixed(0)}%</div>
         </div>
         <div class="metric-card">
