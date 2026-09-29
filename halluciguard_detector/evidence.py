@@ -27,10 +27,11 @@ _VERIFIER_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
 )
 
-# Tunables. These are the DeBERTa claim-verification default budgets; the
-# Verifier's HybridRetriever keeps its own internal boxing, these control how
-# many candidates are requested from it before reranking.
-DEFAULT_CANDIDATE_K = 10
+# Retrieval budget. The shared ``HybridRetriever`` exposes a single ``k``
+# (fused top-k output cap) and derives its own per-backend candidate window
+# internally, so there is only one honest knob here: how many merged candidates
+# the hybrid stage returns before the cross-encoder narrows them to
+# ``rerank_top`` snippets. An independent "candidate_k" would be dead config.
 DEFAULT_POOL_K = 20
 DEFAULT_RERANK_TOP = 3
 
@@ -126,30 +127,66 @@ def _to_passage(text: str) -> Any:
     )
 
 
+def _record_route(
+    trace: dict[str, Any] | None,
+    route: str,
+    degraded: bool,
+    reason: str = "",
+) -> None:
+    """Record which selection route ran, so a fallback is traceable.
+
+    ``select_evidence`` returns only snippets for backward compatibility, so the
+    route is written into the caller-supplied ``trace`` dict instead. This keeps
+    the degraded case observable (and loggable) without changing the return type
+    or fabricating any confidence value.
+    """
+    if trace is None:
+        return
+    trace["route"] = route
+    trace["degraded"] = degraded
+    if reason:
+        trace["reason"] = reason
+
+
 def select_evidence(
     claim: str,
     evidence_texts: Sequence[str],
     *,
-    candidate_k: int = DEFAULT_CANDIDATE_K,
     pool_k: int = DEFAULT_POOL_K,
     rerank_top: int = DEFAULT_RERANK_TOP,
     dense_model: Optional[str] = None,
+    trace: dict[str, Any] | None = None,
 ) -> List[str]:
     """Select and rank evidence snippets for an atomic claim.
 
-    Uses shared HybridRetriever (BM25 + dense/FAISS rank fusion) then reranks
-    the merged pool with the shared cross-encoder. The reranker always receives
-    the REAL claim (never a rewritten retrieval query), preserving the fix from
-    PR #49. Falls back to deterministic lexical selection when the shared stack
-    is unavailable or fails.
+    Uses the shared HybridRetriever (BM25 + dense/FAISS rank fusion) then
+    reranks the merged pool with the shared cross-encoder. ``pool_k`` is the
+    number of merged hybrid candidates requested; ``rerank_top`` is how many
+    reranked snippets are returned. The reranker always receives the REAL claim
+    (never a rewritten retrieval query), preserving the fix from PR #49. Falls
+    back to deterministic lexical selection when the shared stack is
+    unavailable or fails.
+
+    ``trace``, when provided, is filled with the route that actually ran so the
+    caller can expose and report a degraded selection instead of hiding it.
     """
     if not claim.strip() or not evidence_texts:
+        _record_route(trace, "empty", True, "no claim text or no evidence supplied")
         return []
     texts = [t for t in evidence_texts if t and t.strip()]
     if not texts:
+        _record_route(trace, "empty", True, "no non-empty evidence supplied")
         return []
 
     if not _ensure_verifier() or _hybrid_retriever is None or _reranker is None:
+        reason = "shared hybrid retrieval/reranking stack unavailable"
+        logger.warning(
+            "Evidence selection for claim (%s) fell back to deterministic lexical "
+            "selection: %s.",
+            claim,
+            reason,
+        )
+        _record_route(trace, "lexical", True, reason)
         return lexical_evidence(claim, texts, limit=max(1, rerank_top))
 
     try:
@@ -163,15 +200,20 @@ def select_evidence(
         ranked = _reranker.rerank(claim, merged[: pool_k + 1], k=rerank_top)
         snippets = [p.snippet for p in ranked if p.snippet and p.snippet.strip()]
         if snippets:
+            _record_route(trace, "hybrid", False)
             return snippets
         # Reranker produced no usable snippet (degraded/unavailable): keep the
         # hybrid order as a real fallback rather than silently dropping evidence.
+        reason = "reranker returned no usable snippet; kept pre-rerank hybrid order"
+        logger.warning("Evidence selection for claim (%s) degraded: %s.", claim, reason)
+        _record_route(trace, "hybrid_order", True, reason)
         return [p.snippet for p in merged[:rerank_top] if p.snippet]
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(
             "Shared evidence selection failed for claim (%s); using lexical fallback.",
-            exc,
+            claim,
         )
+        _record_route(trace, "lexical", True, f"selection failed: {exc}")
         return lexical_evidence(claim, texts, limit=max(1, rerank_top))
 
 
@@ -185,12 +227,10 @@ class ClaimEvidenceEngine:
 
     def __init__(
         self,
-        candidate_k: int = DEFAULT_CANDIDATE_K,
         pool_k: int = DEFAULT_POOL_K,
         rerank_top: int = DEFAULT_RERANK_TOP,
         dense_model: Optional[str] = None,
     ) -> None:
-        self.candidate_k = candidate_k
         self.pool_k = pool_k
         self.rerank_top = rerank_top
         self.dense_model = dense_model
@@ -204,12 +244,17 @@ class ClaimEvidenceEngine:
     def checkable(self, text: str) -> bool:
         return is_checkable(text)
 
-    def select(self, claim: str, evidence_texts: Sequence[str]) -> List[str]:
+    def select(
+        self,
+        claim: str,
+        evidence_texts: Sequence[str],
+        trace: dict[str, Any] | None = None,
+    ) -> List[str]:
         return select_evidence(
             claim,
             evidence_texts,
-            candidate_k=self.candidate_k,
             pool_k=self.pool_k,
             rerank_top=self.rerank_top,
             dense_model=self.dense_model,
+            trace=trace,
         )

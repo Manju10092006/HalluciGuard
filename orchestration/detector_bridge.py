@@ -95,12 +95,18 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
                 "contradicted_probability": claim.get("contradicted_probability", 0.0),
                 "unknown_probability": claim.get("unknown_probability", 0.0),
                 "non_factual": bool(claim.get("non_factual", False)),
+                "verification_risk": claim.get(
+                    "verification_risk", claim_probability
+                ),
             }
         )
 
     diagnostics = result.get("diagnostics") or {}
     return {
         "hallucination_probability": probability,
+        "verification_risk": float(
+            result.get("verification_risk", probability) or 0.0
+        ),
         "probability_available": probability_available,
         "confidence_score": confidence,
         "risk_level": risk_level,

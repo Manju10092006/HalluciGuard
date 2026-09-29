@@ -3,7 +3,15 @@
 The production graph calls the Detector before n8n evidence retrieval. At that
 point this adapter performs claim triage and fails safely toward verification;
 it does not invent a truth probability. When evidence is supplied, it executes
-the trained model and returns sentence-level grounded predictions.
+the trained model and returns claim-level grounded predictions.
+
+Result semantics (see ``Detector`` for the authoritative description):
+  SUPPORTED      -> the evidence supports the claim.
+  CONTRADICTED   -> the evidence conflicts with the claim.
+  NOT_ENOUGH_INFO-> the evidence is insufficient; NOT proof of falsehood.
+  verification_risk / hallucination_probability -> an operational score for
+  downstream triage (P(CONTRADICTED) + P(NOT_ENOUGH_INFO)), not a calibrated
+  probability that the claim is objectively false.
 """
 from __future__ import annotations
 
@@ -103,14 +111,29 @@ class DetectorAgent:
                     ),
                     "unknown_probability": getattr(sentence, "unknown_probability", 0.0),
                     "non_factual": bool(getattr(sentence, "non_factual", False)),
+                    "verification_risk": getattr(
+                        sentence,
+                        "verification_risk",
+                        getattr(sentence, "hallucination_probability", 0.0),
+                    ),
                 }
             )
         confidence = max(
             max(sentence.probabilities.values(), default=0.0)
             for sentence in grounded.sentences
         )
+        verification_risk = float(
+            getattr(
+                grounded,
+                "verification_risk",
+                getattr(grounded, "probability", 0.0),
+            )
+        )
         return {
+            # Legacy field retained; semantically the operational verification
+            # risk (P(CONTRADICTED) + P(NOT_ENOUGH_INFO)), not P(hallucinated).
             "hallucination_probability": grounded.probability,
+            "verification_risk": verification_risk,
             "confidence_score": float(confidence),
             "risk_level": grounded.risk.value,
             "next_action": "Verify" if grounded.requires_verification else "Accept",
@@ -125,8 +148,11 @@ class DetectorAgent:
             "detector_degraded": False,
             "grounded": True,
             "probability_semantics": (
-                "max over claims of calibrated P(CONTRADICTED)+P(NOT_ENOUGH_INFO); "
-                "per-class probabilities are kept separate on each claim"
+                "claim_level: SUPPORTED=evidence supports, CONTRADICTED=evidence "
+                "conflicts, NOT_ENOUGH_INFO=insufficient evidence (never folded "
+                "into contradiction); verification_risk=operational triage score "
+                "P(CONTRADICTED)+P(NOT_ENOUGH_INFO), not a probability the claim "
+                "is false; final decision belongs to the Judge"
             ),
             "verification_reason": (
                 "one_or_more_claims_not_supported" if grounded.requires_verification else None
@@ -150,6 +176,16 @@ class DetectorAgent:
         }
 
     def _pre_verification_result(self, user_query: str, answer: str) -> dict[str, Any]:
+        """Evidence-free triage: split the answer into claims and require verification.
+
+        No evidence means no grounded verification is possible, so this path
+        never fabricates NLI probabilities (``hallucination_probability`` and
+        ``verification_risk`` are ``None`` and ``inference_executed`` is
+        ``False``). Sentence spans are used purely as a triage representation
+        of the answer so downstream retrieval knows what to target; they are
+        not final claim verdicts. The graph must retrieve evidence and re-run
+        the grounded detector before the Judge.
+        """
         spans = sentence_spans(answer)
         claims = [
             {
@@ -167,6 +203,7 @@ class DetectorAgent:
         ]
         return {
             "hallucination_probability": None,
+            "verification_risk": None,
             "confidence_score": None,
             "risk_level": "HIGH",
             "next_action": "Verify",

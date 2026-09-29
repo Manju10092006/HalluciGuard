@@ -65,6 +65,52 @@ def lexical_evidence(claim: str, documents: list[str], limit: int = 6) -> list[s
     return selected
 
 
+_RELATION_STOP = {
+    "a", "an", "the", "and", "or", "of", "in", "on", "at", "by", "to", "for",
+    "from", "with", "is", "are", "was", "were", "be", "been", "it", "its",
+    "this", "that", "as", "into", "about", "over", "under", "during",
+}
+
+
+def _entity_tokens(text: str) -> set[str]:
+    """Lowercased tokens that belong to a detected named entity."""
+    tokens: set[str] = set()
+    for entity in _ENTITY.findall(text):
+        if entity in _ENTITY_STOP:
+            continue
+        tokens.update(_TOKEN.findall(entity.lower()))
+    return tokens
+
+
+def shared_relation(claim: str, evidence: str) -> set[str]:
+    """Return content words shared by both texts, ignoring named entities.
+
+    Used to tell a *direct* entity contradiction (same predicate, e.g.
+    "Apple acquired Company A" vs "Apple acquired Company B", which shares
+    ``acquired``) from a *mere* entity mismatch (different predicate, e.g.
+    "Apple works with Company A" vs "Apple acquired Company B", which shares
+    no content word once the entities are removed). The entity guard uses this
+    only to modulate the secondary contradiction signal; it never decides truth
+    on its own.
+    """
+    # Entity words are excluded: they are the thing that *differs*, so counting
+    # them would make every entity conflict look like a shared relation. Bare
+    # numbers are excluded too: those are quantities, handled by
+    # ``numeric_consistency``, not relations.
+    entity_words = _entity_tokens(claim) | _entity_tokens(evidence)
+    claim_words = {
+        w
+        for w in _TOKEN.findall(claim.lower())
+        if w and w not in _RELATION_STOP and w not in entity_words and not w.isdigit()
+    }
+    evidence_words = {
+        w
+        for w in _TOKEN.findall(evidence.lower())
+        if w and w not in _RELATION_STOP and w not in entity_words and not w.isdigit()
+    }
+    return claim_words & evidence_words
+
+
 def has_entity_conflict(claim: str, evidence: str) -> bool:
     """Conservative guard for incompatible named entities around a shared anchor.
 
