@@ -2,7 +2,7 @@
 
 ## Intended use
 
-Triage factual sentences in an LLM draft against evidence supplied by a retrieval service. Output classes are `SUPPORTED`, `CONTRADICTED`, and `NOT_ENOUGH_INFO`. The detector is not an open-world truth oracle and is not the final HalluciGuard Judge.
+Triage factual claims in an LLM draft against evidence supplied by a retrieval service. The answer is first decomposed into atomic claims (shared Verifier `ClaimDecomposer`); evidence is selected per claim with the shared hybrid retriever and cross-encoder reranker (reranking on the real claim), then each claim is classified as `SUPPORTED`, `CONTRADICTED`, or `NOT_ENOUGH_INFO`. Output classes and per-claim probabilities keep these three classes separate. The detector is not an open-world truth oracle and is not the final HalluciGuard Judge.
 
 ## Training
 
@@ -33,15 +33,22 @@ These metrics cover the learned model only. They do not include the runtime name
 
 Confusion counts: TN 15,441; FP 1,817; FN 709; TP 810.
 
-## Runtime guard
+## Runtime guards (secondary signals)
 
-A conservative named-entity conflict rule overrides the model only when claim and evidence share a named anchor and each contains a different additional named entity. This catches obvious substitutions such as “Java was created by Snehith” versus evidence naming James Gosling. The response includes a warning whenever this guard fires. This rule has unit coverage but is not included in the benchmark figures above.
+These guards never overwrite the model's probabilities with hard-coded values; they reinforce or annotate.
+
+- **Named-entity conflict:** fires only when claim and evidence share a named anchor and each names a different additional named entity. It re-normalizes contradiction confidence upward by a bounded amount (25% of the model's own support-confidence gap) and adds a warning. Catches obvious substitutions such as "Java was created by Snehith" versus evidence naming James Gosling, without assuming contradiction whenever an entity merely differs or is absent.
+- **Numeric/date/percent consistency:** a conservative quantity-unit and year check emits a warning for mismatches (e.g. "released in 1995" vs evidence "released in 1996"); the mismatch is surfaced to the Judge as a secondary signal, not treated as an automatic contradiction.
+- **Non-factual content:** non-factual/opinion claims are filtered by the shared decomposer's checkable-content rule before NLI; they are marked `non_factual`, excluded from claim counts, and never become hallucination.
+
+These rules have unit coverage but are not included in the benchmark figures above.
 
 ## Limitations
 
-- Recall and F1 are not sufficient for autonomous final decisions. Always send flagged claims to the Verifier.
-- `NOT_ENOUGH_INFO` means the supplied evidence is insufficient, not that the claim is false.
+- Recall and F1 are not sufficient for autonomous final decisions. Always send flagged claims to the Verifier; the Judge decides from the per-class claim counts and independent Verifier verdicts.
+- `NOT_ENOUGH_INFO` is a first-class class: it means the supplied evidence is insufficient, not that the claim is false, and it is never folded into the contradiction rate.
 - RAGTruth is English and RAG-oriented; other languages and domains require separate evaluation.
-- Sentence boundaries are deterministic and can be imperfect for abbreviations or malformed model output.
-- The entity guard does not resolve aliases or coreference and may miss non-entity contradictions.
+- Claim/span boundaries are deterministic and can be imperfect for abbreviations or malformed model output.
+- Evidence selection degrades to deterministic lexical retrieval when the shared Verifier stack or its models are unavailable (e.g. offline dense encoder).
+- The entity guard does not resolve aliases or coreference and may miss non-entity contradictions; the numeric checks are deliberately conservative and can miss complex quantitative reasoning.
 - High-stakes medical, legal, financial, and safety uses require domain data and human review.
