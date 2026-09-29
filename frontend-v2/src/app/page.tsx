@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth/AuthContext'
 import { AuthDialog } from '@/components/auth/AuthDialog'
 import Lenis from 'lenis'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
+import { SplitText } from 'gsap/SplitText'
+import { useGSAP } from '@gsap/react'
+import * as AccordionPrimitive from '@radix-ui/react-accordion'
 import Matter from 'matter-js'
 import {
   AlertTriangle,
@@ -35,7 +38,7 @@ import {
   X,
 } from 'lucide-react'
 
-gsap.registerPlugin(ScrollTrigger)
+gsap.registerPlugin(ScrollTrigger, SplitText, useGSAP)
 
 const capabilities = [
   ['Atomic claim extraction', ScanSearch, 'coral', 'One answer becomes precise, testable statements.'],
@@ -71,33 +74,33 @@ const agents = [
 
 const faqs = [
   {
-    q: 'How do I connect my financial data sources?',
-    a: 'Connecting your data sources is straightforward. You can use our secure API integrations or pre-built connectors for major financial platforms to import your data in minutes.',
+    q: 'What does HalluciGuard actually verify?',
+    a: 'HalluciGuard breaks an AI-generated answer into atomic, independently checkable claims, retrieves primary-source passages for each one, and tests whether the passage directly establishes the claim. Every verdict ships with the exact evidence trail — what was checked, what was found, and where it came from.',
   },
   {
-    q: 'Can I change or cancel my plan at any time?',
-    a: 'Yes, you can upgrade, downgrade, or cancel your subscription at any time directly from your account dashboard with no hidden fees or lock-in periods.',
+    q: 'How is this different from asking the AI to check its own work?',
+    a: 'Self-checking reuses the same model weights that produced the answer, so it tends to repeat the same mistakes with the same confidence. HalluciGuard grounds each claim in external primary records through a separate multi-agent pipeline — detector, verifier, judge, corrector — so the evidence, not the model, decides.',
   },
   {
-    q: 'How secure is my data?',
-    a: 'We utilize bank-grade 256-bit encryption for all data in transit and at rest. Your information is isolated and processed strictly within compliant, certified infrastructure.',
+    q: 'What do the verdicts mean?',
+    a: 'SUPPORTED means a primary passage directly establishes the claim. CONTRADICTED means retrieved evidence conflicts with it. INSUFFICIENT EVIDENCE means the records lack proof either way — we say so instead of guessing. UNCERTAIN means the sources themselves disagree, and we keep that disagreement visible.',
   },
   {
-    q: 'Does the platform support multiple team members?',
-    a: 'Yes, multi-seat collaboration with role-based access control (RBAC) is supported, allowing your team to collaborate seamlessly while maintaining security controls.',
+    q: 'Where does the evidence come from?',
+    a: 'Authoritative primary documentation and records relevant to each claim. Every verdict links the exact passage it rests on, with its source lineage — extraction method, corpus index, and entailment status — so you can audit the reasoning yourself.',
   },
   {
-    q: 'What integrations are included?',
-    a: 'Out of the box, we support integrations with accounting software, major data warehouses, storage providers, and standard REST APIs.',
+    q: 'What happens to contradicted claims?',
+    a: 'The corrector agent repairs unsupported language using the grounded evidence, without changing the parts of the answer that survived scrutiny. The correction record keeps the repair, the reason, and the re-verification together.',
   },
   {
-    q: 'Do you offer onboarding support?',
-    a: 'Yes, all plans include dedicated onboarding documentation and technical support, with custom onboarding assistance available for enterprise accounts.',
+    q: 'Can I use HalluciGuard inside my own workflows?',
+    a: 'Yes. Beyond the chat workspace you can define verification flows — for example, checking drafts before they publish to Slack or Linear — and review every run in the same evidence-trail interface.',
   },
 ]
 
 function useSmoothScroll() {
-  useEffect(() => {
+  useGSAP(() => {
     if (typeof window === 'undefined') return undefined
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
     const lenis = new Lenis({ lerp: 0.085, smoothWheel: true, wheelMultiplier: 0.92, syncTouch: false })
@@ -106,39 +109,70 @@ function useSmoothScroll() {
     gsap.ticker.add(update)
     gsap.ticker.lagSmoothing(0)
     return () => { gsap.ticker.remove(update); lenis.destroy() }
-  }, [])
+  })
 }
 
 function useReveal() {
-  useLayoutEffect(() => {
-    const ctx = gsap.context(() => gsap.utils.toArray('[data-reveal]').forEach((item: any) => {
+  useGSAP(() => {
+    gsap.utils.toArray('[data-reveal]').forEach((item: any) => {
       gsap.fromTo(item, { autoAlpha: 0, y: 32 }, { autoAlpha: 1, y: 0, duration: 0.85, ease: 'power3.out', scrollTrigger: { trigger: item, start: 'top 88%', once: true, fastScrollEnd: true } })
-    }))
-    return () => { ctx.revert(); }
-  }, [])
+    })
+  })
 }
 
+/**
+ * Word/char masked reveal — powered by GSAP SplitText (free since 3.13).
+ * Replaces the hand-rolled splitter: real selectable copy, built-in a11y
+ * (aria-label on the parent, aria-hidden on fragments), reverted on unmount.
+ * Gated behind prefers-reduced-motion.
+ */
 function SplitReveal({ children, className = '', as: Tag = 'span', by = 'word' }: { children: string; className?: string; as?: any; by?: string }) {
   const ref = useRef<HTMLElement>(null)
-  const parts = useMemo(() => by === 'char' ? Array.from(children) : children.split(/(\s+)/), [children, by])
-  useLayoutEffect(() => {
+
+  useGSAP(() => {
     const el = ref.current
-    if (!el) return undefined
-    const ctx = gsap.context(() => gsap.fromTo(el.querySelectorAll('[data-split-piece]'), { opacity: 0, yPercent: 105, rotateX: -42 }, { opacity: 1, yPercent: 0, rotateX: 0, duration: 0.85, stagger: by === 'char' ? 0.018 : 0.05, ease: 'power3.out', scrollTrigger: { trigger: el, start: 'top 86%', once: true } }), el)
-    return () => { ctx.revert(); }
-  }, [children, by])
-  return <Tag ref={ref} className={`split-reveal ${className}`.trim()}>{parts.map((part: string, index: number) => /^\s+$/.test(part) ? part : <span className="split-mask" key={`${part}-${index}`}><span data-split-piece>{part}</span></span>)}</Tag>
+    if (!el || typeof window === 'undefined') return undefined
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
+    const charMode = by === 'char'
+    const split = SplitText.create(el, {
+      type: charMode ? 'chars' : 'words',
+      mask: charMode ? 'chars' : 'words',
+      charsClass: 'split-char',
+      wordsClass: 'split-word',
+      aria: 'auto',
+    })
+    const targets = charMode ? split.chars : split.words
+    gsap.fromTo(targets,
+      { opacity: 0, yPercent: 105 },
+      {
+        opacity: 1, yPercent: 0, duration: 0.85,
+        stagger: charMode ? 0.018 : 0.05, ease: 'power3.out',
+        scrollTrigger: { trigger: el, start: 'top 86%', once: true },
+      })
+    return () => { split.revert() }
+  }, { scope: ref, dependencies: [children, by] })
+
+  return <Tag ref={ref} className={`split-reveal ${className}`.trim()}>{children}</Tag>
 }
 
+/**
+ * Character fold-in for display names — GSAP SplitText chars.
+ */
 function FoldText({ text, className = '' }: { text: string; className?: string }) {
   const ref = useRef<HTMLSpanElement>(null)
-  useLayoutEffect(() => {
-    const pieces = ref.current?.querySelectorAll('i')
-    if (!pieces?.length) return undefined
-    const tween = gsap.fromTo(pieces, { opacity: 0, rotateX: -88, transformOrigin: '50% 0%' }, { opacity: 1, rotateX: 0, duration: 0.62, stagger: 0.025, ease: 'power3.out' })
-    return () => { tween.kill(); }
-  }, [text])
-  return <span ref={ref} className={`fold-text ${className}`}>{Array.from(text).map((char, i) => <span key={i}><i>{char === ' ' ? '\u00a0' : char}</i></span>)}</span>
+
+  useGSAP(() => {
+    const el = ref.current
+    if (!el || typeof window === 'undefined') return undefined
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
+    const split = SplitText.create(el, { type: 'chars', charsClass: 'fold-char', aria: 'auto' })
+    gsap.fromTo(split.chars,
+      { opacity: 0, rotateX: -88, transformOrigin: '50% 0%' },
+      { opacity: 1, rotateX: 0, duration: 0.62, stagger: 0.025, ease: 'power3.out' })
+    return () => { split.revert() }
+  }, { scope: ref, dependencies: [text] })
+
+  return <span ref={ref} className={`fold-text ${className}`.trim()}>{text}</span>
 }
 
 function BrandMark() {
@@ -802,7 +836,6 @@ function MatterComparisonSection() {
 }
 
 function FAQ() {
-  const [open, setOpen] = useState(-1)
   const videoSrc = `/help-support.mp4`
 
   return (
@@ -810,30 +843,28 @@ function FAQ() {
       <div className="section-shell faq-grid-v2">
         <div className="faq-left">
           <h2>Help and <span className="support-underline">support</span></h2>
-          <p className="faq-subtitle">Answers to common questions about setup, pricing, and how everything works.</p>
+          <p className="faq-subtitle">Answers to common questions about verification, verdicts, and how everything works.</p>
           <div className="faq-video-container">
             <video src={videoSrc} autoPlay loop muted playsInline preload="metadata" className="faq-video-element" />
           </div>
           <p className="still-questions-label">Still got questions?</p>
           <a className="button dark faq-contact-button" href="#contact">Contact us <ArrowRight size={15} /></a>
         </div>
-        <div className="faq-right-card">
-          {faqs.map((item, index) => (
-            <article className={`faq-item-card ${open === index ? 'open' : ''}`} key={item.q}>
-              <button
-                className="faq-question-btn"
-                onClick={() => setOpen(open === index ? -1 : index)}
-                aria-expanded={open === index}
-              >
-                <span>{item.q}</span>
-                <span className="plus-badge">{open === index ? '−' : '+'}</span>
-              </button>
-              <div className="faq-answer-collapse">
+        <AccordionPrimitive.Root type="single" collapsible className="faq-right-card">
+          {faqs.map((item) => (
+            <AccordionPrimitive.Item className="faq-item-card" value={item.q} key={item.q}>
+              <AccordionPrimitive.Header>
+                <AccordionPrimitive.Trigger className="faq-question-btn">
+                  <span>{item.q}</span>
+                  <span className="plus-badge" aria-hidden="true">+</span>
+                </AccordionPrimitive.Trigger>
+              </AccordionPrimitive.Header>
+              <AccordionPrimitive.Content className="faq-answer-collapse-radix">
                 <p>{item.a}</p>
-              </div>
-            </article>
+              </AccordionPrimitive.Content>
+            </AccordionPrimitive.Item>
           ))}
-        </div>
+        </AccordionPrimitive.Root>
       </div>
     </section>
   )

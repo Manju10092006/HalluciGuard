@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronRight, ExternalLink, Globe, FileText, CheckCircle, XCircle, Info } from 'lucide-react'
+import { SpotlightCard } from '@/components/ui/spotlight-card'
 
 export function EvidenceTrace({ summary, sources, onOpenSource }) {
   const [isExpanded, setIsExpanded] = useState(false)
@@ -72,7 +73,7 @@ export function EvidenceTrace({ summary, sources, onOpenSource }) {
             {sources.map((src, index) => (
               <div className="trail-item-wrapper" key={src.id || index}>
                 <div className="trail-node-point" />
-                <div className="trail-card">
+                <SpotlightCard className="trail-card">
                   <div className="trail-card-header">
                     <div className="source-identity">
                       <Globe size={13} className="domain-icon" />
@@ -94,7 +95,7 @@ export function EvidenceTrace({ summary, sources, onOpenSource }) {
                       <ExternalLink size={12} />
                     </button>
                   </div>
-                </div>
+                </SpotlightCard>
               </div>
             ))}
           </div>
