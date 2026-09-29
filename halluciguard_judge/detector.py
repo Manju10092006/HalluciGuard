@@ -51,7 +51,6 @@ from .llm_judge import LLMJudge
 from .models import (
     Claim,
     ClaimDetectionResult,
-    DetectorInput,
     DetectorOutput,
     RiskLevel,
     RoutingDecision,
@@ -131,13 +130,22 @@ class JudgeDetector:
             logger.info("[JudgeDetector] LLM judge disabled (no API key or disabled in config).")
 
     def _ensure_classifier_loaded(self) -> bool:
-        """Load the classifier on first call. Returns True if loaded OK."""
+        """Load the classifier on first call.
+
+        Returns True only when a *fine-tuned* checkpoint is in use. Reporting
+        ``load()``'s success instead made the very first call claim a healthy
+        model while every later call correctly reported degraded, because
+        ``load()`` succeeds even when it falls back to raw base weights. A
+        fail-closed guarantee that is only enforced from the second request
+        onwards is not a guarantee.
+        """
         if not JudgeDetector._classifier_loaded:
-            success = self._classifier.load()
+            self._classifier.load()
             JudgeDetector._classifier_loaded = True
-            if not success:
-                logger.warning("[JudgeDetector] Classifier load failed — degraded mode.")
-            return success
+            if not getattr(self._classifier, "_is_finetuned", False):
+                logger.warning(
+                    "[JudgeDetector] No fine-tuned checkpoint available - degraded mode."
+                )
         return getattr(self._classifier, "_is_finetuned", False)
 
     def _risk_level(self, prob: float) -> RiskLevel:

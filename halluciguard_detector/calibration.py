@@ -1,12 +1,68 @@
+"""Calibration and decision thresholds for the three-class detector.
+
+The detector emits a three-class softmax over
+``SUPPORTED / CONTRADICTED / NOT_ENOUGH_INFO``. That distribution supports **two
+different binary questions**, and they must never share a threshold:
+
+``contradiction``
+    Is the evidence refuting the claim? Score ``P(CONTRADICTED)``,
+    positive class ``CONTRADICTED``, negatives ``SUPPORTED +
+    NOT_ENOUGH_INFO``.
+
+``verification_needed``
+    Does this claim still require checking? Score
+    ``P(CONTRADICTED) + P(NOT_ENOUGH_INFO)``, positive class
+    ``CONTRADICTED + NOT_ENOUGH_INFO``, negatives ``SUPPORTED``.
+
+A single ``hallucination_threshold`` used to serve the second question while
+being *named* after the first, which is how a verification-risk score ended up
+being compared against falsity. Both thresholds are now stored and read
+separately.
+
+A softmax output is a model score, not a calibrated probability of real-world
+truth. Only temperature scaling plus the reliability numbers in
+``training.calibration_report`` say anything about calibration, and even then
+only for the data distribution they were measured on.
+"""
+
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
 
 
+#: Written to ``calibration.json`` for backward compatibility only. It is a
+#: mirror of ``verification_risk_threshold`` and must never be used to decide
+#: contradiction.
+DEPRECATED_HALLUCINATION_THRESHOLD = "hallucination_threshold"
+
+#: Single source of truth for sequence length, shared by training, evaluation
+#: and calibration persistence. Must equal the shipped checkpoint's
+#: ``tokenizer_config.json`` ``model_max_length``. It lives here rather than in
+#: ``training`` because ``training`` already imports this module.
+DEFAULT_MAX_LENGTH = 256
+
+
 def apply_temperature(logits: torch.Tensor, temperature: float) -> torch.Tensor:
     return torch.softmax(logits / max(temperature, 1e-4), dim=-1)
+
+
+def class_probabilities(logits: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+    """Return the calibrated three-class distribution for raw logits."""
+    scaled = torch.tensor(np.asarray(logits, dtype=np.float32)) / max(float(temperature), 1e-4)
+    return apply_temperature(scaled, 1.0).numpy()
+
+
+def contradiction_score(probabilities: np.ndarray) -> np.ndarray:
+    """``P(CONTRADICTED)`` -- the only score that speaks about falsity."""
+    return probabilities[:, 1]
+
+
+def verification_risk_score(probabilities: np.ndarray) -> np.ndarray:
+    """``P(CONTRADICTED) + P(NOT_ENOUGH_INFO)`` -- the operational triage score."""
+    return probabilities[:, 1] + probabilities[:, 2]
 
 
 def fit_temperature(logits: np.ndarray, labels: np.ndarray) -> float:
@@ -25,15 +81,48 @@ def fit_temperature(logits: np.ndarray, labels: np.ndarray) -> float:
     return float(log_temperature.exp().detach().clamp(0.05, 10.0).item())
 
 
-def save_calibration(path: Path, temperature: float, threshold: float, max_length: int = 384) -> None:
+def save_calibration(
+    path: Path,
+    temperature: float,
+    contradiction_threshold: float,
+    verification_risk_threshold: float,
+    max_length: int = DEFAULT_MAX_LENGTH,
+) -> None:
+    """Persist temperature plus both task-specific thresholds.
+
+    ``hallucination_threshold`` is retained as a deprecated mirror of
+    ``verification_risk_threshold`` so older readers keep their previous value
+    instead of silently picking up a different number.
+    """
     path.write_text(
         json.dumps(
             {
-                "temperature": temperature,
-                "hallucination_threshold": threshold,
-                "max_length": max_length,
+                "temperature": float(temperature),
+                "contradiction_threshold": float(contradiction_threshold),
+                "verification_risk_threshold": float(verification_risk_threshold),
+                DEPRECATED_HALLUCINATION_THRESHOLD: float(verification_risk_threshold),
+                "max_length": int(max_length),
             },
             indent=2,
         ),
         encoding="utf-8",
     )
+
+
+def load_calibration(path: Path) -> dict[str, Any]:
+    """Read calibration metadata, tolerating the deprecated threshold key.
+
+    Older checkpoints only carry ``hallucination_threshold``. That value was
+    fitted for the verification-needed question, so it is mapped onto
+    ``verification_risk_threshold`` rather than onto
+    ``contradiction_threshold`` -- guessing a contradiction threshold from it
+    would reintroduce exactly the confusion this module exists to remove.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    legacy = data.get(DEPRECATED_HALLUCINATION_THRESHOLD)
+    if data.get("verification_risk_threshold") is None and legacy is not None:
+        data["verification_risk_threshold"] = float(legacy)
+    return data

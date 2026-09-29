@@ -1,4 +1,4 @@
-from halluciguard_detector.data import _sentence_label
+from halluciguard_detector.data import _uniform_sentence_label
 from halluciguard_detector.text import has_entity_conflict, lexical_evidence, sentence_spans
 
 
@@ -13,12 +13,19 @@ def test_sentence_offsets_round_trip():
 
 
 def test_annotation_mapping():
-    conflict = [{"start": 5, "end": 10, "label_type": "Evident Conflict"}]
-    baseless = [{"start": 5, "end": 10, "label_type": "Evident Baseless Info"}]
-    implicit = [{"start": 5, "end": 10, "label_type": "Subtle Baseless Info", "implicit_true": True}]
-    assert _sentence_label(0, 20, conflict) == "CONTRADICTED"
-    assert _sentence_label(0, 20, baseless) == "NOT_ENOUGH_INFO"
-    assert _sentence_label(0, 20, implicit) == "SUPPORTED"
+    # The four real RAGTruth label_type values are decorated, not bare. If this
+    # regresses to exact matching, every span falls into the unknown fallback and
+    # the entire training set flips to NOT_ENOUGH_INFO.
+    conflict = [{"start": 0, "end": 20, "label_type": "Evident Conflict"}]
+    subtle = [{"start": 0, "end": 20, "label_type": "Subtle Conflict"}]
+    baseless = [{"start": 0, "end": 20, "label_type": "Evident Baseless Info"}]
+    subtle_baseless = [{"start": 0, "end": 20, "label_type": "Subtle Baseless Info"}]
+    implicit = [{"start": 0, "end": 20, "label_type": "Subtle Baseless Info", "implicit_true": True}]
+    assert _uniform_sentence_label(0, 20, conflict) == "CONTRADICTED"
+    assert _uniform_sentence_label(0, 20, subtle) == "CONTRADICTED"
+    assert _uniform_sentence_label(0, 20, baseless) == "NOT_ENOUGH_INFO"
+    assert _uniform_sentence_label(0, 20, subtle_baseless) == "NOT_ENOUGH_INFO"
+    assert _uniform_sentence_label(0, 20, implicit) == "SUPPORTED"
 
 
 def test_lexical_retrieval_prefers_relevant_sentence():

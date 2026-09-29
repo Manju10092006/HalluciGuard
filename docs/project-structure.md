@@ -41,6 +41,35 @@ halluciguard_judge/     standalone experimental/legacy judge-detector package
 artifacts/detector-best production Detector checkpoint and evaluation metadata
 ```
 
+## Two detector packages
+
+There are two detectors in this repository. They are **not** interchangeable, and
+only one is part of the product path.
+
+| | `halluciguard_detector/` | `halluciguard_judge/` |
+|---|---|---|
+| Status | **Canonical.** Production. | Standalone, experimental / legacy. |
+| Checkpoint | `artifacts/detector-best` (DeBERTa-v3-xsmall, 3-class) | own `checkpoints/` path, binary `hallucination_probability` |
+| Class semantics | `SUPPORTED` / `CONTRADICTED` / `NOT_ENOUGH_INFO` | a single hallucination probability |
+| Imported by | `orchestration/detector_bridge.py`, `orchestration/runtime_validation.py`, `services/llm_detector_service.py`, `services/llm_detector_verifier_service.py` | nothing outside its own package |
+| Shared components | uses the shared Verifier claim decomposer, hybrid retriever and cross-encoder reranker | has its own copies |
+
+Consequences to keep in mind:
+
+- `halluciguard_judge` is retained for reference and experimentation. It is
+  **not** on the production path, so it is not covered by the product
+  integration tests and its output schema does not match
+  `orchestration/schemas.py`.
+- It is **not** to be deleted: it still carries a claim extractor and an LLM
+  judge path that have no equivalent in the canonical package.
+- Its degraded-mode handling was found to be broken and fixed here (see the
+  fail-closed note in `halluciguard_judge/detector.py`): the first request
+  reported a healthy model while later ones correctly reported degraded, because
+  the code returned the classifier's *load success* rather than whether a
+  fine-tuned checkpoint was actually in use.
+- Anything new belongs in `halluciguard_detector`. Changes to
+  `halluciguard_judge` should be treated as maintenance of a frozen subsystem.
+
 ## APIs
 
 | Surface | Entry point | Purpose |
