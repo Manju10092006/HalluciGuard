@@ -1,8 +1,19 @@
 import React from 'react'
 import { ShieldCheck, AlertOctagon, HelpCircle, AlertTriangle } from 'lucide-react'
 import { VERIFICATION_STATUS } from '../../types/verification'
+import { ShineBorder } from '@/components/ui/shine-border'
+import { NumberTicker } from '@/components/ui/number-ticker'
+import { GaugeChart } from '@/components/ui/charts'
 
-export function VerificationStatus({ status, title, description }) {
+/**
+ * Verdict surface — Magic UI "Shine Border" (zero-dep CSS) gives the active
+ * verdict pill its single slow sheen along the border ring.
+ *
+ * Optional `confidence` (0–100): when the backend supplies a real confidence
+ * value it renders a Magic UI Number Ticker + Animata Gauge Chart summary.
+ * It is NEVER invented here — absent data means no instrument is shown.
+ */
+export function VerificationStatus({ status, title, description, confidence }) {
   const getStatusConfig = () => {
     switch (status) {
       case VERIFICATION_STATUS.SUPPORTED:
@@ -41,24 +52,59 @@ export function VerificationStatus({ status, title, description }) {
 
   const config = getStatusConfig()
   const Icon = config.icon
+  const hasConfidence =
+    typeof confidence === 'number' && Number.isFinite(confidence)
 
   return (
-    <div className={`verification-status-surface ${config.className}`}>
-      <div className="status-header-row">
-        <Icon size={16} className="status-indicator-icon" />
-        <span className="status-label">{title || config.defaultTitle}</span>
+    <ShineBorder
+      className={`verification-status-surface ${config.className}`}
+      duration={14}
+    >
+      <div className="status-layout">
+        <div className="status-main">
+          <div className="status-header-row">
+            <Icon size={16} className="status-indicator-icon" />
+            <span className="status-label">{title || config.defaultTitle}</span>
+          </div>
+          <p className="status-explanation">{description || config.defaultDesc}</p>
+          {hasConfidence && (
+            <div className="confidence-row">
+              <span className="confidence-label">Confidence</span>
+              <NumberTicker
+                value={confidence}
+                suffix="%"
+                className="confidence-value"
+              />
+            </div>
+          )}
+        </div>
+        {hasConfidence && (
+          <div className="gauge-wrap">
+            <GaugeChart value={confidence} size={92} strokeWidth={8} />
+          </div>
+        )}
       </div>
-      <p className="status-explanation">{description || config.defaultDesc}</p>
 
       <style>{`
         .verification-status-surface {
           border-radius: var(--radius-inline);
           padding: 12px 16px;
           margin: 14px 0 16px;
+          transition: all 140ms ease;
+        }
+
+        .status-layout {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .status-main {
+          flex: 1;
+          min-width: 0;
           display: flex;
           flex-direction: column;
           gap: 4px;
-          transition: all 140ms ease;
         }
 
         .status-header-row {
@@ -79,6 +125,33 @@ export function VerificationStatus({ status, title, description }) {
           line-height: 1.45;
           margin: 0;
           opacity: 0.9;
+        }
+
+        .confidence-row {
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          margin-top: 6px;
+        }
+
+        .confidence-label {
+          font-family: var(--font-mono);
+          font-size: 10.5px;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          opacity: 0.75;
+        }
+
+        .confidence-value {
+          font-family: var(--font-mono);
+          font-size: 20px;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+        }
+
+        .gauge-wrap {
+          flex-shrink: 0;
+          color: currentColor;
         }
 
         /* Supported */
@@ -120,7 +193,13 @@ export function VerificationStatus({ status, title, description }) {
         .verification-status-surface.is-uncertain .status-explanation {
           color: var(--text-primary);
         }
+
+        @media (prefers-reduced-motion: reduce) {
+          .verification-status-surface {
+            transition: none;
+          }
+        }
       `}</style>
-    </div>
+    </ShineBorder>
   )
 }

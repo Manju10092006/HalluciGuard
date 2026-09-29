@@ -1,192 +1,131 @@
-import React, { useEffect } from 'react'
-import { X, ExternalLink, Globe, BookOpenCheck, ShieldCheck, AlertOctagon } from 'lucide-react'
+import React from 'react'
+import { ExternalLink, Globe, BookOpenCheck } from 'lucide-react'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet'
 
+/**
+ * Evidence slide-over — shadcn Sheet pattern (Radix Dialog primitive,
+ * zero new deps). Flat right-side panel: header (source title), body
+ * (excerpt + verdict + lineage), footer (actions). MIT (shadcn).
+ */
 export function SourceDrawer({ source, isOpen, onClose }) {
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') onClose()
-    }
-    if (isOpen) {
-      document.addEventListener('keydown', handleKeyDown)
-    }
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
-
-  if (!isOpen || !source) return null
-
   return (
-    <div className="drawer-overlay" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer-header">
-          <div className="drawer-title-group">
-            <BookOpenCheck size={16} className="drawer-icon" />
-            <h3>Primary Source Record</h3>
-          </div>
-          <button
-            type="button"
-            className="drawer-close-btn"
-            onClick={onClose}
-            aria-label="Close source drawer"
-          >
-            <X size={16} />
-          </button>
-        </div>
+    <Sheet
+      open={!!isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose?.()
+      }}
+    >
+      <SheetContent
+        side="right"
+        className="flex w-[420px] flex-col gap-0 bg-hg-surface p-0 sm:max-w-[420px]"
+        aria-label="Primary source record"
+      >
+        {source && (
+          <>
+            <SheetHeader className="flex-row items-center justify-between space-y-0 border-b border-hg-line px-5 py-4 pr-12 text-left">
+              <div>
+                <SheetTitle className="flex items-center gap-2 text-[14px] font-semibold text-hg-text">
+                  <BookOpenCheck size={16} className="text-hg-accent" />
+                  Primary Source Record
+                </SheetTitle>
+                <SheetDescription className="mt-0.5 text-[12px] text-hg-muted">
+                  Verified passage and evidence lineage
+                </SheetDescription>
+              </div>
+            </SheetHeader>
 
-        <div className="drawer-body">
-          {/* Source domain & relationship */}
-          <div className="source-meta-row">
-            <div className="source-origin">
-              <Globe size={14} className="globe-icon" />
-              <span className="domain-text">{source.domain}</span>
-            </div>
-            <span className={`relationship-badge tone-${source.relationshipTone}`}>
-              {source.relationship}
-            </span>
-          </div>
-
-          <h2 className="source-headline">{source.title}</h2>
-
-          <div className="section-divider" />
-
-          {/* Full passage citation */}
-          <div className="passage-section">
-            <label className="section-heading">Verified Passage</label>
-            <blockquote className="passage-quote">
-              “{source.excerpt}”
-            </blockquote>
-          </div>
-
-          {/* Provenance details */}
-          <div className="provenance-section">
-            <label className="section-heading">Evidence Lineage</label>
-            <div className="provenance-grid">
-              <div className="provenance-item">
-                <span className="prov-label">Entailment Status</span>
-                <span className="prov-val">
-                  {source.relationshipTone === 'contradicted' ? 'Direct Contradiction' : 'Factual Entailment'}
+            <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
+              {/* Source domain & relationship */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Globe size={14} className="text-hg-muted" />
+                  <span className="text-[12.5px] font-semibold text-hg-text2">
+                    {source.domain}
+                  </span>
+                </div>
+                <span className={`relationship-badge tone-${source.relationshipTone}`}>
+                  {source.relationship}
                 </span>
               </div>
-              <div className="provenance-item">
-                <span className="prov-label">Extraction Method</span>
-                <span className="prov-val">Passage-level BGE Retrieval</span>
+
+              <h2 className="text-[18px] font-semibold leading-[1.35] text-hg-text">
+                {source.title}
+              </h2>
+
+              <div className="h-px bg-hg-line" />
+
+              {/* Full passage citation */}
+              <div>
+                <span className="mb-2 block text-[11.5px] font-bold uppercase tracking-[0.04em] text-hg-muted">
+                  Verified Passage
+                </span>
+                <blockquote className="rounded-md border-l-[3px] border-hg-accent bg-hg-sunken px-3.5 py-3 text-[13.5px] italic leading-[1.55] text-hg-text">
+                  “{source.excerpt}”
+                </blockquote>
               </div>
-              <div className="provenance-item">
-                <span className="prov-label">Corpus Index</span>
-                <span className="prov-val">Authoritative Primary Record</span>
+
+              {/* Provenance details */}
+              <div>
+                <span className="mb-2 block text-[11.5px] font-bold uppercase tracking-[0.04em] text-hg-muted">
+                  Evidence Lineage
+                </span>
+                <dl className="flex flex-col gap-2.5 rounded-[10px] border border-hg-line bg-hg-sunken px-3.5 py-3">
+                  <div className="flex justify-between text-[12.5px]">
+                    <dt className="text-hg-text2">Entailment Status</dt>
+                    <dd className="font-semibold text-hg-text">
+                      {source.relationshipTone === 'contradicted'
+                        ? 'Direct Contradiction'
+                        : 'Factual Entailment'}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between text-[12.5px]">
+                    <dt className="text-hg-text2">Extraction Method</dt>
+                    <dd className="font-semibold text-hg-text">
+                      Passage-level BGE Retrieval
+                    </dd>
+                  </div>
+                  <div className="flex justify-between text-[12.5px]">
+                    <dt className="text-hg-text2">Corpus Index</dt>
+                    <dd className="font-semibold text-hg-text">
+                      Authoritative Primary Record
+                    </dd>
+                  </div>
+                </dl>
               </div>
             </div>
-          </div>
-        </div>
 
-        <div className="drawer-footer">
-          {source.url ? (
-            <a
-              href={source.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="external-link-btn"
-            >
-              <span>Visit External Source</span>
-              <ExternalLink size={14} />
-            </a>
-          ) : (
-            <button type="button" className="close-btn" onClick={onClose}>
-              Close
-            </button>
-          )}
-        </div>
-      </div>
+            <div className="flex justify-end border-t border-hg-line px-5 py-4">
+              {source.url ? (
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-hg-accent px-4 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90"
+                >
+                  <span>Visit External Source</span>
+                  <ExternalLink size={14} />
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-full border border-hg-line px-4 py-2 text-[13px] font-semibold text-hg-text transition-colors hover:bg-hg-sunken"
+                >
+                  Close
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </SheetContent>
 
       <style>{`
-        .drawer-overlay {
-          position: fixed;
-          inset: 0;
-          background: rgba(0, 0, 0, 0.35);
-          backdrop-filter: blur(4px);
-          display: flex;
-          justify-content: flex-end;
-          z-index: 120;
-          animation: overlay-fade 140ms ease-out;
-        }
-
-        .drawer-panel {
-          width: 100%;
-          max-width: 420px;
-          height: 100%;
-          background: var(--surface);
-          border-left: 1px solid var(--border);
-          box-shadow: var(--shadow-modal);
-          display: flex;
-          flex-direction: column;
-          animation: drawer-slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        .drawer-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 16px 20px;
-          border-bottom: 1px solid var(--border);
-        }
-
-        .drawer-title-group {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .drawer-icon {
-          color: var(--accent);
-        }
-
-        .drawer-header h3 {
-          font-size: 14px;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-
-        .drawer-close-btn {
-          color: var(--text-muted);
-          padding: 4px;
-          border-radius: 6px;
-        }
-
-        .drawer-close-btn:hover {
-          color: var(--text-primary);
-          background: var(--surface-sunken);
-        }
-
-        .drawer-body {
-          flex: 1;
-          overflow-y: auto;
-          padding: 20px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .source-meta-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .source-origin {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .globe-icon {
-          color: var(--text-muted);
-        }
-
-        .domain-text {
-          font-size: 12.5px;
-          font-weight: 600;
-          color: var(--text-secondary);
-        }
-
         .relationship-badge {
           display: inline-flex;
           align-items: center;
@@ -195,118 +134,28 @@ export function SourceDrawer({ source, isOpen, onClose }) {
           font-size: 11px;
           font-weight: 600;
         }
-
         .tone-supported {
           background: var(--supported-bg);
           color: var(--supported);
           border: 1px solid var(--supported-border);
         }
-
         .tone-contradicted {
           background: var(--contradicted-bg);
           color: var(--contradicted);
           border: 1px solid var(--contradicted-border);
         }
-
         .tone-context {
           background: var(--uncertain-bg);
           color: var(--uncertain);
           border: 1px solid var(--uncertain-border);
         }
-
-        .source-headline {
-          font-size: 18px;
-          font-weight: 600;
-          line-height: 1.35;
-          color: var(--text-primary);
-        }
-
-        .section-divider {
-          height: 1px;
-          background: var(--border);
-          margin: 4px 0;
-        }
-
-        .section-heading {
-          font-size: 11.5px;
-          font-weight: 700;
-          color: var(--text-muted);
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-          display: block;
-          margin-bottom: 8px;
-        }
-
-        .passage-quote {
-          background: var(--surface-sunken);
-          border-left: 3px solid var(--accent);
-          padding: 12px 14px;
-          border-radius: 6px;
-          font-size: 13.5px;
-          line-height: 1.55;
-          color: var(--text-primary);
-          font-style: italic;
-        }
-
-        .provenance-grid {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          background: var(--surface-sunken);
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          padding: 12px 14px;
-        }
-
-        .provenance-item {
-          display: flex;
-          justify-content: space-between;
-          font-size: 12.5px;
-        }
-
-        .prov-label {
-          color: var(--text-secondary);
-        }
-
-        .prov-val {
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-
-        .drawer-footer {
-          padding: 16px 20px;
-          border-top: 1px solid var(--border);
-          display: flex;
-          justify-content: flex-end;
-        }
-
-        .external-link-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 16px;
-          border-radius: var(--radius-pill);
-          background: var(--accent);
-          color: #ffffff;
-          font-size: 13px;
-          font-weight: 600;
-          transition: background-color 140ms ease;
-        }
-
-        .external-link-btn:hover {
-          background: var(--accent-hover);
-        }
-
-        @keyframes overlay-fade {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-
-        @keyframes drawer-slide-in {
-          from { transform: translateX(100%); }
-          to { transform: translateX(0); }
+        @media (prefers-reduced-motion: reduce) {
+          [data-state="open"], [data-state="closed"] {
+            animation: none !important;
+            transition: none !important;
+          }
         }
       `}</style>
-    </div>
+    </Sheet>
   )
 }
