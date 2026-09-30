@@ -51,6 +51,11 @@ class HybridRetriever:
     def __init__(self) -> None:
         self.sparse = BM25Retriever()
         self.dense = DenseRetriever()
+        self.last_diagnostics: dict = {"route": "not_run", "degraded": False}
+
+    def diagnostics(self) -> dict:
+        """Execution outcome of the most recent retrieval, not configured intent."""
+        return dict(self.last_diagnostics)
 
     @staticmethod
     def _key(passage: Passage) -> str:
@@ -85,7 +90,20 @@ class HybridRetriever:
         k: int = 5,
         dense_model: str | None = None,
     ) -> List[Passage]:
+        self.last_diagnostics = {
+            "route": "not_run", "degraded": False,
+            "sparse_attempted": False, "sparse_executed": False,
+            "sparse_contributed": False, "dense_attempted": False,
+            "dense_executed": False, "dense_contributed": False,
+            "dense_available": False, "dense_failure_stage": None,
+            "dense_initialization_attempted": False,
+            "dense_indexing_attempted": False,
+            "dense_indexing_executed": False,
+            "dense_inference_attempted": False,
+            "errors": [], "selected_count": 0,
+        }
         if not passages or k <= 0 or not query.strip():
+            self.last_diagnostics["route"] = "empty_input"
             return []
 
         unique: Dict[str, Passage] = {}
@@ -99,12 +117,58 @@ class HybridRetriever:
             if dense_model and dense_model != self.dense.model_name:
                 self.dense = DenseRetriever(model_name=dense_model)
 
-            self.sparse.build_index(passages)
-            self.dense.build_index(passages)
-
             candidate_k = min(len(passages), max(k * 4, 12))
-            sparse_results = self.sparse.retrieve(query, candidate_k)
-            dense_results = self.dense.retrieve(query, candidate_k)
+            sparse_results = []
+            dense_results = []
+            self.last_diagnostics["sparse_attempted"] = True
+            try:
+                self.sparse.build_index(passages)
+                sparse_results = self.sparse.retrieve(query, candidate_k)
+                self.last_diagnostics["sparse_executed"] = True
+            except Exception as exc:
+                self.last_diagnostics["errors"].append({
+                    "component": "sparse", "error_type": type(exc).__name__,
+                })
+            self.last_diagnostics["dense_attempted"] = True
+            try:
+                self.dense.build_index(passages)
+                dense_results = self.dense.retrieve(query, candidate_k)
+                self.last_diagnostics["dense_executed"] = True
+            except Exception as exc:
+                self.last_diagnostics["errors"].append({
+                    "component": "dense", "error_type": type(exc).__name__,
+                })
+            dense_diag = self.dense.diagnostics() if hasattr(self.dense, "diagnostics") else {}
+            if dense_diag:
+                self.last_diagnostics["dense_available"] = bool(dense_diag.get("model_available"))
+                self.last_diagnostics["dense_executed"] = bool(dense_diag.get("inference_executed"))
+                self.last_diagnostics["dense_failure_stage"] = dense_diag.get("failure_stage")
+                self.last_diagnostics["dense_initialization_attempted"] = bool(dense_diag.get("initialization_attempted"))
+                self.last_diagnostics["dense_indexing_attempted"] = bool(dense_diag.get("indexing_attempted"))
+                self.last_diagnostics["dense_indexing_executed"] = bool(dense_diag.get("indexing_executed"))
+                self.last_diagnostics["dense_inference_attempted"] = bool(dense_diag.get("inference_attempted"))
+                if dense_diag.get("error_type"):
+                    self.last_diagnostics["errors"].append({
+                        "component": "dense", "stage": dense_diag.get("failure_stage"),
+                        "error_type": dense_diag["error_type"],
+                    })
+            else:
+                # Legacy/mock retrievers have no execution proof: a returned
+                # result proves contribution, not model availability.
+                self.last_diagnostics["dense_available"] = bool(dense_results)
+                self.last_diagnostics["dense_executed"] = bool(dense_results)
+            self.last_diagnostics["sparse_contributed"] = bool(sparse_results)
+            self.last_diagnostics["dense_contributed"] = bool(dense_results)
+            if sparse_results and dense_results:
+                route = "hybrid"
+            elif sparse_results:
+                route = "bm25_only"
+            elif dense_results:
+                route = "dense_only"
+            else:
+                route = "lexical_fallback"
+            self.last_diagnostics["route"] = route
+            self.last_diagnostics["degraded"] = route != "hybrid" or bool(self.last_diagnostics["errors"])
 
             # BM25 and cosine similarity live on different scales. Fuse their
             # ranks instead of their raw scores; this remains stable across models.
@@ -169,21 +233,27 @@ class HybridRetriever:
                 if len(final) >= k:
                     break
 
+            self.last_diagnostics["selected_count"] = len(final)
             return final
 
-        except Exception:
+        except Exception as exc:
             # Deterministic fail-soft fallback when BM25/FAISS/embeddings fail.
+            self.last_diagnostics["route"] = "lexical_fallback"
+            self.last_diagnostics["degraded"] = True
+            self.last_diagnostics["errors"].append({"component": "fusion", "error_type": type(exc).__name__})
             fallback = sorted(
                 passages,
                 key=lambda p: self._lexical_score(query, p),
                 reverse=True,
             )
-            return [
+            selected = [
                 p.model_copy(
                     update={"relevance_score": round(self._lexical_score(query, p), 6)}
                 )
                 for p in fallback[:k]
             ]
+            self.last_diagnostics["selected_count"] = len(selected)
+            return selected
 
     @staticmethod
     def _compute_overlap(text1: str, text2: str) -> float:

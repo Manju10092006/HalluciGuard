@@ -11,9 +11,11 @@ import os
 import threading
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .detector import Detector
+from .evidence_shapes import normalize_evidence
+from .schemas import RiskLevel
 from .text import sentence_spans
 
 
@@ -26,41 +28,25 @@ def _phase1_service():
 class DetectorAgent:
     """Compatibility surface used by HalluciGuard orchestration and services."""
 
-    _detector: Detector | None = None
-    _lock = threading.Lock()
-
     def __init__(self, model_path: str | Path | None = None, device: str | None = None):
         repo_root = Path(__file__).resolve().parent.parent
         configured = os.getenv("HALLUCIGUARD_DETECTOR_MODEL", "").strip()
         selected_path = Path(model_path or configured or repo_root / "artifacts" / "detector-best")
         self.model_path = selected_path if selected_path.is_absolute() else repo_root / selected_path
         self.device = device
+        self._detector: Detector | None = None
+        self._lock = threading.Lock()
 
     def _get_detector(self) -> Detector:
-        if self.__class__._detector is None:
-            with self.__class__._lock:
-                if self.__class__._detector is None:
-                    self.__class__._detector = Detector(self.model_path, self.device)
-        return self.__class__._detector
+        if self._detector is None:
+            with self._lock:
+                if self._detector is None:
+                    self._detector = Detector(self.model_path, self.device)
+        return self._detector
 
     @staticmethod
     def _evidence_from(value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [value] if value.strip() else []
-        if isinstance(value, dict):
-            for key in ("evidence", "passages", "documents", "context"):
-                if key in value:
-                    return DetectorAgent._evidence_from(value[key])
-            text = value.get("snippet") or value.get("text") or value.get("content")
-            return [str(text)] if text and str(text).strip() else []
-        if isinstance(value, Iterable):
-            result: list[str] = []
-            for item in value:
-                result.extend(DetectorAgent._evidence_from(item))
-            return result
-        return []
+        return normalize_evidence(value).documents
 
     def detect(
         self,
@@ -76,11 +62,17 @@ class DetectorAgent:
         if not answer:
             raise ValueError("llm_response/draft_answer must not be empty")
 
-        evidence_texts = self._evidence_from(evidence)
-        if not evidence_texts:
-            evidence_texts = self._evidence_from(context)
+        normalized = normalize_evidence(evidence)
+        if not normalized.documents:
+            context_normalized = normalize_evidence(context)
+            context_normalized.malformed_records += normalized.malformed_records
+            context_normalized.truncated_records += normalized.truncated_records
+            context_normalized.null_fields += normalized.null_fields
+            normalized = context_normalized
+        evidence_texts = normalized.documents
         if not evidence_texts:
             result = self._pre_verification_result(user_query, answer)
+            result["diagnostics"]["evidence_shape"] = normalized.diagnostics()
             spans = sentence_spans(answer)
             phase1 = _phase1_service().score(
                 answer,
@@ -109,6 +101,11 @@ class DetectorAgent:
         )
         claims = []
         for index, sentence in enumerate(grounded.sentences, start=1):
+            snippet_sources = []
+            for snippet in sentence.evidence_snippets:
+                matching = {source for document, source in zip(normalized.documents, normalized.document_sources)
+                            if snippet in document}
+                snippet_sources.append(next(iter(matching)) if len(matching) == 1 and None not in matching else None)
             claims.append(
                 {
                     "claim_id": index,
@@ -120,27 +117,29 @@ class DetectorAgent:
                         key.value: value for key, value in sentence.probabilities.items()
                     },
                     "risk_level": sentence.risk.value,
-                    "requires_verification": sentence.label.value != "SUPPORTED",
+                    "requires_verification": sentence.label.value != "SUPPORTED" or sentence.risk == RiskLevel.HIGH,
                     "evidence_snippets": sentence.evidence_snippets,
+                    "evidence_source_ids": snippet_sources,
                 }
             )
         confidence = max(
             max(sentence.probabilities.values()) for sentence in grounded.sentences
         )
+        evidence_shape = normalized.diagnostics()
         return {
             "hallucination_probability": grounded.probability,
             "confidence_score": float(confidence),
             "risk_level": grounded.risk.value,
             "next_action": "Verify" if grounded.requires_verification else "Accept",
             "model_source": "halluciguard_detector_ragtruth_deberta",
-            "status": "completed",
+            "status": "degraded" if evidence_shape["degraded"] else "completed",
             "calibrated": True,
             "calibration_applied": True,
             "inference_executed": True,
             "model_loaded": True,
             "model_version": grounded.model_version,
             "calibrator_version": "temperature-scaling-v1",
-            "detector_degraded": False,
+            "detector_degraded": evidence_shape["degraded"],
             "grounded": True,
             "probability_semantics": (
                 "max over sentences of calibrated P(CONTRADICTED)+P(NOT_ENOUGH_INFO)"
@@ -150,7 +149,9 @@ class DetectorAgent:
             ),
             "claims": claims,
             "warnings": grounded.warnings,
-            "diagnostics": {"degraded_reason": None, "evidence_count": len(evidence_texts)},
+            "diagnostics": {"degraded_reason": "evidence_normalization_incomplete" if evidence_shape["degraded"] else None,
+                            "evidence_count": len(evidence_texts), "evidence_shape": evidence_shape,
+                            "model_input": getattr(grounded, "input_diagnostics", {})},
         }
 
     def _pre_verification_result(self, user_query: str, answer: str) -> dict[str, Any]:

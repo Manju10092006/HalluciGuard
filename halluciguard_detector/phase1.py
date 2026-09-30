@@ -232,4 +232,4 @@ class Phase1Service:
         except FileNotFoundError:
             return Phase1Result(status="unavailable", reason="missing_head_or_calibration", mode=cfg.mode)
         except Exception as exc:
-            return Phase1Result(status="unavailable", reason=f"{type(exc).__name__}: {str(exc)[:100]}", mode=cfg.mode)
+            return Phase1Result(status="unavailable", reason=type(exc).__name__, mode=cfg.mode)

@@ -127,6 +127,41 @@ def test_runtime_error_fails_closed(monkeypatch):
     assert "detector_failed" in out["degraded_reason"]
 
 
+def test_malformed_and_nonfinite_scores_cannot_authorize_accept(monkeypatch):
+    for payload in (
+        _grounded(hallucination_probability=None, next_action="Accept", risk_level="LOW"),
+        _grounded(hallucination_probability=float("nan"), next_action="Accept", risk_level="LOW"),
+        _grounded(hallucination_probability=1.5, next_action="Accept", risk_level="LOW"),
+        _grounded(calibration_applied=False, next_action="Accept", risk_level="LOW"),
+        {"status": "completed", "next_action": "Accept", "risk_level": "LOW"},
+    ):
+        monkeypatch.setattr(db, "_get_agent", lambda payload=payload: _StubAgent(payload))
+        out = db.run_detection("q", "A claim.")
+        assert out["next_action"] == "Verify"
+        assert out["risk_level"] == "HIGH"
+
+
+def test_bridge_error_does_not_echo_sensitive_exception_message(monkeypatch):
+    def _boom():
+        raise RuntimeError("secret-token-value")
+
+    monkeypatch.setattr(db, "_get_agent", _boom)
+    out = db.run_detection("q", "A claim.")
+    assert "secret-token-value" not in out["degraded_reason"]
+
+
+def test_incomplete_phase1_claim_cannot_enable_fast_path(monkeypatch):
+    payload = _grounded(
+        hallucination_probability=None, grounded=False, calibration_applied=False,
+        next_action="Accept", risk_level="LOW",
+        phase1={"status": "scored", "mode": "fast_path", "bypass_eligible": True},
+    )
+    monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(payload))
+    out = db.run_detection("q", "A claim.")
+    assert out["next_action"] == "Verify"
+    assert out["phase1"]["bypass_eligible"] is False
+
+
 def test_empty_claim_text_is_skipped(monkeypatch):
     payload = _grounded(claims=[
         {"claim_id": 1, "text": "  ", "claim_risk": 0.9},

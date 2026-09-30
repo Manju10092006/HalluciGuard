@@ -102,7 +102,15 @@ def make_mock_verifier_output(retrieved=5, verified=2, confidence=0.85):
 
 
 @pytest.mark.asyncio
-async def test_low_detector_result_skips_verifier():
+@pytest.mark.parametrize("status,phase1", [
+    ("completed", {"bypass_eligible": True}),
+    ("unknown", {"bypass_eligible": True, "status": "scored", "mode": "fast_path",
+                 "head_id": "head", "calibration_id": "cal", "calibrated_risks": [0.02],
+                 "response_risk": 0.02}),
+])
+async def test_low_detector_result_still_verifies_without_validated_fast_path(monkeypatch, status, phase1):
+    monkeypatch.setenv("ALWAYS_VERIFY", "false")
+    monkeypatch.setenv("ALLOW_DETECTOR_FAST_PATH", "true")
     gen_result = GenerationResult(
         user_query="Low risk question",
         draft_response="Standard low risk text.",
@@ -122,6 +130,8 @@ async def test_low_detector_result_skips_verifier():
         risk_level=RiskLevel.LOW,
         next_action=NextAction.ACCEPT,
     )
+    det_result.update({"grounded": True, "calibration_applied": True,
+                       "phase1": phase1, "status": status})
 
     mock_verifier_pipeline = AsyncMock()
     mock_verifier_pipeline.verify.return_value = make_mock_verifier_output()
@@ -138,9 +148,8 @@ async def test_low_detector_result_skips_verifier():
 
     assert result.detector["risk_tier"] == "LOW"
     assert result.detector["decision"] == "ACCEPT"
-    assert result.verifier["executed"] is False
-    assert "skipped" in result.verifier["reason"].lower()
-    mock_verifier_pipeline.verify.assert_not_called()
+    assert result.verifier["executed"] is True
+    mock_verifier_pipeline.verify.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -227,7 +236,7 @@ async def test_high_detector_result_invokes_verifier():
 
 
 @pytest.mark.asyncio
-async def test_detector_failure_does_not_invoke_verifier():
+async def test_detector_failure_still_invokes_verifier():
     gen_result = GenerationResult(
         user_query="Detector error test",
         draft_response="Valid draft response.",
@@ -243,6 +252,7 @@ async def test_detector_failure_does_not_invoke_verifier():
     )
 
     mock_verifier_pipeline = AsyncMock()
+    mock_verifier_pipeline.verify.return_value = make_mock_verifier_output()
 
     llm_stub = StubBaseLLMService(gen_result)
     det_stub = DummyDetectorAgent(RuntimeError("Detector model crash"))
@@ -255,9 +265,10 @@ async def test_detector_failure_does_not_invoke_verifier():
     result = await service.execute_slice("Detector error test")
 
     assert result.detector["status"] == "failed"
-    assert "Detector model crash" in result.detector["error"]
-    assert result.verifier is None
-    mock_verifier_pipeline.verify.assert_not_called()
+    assert "RuntimeError" in result.detector["error"]
+    assert result.detector["detector_degraded"] is True
+    assert result.verifier["executed"] is True
+    mock_verifier_pipeline.verify.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -323,7 +334,7 @@ async def test_verifier_failure_handled_cleanly():
     )
 
     mock_verifier_pipeline = AsyncMock()
-    mock_verifier_pipeline.verify.side_effect = TimeoutError("Retrieval API timed out")
+    mock_verifier_pipeline.verify.side_effect = TimeoutError("Retrieval API timed out SECRET-123")
 
     llm_stub = StubBaseLLMService(gen_result)
     det_stub = DummyDetectorAgent(det_result)
@@ -337,8 +348,62 @@ async def test_verifier_failure_handled_cleanly():
 
     assert result.verifier["executed"] is True
     assert result.verifier["status"] == "failed"
-    assert "Retrieval API timed out" in result.verifier["error"]
+    assert result.verifier["error"] == "Verifier error: TimeoutError"
+    assert "SECRET-123" not in str(result.model_dump())
     assert result.verifier["claim_evidence"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detector_payload,expected_status", [
+    ({"status": "completed", "grounded": False, "inference_executed": False}, "failed"),
+    ({"status": "completed", "grounded": True, "inference_executed": True}, "passed"),
+    (RuntimeError("DETECTOR-SECRET"), "failed"),
+])
+async def test_certification_waits_until_after_verifier(monkeypatch, detector_payload, expected_status):
+    monkeypatch.setenv("CERTIFICATION_MODE", "true")
+    monkeypatch.setenv("ALWAYS_VERIFY", "false")
+    monkeypatch.setenv("ALLOW_DETECTOR_FAST_PATH", "true")
+    generation = GenerationResult(
+        user_query="Question", draft_response="A factual claim.", model="stub",
+        provider="stub", generation_mode="normal", mode="normal",
+        temperature=0.7, latency_ms=1, finish_reason="stop",
+        request_id="req-cert", status="success",
+    )
+    if isinstance(detector_payload, dict):
+        detector_payload = {**_det(0.9, 0.1, RiskLevel.LOW, NextAction.ACCEPT),
+                            **detector_payload}
+    verifier = AsyncMock()
+    verifier.verify.return_value = make_mock_verifier_output()
+    service = BaseLLMDetectorVerifierService(
+        llm_service=StubBaseLLMService(generation),
+        detector_agent=DummyDetectorAgent(detector_payload),
+        verifier_pipeline=verifier,
+    )
+    result = await service.execute_slice("Question")
+    verifier.verify.assert_called_once()
+    assert result.verifier["executed"] is True
+    assert result.detector["detector_certification_status"] == expected_status
+    assert "DETECTOR-SECRET" not in str(result.model_dump())
+
+
+@pytest.mark.asyncio
+async def test_generation_provider_error_is_sanitized():
+    generation = GenerationResult(
+        user_query="Question", draft_response="", model="stub", provider="stub",
+        generation_mode="normal", mode="normal", temperature=0.7,
+        latency_ms=1, finish_reason="error", request_id="req-generation",
+        status="failed", error="dummy-provider-api-key-secret", error_code="PROVIDER_FAILURE",
+    )
+    verifier = AsyncMock()
+    service = BaseLLMDetectorVerifierService(
+        llm_service=StubBaseLLMService(generation),
+        detector_agent=DummyDetectorAgent(RuntimeError("should not run")),
+        verifier_pipeline=verifier,
+    )
+    result = await service.execute_slice("Question")
+    assert result.generation["error_code"] == "PROVIDER_FAILURE"
+    assert "dummy-provider-api-key-secret" not in str(result.model_dump())
+    verifier.verify.assert_not_called()
 
 
 @pytest.mark.asyncio

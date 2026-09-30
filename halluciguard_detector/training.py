@@ -16,7 +16,20 @@ ID_TO_LABEL = {0: "SUPPORTED", 1: "CONTRADICTED", 2: "NOT_ENOUGH_INFO"}
 
 class JsonlDataset(Dataset):
     def __init__(self, path: Path):
-        self.rows = [json.loads(line) for line in path.open(encoding="utf-8")]
+        self.rows = []
+        with path.open(encoding="utf-8") as handle:
+            for number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    raise ValueError(f"{path.name} line {number}: empty JSONL row")
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"{path.name} line {number}: malformed JSON") from exc
+                if not isinstance(row, dict) or not isinstance(row.get("claim"), str) or not row["claim"].strip() or not isinstance(row.get("evidence"), str) or not row["evidence"].strip() or type(row.get("label_id")) is not int or row["label_id"] not in ID_TO_LABEL:
+                    raise ValueError(f"{path.name} line {number}: malformed training example")
+                if "label" in row and row["label"] != ID_TO_LABEL[row["label_id"]]:
+                    raise ValueError(f"{path.name} line {number}: label and label_id disagree")
+                self.rows.append(row)
 
     def __len__(self):
         return len(self.rows)
@@ -54,6 +67,14 @@ def _evaluate(model, loader, device):
 
 
 def binary_metrics(logits: np.ndarray, labels: np.ndarray, temperature: float = 1.0, threshold: float = 0.5):
+    if logits.ndim != 2 or logits.shape[1] != 3 or labels.ndim != 1 or len(logits) != len(labels) or not len(labels):
+        raise ValueError("expected nonempty [N,3] logits and [N] labels")
+    if logits.dtype.kind not in "fi" or labels.dtype.kind not in "iu":
+        raise ValueError("logits must be numeric and labels must be integer class IDs")
+    if not np.isfinite(logits).all() or not np.isin(labels, [0, 1, 2]).all():
+        raise ValueError("nonfinite logits or unsupported labels")
+    if not np.isfinite(temperature) or temperature <= 0 or not 0 <= threshold <= 1:
+        raise ValueError("invalid calibration temperature or threshold")
     probabilities = torch.softmax(torch.tensor(logits) / temperature, dim=-1).numpy()
     hallu_probability = 1.0 - probabilities[:, 0]
     truth = (labels != 0).astype(int)
@@ -64,7 +85,7 @@ def binary_metrics(logits: np.ndarray, labels: np.ndarray, temperature: float = 
     bins = np.linspace(0, 1, 11)
     ece = 0.0
     for low, high in zip(bins[:-1], bins[1:]):
-        mask = (hallu_probability >= low) & (hallu_probability < high)
+        mask = (hallu_probability >= low) & (hallu_probability <= high if high == 1 else hallu_probability < high)
         if mask.any():
             ece += mask.mean() * abs(hallu_probability[mask].mean() - truth[mask].mean())
     return {
@@ -72,12 +93,14 @@ def binary_metrics(logits: np.ndarray, labels: np.ndarray, temperature: float = 
         "precision": float(precision),
         "recall": float(recall),
         "f1": float(f1),
-        "roc_auc": float(roc_auc_score(truth, hallu_probability)),
-        "pr_auc": float(average_precision_score(truth, hallu_probability)),
+        "roc_auc": float(roc_auc_score(truth, hallu_probability)) if len(set(truth)) == 2 else None,
+        "pr_auc": float(average_precision_score(truth, hallu_probability)) if len(set(truth)) == 2 else None,
         "false_positive_rate": float(fp / max(1, fp + tn)),
         "false_negative_rate": float(fn / max(1, fn + tp)),
         "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
         "ece": float(ece),
+        "brier": float(np.mean((hallu_probability - truth) ** 2)),
+        "class_counts": {ID_TO_LABEL[i]: int((labels == i).sum()) for i in ID_TO_LABEL},
         "threshold": threshold,
     }
 
@@ -92,6 +115,17 @@ def train(
     max_length: int = 384,
     seed: int = 42,
 ) -> dict:
+    if epochs < 1 or batch_size < 1 or max_length < 1:
+        raise ValueError("epochs, batch size, and maximum length must be positive")
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError("detector output directory is not empty; preserve existing artifacts")
+    recovery_dir = output_dir.parent / f"{output_dir.name}-last"
+    if recovery_dir.exists() and any(recovery_dir.iterdir()):
+        raise FileExistsError("detector recovery directory is not empty; preserve existing artifacts")
+    train_data = JsonlDataset(data_dir / "train.jsonl")
+    dev_data = JsonlDataset(data_dir / "dev.jsonl")
+    if not train_data or not dev_data:
+        raise ValueError("training requires nonempty train and dev datasets")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -106,8 +140,8 @@ def train(
         label2id={v: k for k, v in ID_TO_LABEL.items()},
     ).float().to(device)
     collate = _collator(tokenizer, max_length)
-    train_loader = DataLoader(JsonlDataset(data_dir / "train.jsonl"), batch_size=batch_size, shuffle=True, collate_fn=collate)
-    dev_loader = DataLoader(JsonlDataset(data_dir / "dev.jsonl"), batch_size=batch_size, shuffle=False, collate_fn=collate)
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, collate_fn=collate)
+    dev_loader = DataLoader(dev_data, batch_size=batch_size, shuffle=False, collate_fn=collate)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
     steps = epochs * len(train_loader)
     scheduler = get_linear_schedule_with_warmup(optimizer, int(steps * 0.06), steps)
@@ -138,7 +172,6 @@ def train(
                 )
         # Persist completed work before evaluation; a late resource error must not
         # discard a full epoch. This is overwritten only by another completed epoch.
-        recovery_dir = output_dir.parent / f"{output_dir.name}-last"
         model.save_pretrained(recovery_dir, safe_serialization=True)
         tokenizer.save_pretrained(recovery_dir)
         torch.cuda.empty_cache()
@@ -163,13 +196,23 @@ def train(
     return report
 
 
-def evaluate(data_dir: Path, model_dir: Path, batch_size: int = 16, max_length: int = 384) -> dict:
+def evaluate(data_dir: Path, model_dir: Path, batch_size: int = 16, max_length: int | None = None) -> dict:
+    if (model_dir / "test_metrics.json").exists() or (model_dir / "test_predictions.npz").exists():
+        raise FileExistsError("test evaluation artifacts already exist; preserve measured results")
+    calibration = json.loads((model_dir / "calibration.json").read_text(encoding="utf-8"))
+    effective_length = int(max_length if max_length is not None else calibration["max_length"])
+    if batch_size < 1 or effective_length < 1:
+        raise ValueError("batch size and maximum length must be positive")
+    if effective_length != int(calibration["max_length"]):
+        raise ValueError("evaluation maximum length must match saved calibration")
+    test_data = JsonlDataset(data_dir / "test.jsonl")
+    if not test_data:
+        raise ValueError("evaluation requires a nonempty test dataset")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     model = AutoModelForSequenceClassification.from_pretrained(model_dir).to(device)
-    loader = DataLoader(JsonlDataset(data_dir / "test.jsonl"), batch_size=batch_size, shuffle=False, collate_fn=_collator(tokenizer, max_length))
+    loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, collate_fn=_collator(tokenizer, effective_length))
     logits, labels = _evaluate(model, loader, device)
-    calibration = json.loads((model_dir / "calibration.json").read_text(encoding="utf-8"))
     metrics = binary_metrics(logits, labels, calibration["temperature"], calibration["hallucination_threshold"])
     metrics["samples"] = int(len(labels))
     (model_dir / "test_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")

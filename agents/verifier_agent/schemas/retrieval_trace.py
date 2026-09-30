@@ -69,6 +69,10 @@ class ModelExecutionTrace(BaseModel):
     latency_ms: int = 0
     scored_count: int = 0          # reranker: passages scored
     batch_size: int = 0            # nli: pairs classified
+    attempted: bool = False
+    initialization_attempted: bool = False
+    failure_stage: Optional[str] = None
+    error_type: Optional[str] = None
 
 
 class EvidencePassageTrace(BaseModel):
@@ -153,6 +157,8 @@ class RetrievalTrace(BaseModel):
     relation_check: Optional[RelationCheckTrace] = None
     gate_relevance_audit: Optional[GateRelevanceAuditTrace] = None
     n8n_trace: Optional[N8NTrace] = None
+    hybrid_execution: Optional[Dict[str, Any]] = None
+    evidence_degraded: bool = False
     # §26 model-execution proof (populated from reranker/nli .diagnostics()):
     reranker_execution: Optional[ModelExecutionTrace] = None
     nli_execution: Optional[ModelExecutionTrace] = None

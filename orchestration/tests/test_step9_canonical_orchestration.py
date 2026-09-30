@@ -165,7 +165,8 @@ async def test_detector_low_risk_without_validated_phase1_still_verifies(monkeyp
 
     assert res["route"] == "verify"
     assert res["verification_status"] == "verification_required"
-    assert res["detector_result"]["risk_level"] == "LOW"
+    # An uncalibrated legacy score is not trusted as a LOW-risk verdict.
+    assert res["detector_result"]["risk_level"] == "HIGH"
     assert _detector_route(res) == "verifier"
 
 

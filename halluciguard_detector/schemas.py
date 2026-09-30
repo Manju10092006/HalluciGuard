@@ -49,3 +49,4 @@ class DetectResponse(BaseModel):
     sentences: list[SentenceResult]
     model_version: str
     warnings: list[str] = Field(default_factory=list)
+    input_diagnostics: dict = Field(default_factory=dict)

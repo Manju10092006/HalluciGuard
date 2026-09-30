@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from orchestration.graph import (
+    _detector_node,
+    _grounded_detector_node,
+    _verifier_node,
     _corrector_route,
     _detector_route,
     _generate_route,
@@ -46,6 +49,66 @@ def test_detector_high_routes_to_verifier():
 
 def test_detector_failure_routes_to_human_escalation():
     assert _detector_route({"route": "error"}) == "human_escalation"
+
+
+async def _broken_detector_node(monkeypatch):
+    from orchestration import detector_bridge
+
+    monkeypatch.setattr(detector_bridge, "run_detection", lambda *args: (_ for _ in ()).throw(RuntimeError("secret")))
+    return await _detector_node({"user_query": "Question?", "llm_response": "A factual draft."})
+
+
+def test_detector_node_error_with_draft_routes_to_verifier(monkeypatch):
+    import asyncio
+
+    update = asyncio.run(_broken_detector_node(monkeypatch))
+    assert update["route"] == "verify"
+    assert update["detector_result"]["detector_degraded"] is True
+    assert update["detected_claims"][0]["text"] == "A factual draft."
+    assert "secret" not in str(update)
+
+
+def test_grounded_detector_trace_preserves_upstream_retrieval_degradation(monkeypatch):
+    import asyncio
+    from orchestration import detector_bridge
+
+    monkeypatch.setattr(detector_bridge, "run_grounded_detection", lambda *args: {
+        "inference_executed": False, "model_loaded": False,
+        "hallucination_probability": 0.0, "confidence_score": 0.0,
+        "risk_level": "HIGH", "detector_degraded": True,
+    })
+    update = asyncio.run(_grounded_detector_node({
+        "user_query": "Question?", "llm_response": "A factual draft.",
+        "retrieved_evidence": [{"snippet": "Evidence."}],
+        "verifier": {"claim_evidence": [{"retrieval_trace": {
+            "hybrid_execution": {"route": "bm25_only"}, "evidence_degraded": True,
+        }}]},
+    }))
+    diag = update["detector_result"]["diagnostics"]
+    assert diag["upstream_retrieval_degraded"] is True
+    assert diag["upstream_retrieval_routes"] == ["bm25_only"]
+
+
+def test_verifier_boundary_does_not_return_sensitive_exception_message(monkeypatch):
+    import asyncio
+    from orchestration import graph
+
+    class Input:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class Pipeline:
+        async def verify(self, payload):
+            raise RuntimeError("dummy-api-key-secret")
+
+    monkeypatch.setattr(graph, "_get_verifier_imports", lambda: (Pipeline, Input, Input))
+    update = asyncio.run(_verifier_node({
+        "user_query": "Question?", "llm_response": "A factual draft.",
+        "detected_claims": [{"claim_id": "c1", "text": "A factual draft."}],
+    }))
+    assert update["route"] == "error"
+    assert update["verifier_result"]["status"] == "failed"
+    assert "dummy-api-key-secret" not in str(update)
 
 
 def test_verifier_route_success():

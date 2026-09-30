@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import sys
 import uuid
@@ -12,6 +13,35 @@ from halluciguard_detector import DetectorAgent
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 
 logger = logging.getLogger(__name__)
+
+
+def _validated_fast_path(result: dict[str, Any]) -> bool:
+    """Require a complete calibrated Phase 1 record before any opt-in skip."""
+    phase1 = result.get("phase1")
+    if not isinstance(phase1, dict):
+        return False
+    risks = phase1.get("calibrated_risks")
+    if not isinstance(risks, list) or not risks:
+        return False
+    try:
+        values = [float(value) for value in risks]
+        response_risk = float(phase1.get("response_risk"))
+        detector_probability = float(result.get("hallucination_probability"))
+    except (TypeError, ValueError):
+        return False
+    return (
+        phase1.get("bypass_eligible") is True
+        and phase1.get("status") == "scored"
+        and phase1.get("mode") == "fast_path"
+        and bool(phase1.get("head_id"))
+        and bool(phase1.get("calibration_id"))
+        and all(math.isfinite(value) and 0 <= value <= 1 for value in values)
+        and math.isfinite(response_risk) and 0 <= response_risk <= 1
+        and abs(response_risk - max(values)) < 1e-6
+        and math.isfinite(detector_probability) and 0 <= detector_probability <= 1
+        and bool(result.get("calibration_applied"))
+        and bool(result.get("grounded"))
+    )
 
 
 def _load_verifier_imports():
@@ -125,7 +155,7 @@ class BaseLLMDetectorVerifierService:
             "finish_reason": gen_result.finish_reason,
         }
         if gen_result.error:
-            gen_dict["error"] = gen_result.error
+            gen_dict["error"] = "Generation failed; inspect provider diagnostics securely"
             gen_dict["error_code"] = gen_result.error_code
 
         draft_response = gen_result.draft_response or ""
@@ -155,7 +185,7 @@ class BaseLLMDetectorVerifierService:
             completed = status == "completed"
             risk_tier = str(detection_result.get("risk_level", "HIGH")).upper()
             next_act_str = str(detection_result.get("next_action", "Verify")).upper()
-            decision = "VERIFY" if next_act_str == "VERIFY" else "ACCEPT"
+            decision = "ACCEPT" if next_act_str == "ACCEPT" else "VERIFY"
             model_source = str(detection_result.get("model_source", "halluciguard_detector"))
             # Prefer the explicit degraded flag and preserve execution diagnostics.
             degraded = bool(detection_result.get("detector_degraded", not completed))
@@ -177,41 +207,44 @@ class BaseLLMDetectorVerifierService:
                 "verification_reason": detection_result.get("verification_reason"),
             }
         except Exception as exc:
-            logger.error(
-                f"[LLMDetectorVerifierService] Detector execution failed: {exc}",
-                exc_info=True,
-            )
+            logger.error("[LLMDetectorVerifierService] Detector execution failed (%s)", type(exc).__name__)
             detector_dict = {
                 "status": "failed",
-                "error": f"Detector error: {type(exc).__name__} — {str(exc)[:200]}",
-                "risk_tier": "UNKNOWN",
+                "error": f"Detector error: {type(exc).__name__}",
+                "risk_tier": "HIGH",
                 "decision": "VERIFY",
+                "detector_degraded": True,
+                "probability_available": False,
             }
-            # Detector failure prevents Verifier execution
-            return LLMDetectorVerifierSliceResult(
-                user_query=user_query,
-                draft_response=draft_response,
-                generation=gen_dict,
-                detector=detector_dict,
-                verifier=None,
-            )
+            decision, risk_tier = "VERIFY", "HIGH"
+            completed = False
+            detection_result = {}
 
-        # §28 certification: a degraded detector (baseline heuristic) must not be
-        # silently certified. Fail-closed BEFORE routing to the verifier. Import is
-        # guarded so normal (non-certification) runs are never affected.
+        # The first Detector pass has no retrieved evidence. Certification must
+        # never mistake this triage result for grounded inference, nor prevent
+        # the Verifier from obtaining evidence in the first place.
+        certification_enabled = os.environ.get("CERTIFICATION_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
         try:
             _enforce_detector, _cert_from_env, _CertErr = _load_certification()
         except Exception as _imp_exc:  # pragma: no cover - defensive
             _enforce_detector = None
-            logger.debug("Certification helpers unavailable: %s", _imp_exc)
-        if _enforce_detector is not None:
-            _enforce_detector(detector_dict, _cert_from_env())
+            logger.debug("Certification helpers unavailable (%s)", type(_imp_exc).__name__)
+        if certification_enabled:
+            detector_dict["detector_certification_status"] = "pending_evidence_grounded_detection"
 
         # Step 3: Conditional Verifier Routing
         should_verify = (
             force_verifier
+            or certification_enabled
+            or not completed
+            or os.environ.get("ALWAYS_VERIFY", "true").strip().lower() not in {"false", "0"}
+            or os.environ.get("ALLOW_DETECTOR_FAST_PATH", "false").strip().lower() not in {"true", "1"}
             or decision == "VERIFY"
-            or risk_tier in {"MEDIUM", "HIGH"}
+            or risk_tier != "LOW"
+            or detector_dict.get("detector_degraded", True)
+            or not detector_dict.get("probability_available", False)
+            or not detector_dict.get("grounded", False)
+            or not _validated_fast_path(detection_result)
         )
         if not should_verify:
             logger.info(
@@ -230,9 +263,7 @@ class BaseLLMDetectorVerifierService:
             )
 
         # Execute Verifier Pipeline
-        logger.info(
-            f"[LLMDetectorVerifierService] Invoking Verifier Pipeline for query: '{user_query[:60]}...'"
-        )
+        logger.info("[LLMDetectorVerifierService] Invoking Verifier Pipeline")
         try:
             VerificationPipelineClass, SuspiciousClaim, VerifierInputV2 = (
                 _load_verifier_imports()
@@ -363,16 +394,26 @@ class BaseLLMDetectorVerifierService:
                 "claim_evidence": claims_data,
             }
         except Exception as exc:
-            logger.error(
-                f"[LLMDetectorVerifierService] Verifier execution failed cleanly: {exc}",
-                exc_info=True,
-            )
+            logger.error("[LLMDetectorVerifierService] Verifier execution failed (%s)", type(exc).__name__)
             verifier_dict = {
                 "executed": True,
                 "status": "failed",
-                "error": f"Verifier error: {type(exc).__name__} — {str(exc)[:200]}",
+                "error": f"Verifier error: {type(exc).__name__}",
                 "claim_evidence": [],
             }
+
+        if certification_enabled:
+            if verifier_dict.get("status") == "failed":
+                detector_dict["detector_certification_status"] = "not_evaluated_verifier_failed"
+            elif _enforce_detector is None:
+                detector_dict["detector_certification_status"] = "unavailable"
+            else:
+                try:
+                    _enforce_detector(detector_dict, True)
+                    detector_dict["detector_certification_status"] = "passed"
+                except Exception as exc:
+                    detector_dict["detector_certification_status"] = "failed"
+                    detector_dict["detector_certification_error_type"] = type(exc).__name__
 
         return LLMDetectorVerifierSliceResult(
             user_query=user_query,

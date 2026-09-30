@@ -8,6 +8,7 @@ Any runtime failure fails closed to verification.
 from __future__ import annotations
 
 import threading
+import math
 from typing import Any
 
 
@@ -50,16 +51,46 @@ def _failclosed(reason: str) -> dict[str, Any]:
 
 
 def _map_result(result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise ValueError("detector result must be an object")
+
+    def probability(value: Any) -> float | None:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) and 0.0 <= parsed <= 1.0 else None
+
     raw_probability = result.get("hallucination_probability")
-    probability_available = raw_probability is not None
-    probability = float(raw_probability) if probability_available else 0.0
+    valid_probability = probability(raw_probability)
+    probability_available = valid_probability is not None
+    probability_value = valid_probability if probability_available else 0.0
     raw_confidence = result.get("confidence_score")
-    confidence = float(raw_confidence) if raw_confidence is not None else 0.0
+    confidence = probability(raw_confidence) or 0.0
     status = str(result.get("status", "completed")).lower()
     degraded = bool(result.get("detector_degraded", status != "completed"))
     next_action = str(result.get("next_action", "Verify"))
     risk_level = str(result.get("risk_level", "HIGH")).upper()
-    if status != "completed" or degraded:
+    if risk_level not in {"LOW", "MEDIUM", "HIGH"}:
+        risk_level = "HIGH"
+        degraded = True
+    phase1 = dict(result.get("phase1")) if isinstance(result.get("phase1"), dict) else {}
+    risks = phase1.get("calibrated_risks")
+    response_risk = probability(phase1.get("response_risk"))
+    validated_phase1 = (
+        phase1.get("bypass_eligible") is True
+        and phase1.get("status") == "scored"
+        and phase1.get("mode") == "fast_path"
+        and bool(phase1.get("head_id")) and bool(phase1.get("calibration_id"))
+        and isinstance(risks, list) and bool(risks)
+        and all(probability(item) is not None for item in risks)
+        and response_risk is not None
+        and abs(response_risk - max(float(item) for item in risks)) < 1e-6
+    )
+    if not validated_phase1:
+        phase1["bypass_eligible"] = False
+    grounded_score = bool(result.get("grounded")) and bool(result.get("calibration_applied")) and probability_available
+    if status != "completed" or degraded or not (validated_phase1 or grounded_score):
         next_action = "Verify"
         risk_level = "HIGH"
 
@@ -70,7 +101,8 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         if not text:
             continue
         raw_risk = claim.get("claim_risk")
-        claim_probability = float(raw_risk) if raw_risk is not None else 0.0
+        valid_claim_risk = probability(raw_risk)
+        claim_probability = valid_claim_risk if valid_claim_risk is not None else 0.0
         claim_level = str(
             claim.get("risk_level") or ("HIGH" if overall_verify else "LOW")
         ).upper()
@@ -81,18 +113,19 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
                 "span": claim.get("span"),
                 "label": claim.get("label", "UNVERIFIED"),
                 "hallucination_probability": claim_probability,
-                "probability_available": raw_risk is not None,
+                "probability_available": valid_claim_risk is not None,
                 "phase1_risk": claim.get("phase1_risk"),
                 "risk_level": claim_level,
                 "requires_verification": bool(
                     claim.get("requires_verification", overall_verify)
+                    or (valid_claim_risk is None and not validated_phase1)
                 ),
             }
         )
 
     diagnostics = result.get("diagnostics") or {}
     return {
-        "hallucination_probability": probability,
+        "hallucination_probability": probability_value,
         "probability_available": probability_available,
         "confidence_score": confidence,
         "risk_level": risk_level,
@@ -113,7 +146,7 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         "diagnostics": diagnostics,
         "warnings": result.get("warnings") or [],
         "per_claim_results": per_claim_results,
-        "phase1": result.get("phase1"),
+        "phase1": phase1,
     }
 
 
@@ -130,7 +163,7 @@ def run_detection(user_query: str, llm_response: str, generation_trace: dict[str
             result = _get_agent().detect(user_query, llm_response, generation_trace=generation_trace, domain=domain)
         return _map_result(result)
     except Exception as exc:  # fail closed; the graph must still reach Verifier
-        return _failclosed(f"detector_failed: {type(exc).__name__}: {str(exc)[:160]}")
+        return _failclosed(f"detector_failed: {type(exc).__name__}")
 
 
 def run_grounded_detection(
@@ -148,5 +181,5 @@ def run_grounded_detection(
         return _map_result(result)
     except Exception as exc:  # fail closed; Judge still receives verifier truth
         return _failclosed(
-            f"grounded_detector_failed: {type(exc).__name__}: {str(exc)[:160]}"
+            f"grounded_detector_failed: {type(exc).__name__}"
         )

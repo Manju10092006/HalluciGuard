@@ -364,7 +364,29 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             ),
         }
     except Exception as exc:
-        return _failure_update(state, "detector", exc)
+        if not str(state.get("llm_response") or "").strip():
+            return _failure_update(state, "detector", exc)
+        # A Detector bridge/schema failure must not make an existing draft skip
+        # the authoritative Verifier. The error type is enough for diagnostics;
+        # exception text may contain provider secrets or private prompt data.
+        from .detector_bridge import _failclosed
+
+        detector = _failclosed(f"detector_node_failed: {type(exc).__name__}")
+        claim = {"claim_id": "c1", "text": state["llm_response"],
+                 "hallucination_probability": 0.0, "risk_level": "HIGH",
+                 "requires_verification": True}
+        return {
+            "detector": detector,
+            "detector_result": detector,
+            "phase1_result": {},
+            "generation_trace": None,
+            "detected_claims": [claim],
+            "route": "verify",
+            "verification_status": "verification_required",
+            "updated_at": utc_now(),
+            "trace": add_trace(state, "detector", "degraded", route="verify",
+                               error_type=type(exc).__name__),
+        }
 
 
 def _detector_route(state: HalluciGuardState) -> str:
@@ -677,7 +699,7 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             ) from timeout_exc
         except Exception as exc:
             raise RuntimeError(
-                f"Verifier failed: {type(exc).__name__}: {exc}"
+                f"Verifier failed: {type(exc).__name__}"
             ) from exc
 
         judge_pairs: list[dict[str, Any]] = []
@@ -781,7 +803,8 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             overall_confidence=0.0,
             status=ExecutionStatus.FAILED,
         )
-        update = _failure_update(state, "verifier", exc, retryable=True, error_type=type(exc).__name__)
+        update = _failure_update(state, "verifier", RuntimeError("Verifier execution failed"),
+                                 retryable=True, error_type=type(exc).__name__)
         update["verifier_result"] = _dump(failed_res)
         return update
 
@@ -809,6 +832,21 @@ async def _grounded_detector_node(state: HalluciGuardState) -> dict[str, Any]:
         )
 
     detector = _dump(await asyncio.to_thread(_run_detect))
+    retrieval_traces = [report.get("retrieval_trace") for report in
+                        (state.get("verifier") or {}).get("claim_evidence", [])
+                        if isinstance(report, dict) and isinstance(report.get("retrieval_trace"), dict)]
+    upstream_degraded = (
+        any(trace.get("evidence_degraded") is True for trace in retrieval_traces)
+        if retrieval_traces else None
+    )
+    diagnostics = detector.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+        detector["diagnostics"] = diagnostics
+    diagnostics["upstream_retrieval_degraded"] = upstream_degraded
+    diagnostics["upstream_retrieval_routes"] = [
+        (trace.get("hybrid_execution") or {}).get("route") for trace in retrieval_traces
+    ]
     status = "completed" if detector.get("inference_executed") else "skipped"
     bus = add_bus_message(
         state,
@@ -841,6 +879,7 @@ async def _grounded_detector_node(state: HalluciGuardState) -> dict[str, Any]:
             inference_executed=detector.get("inference_executed", False),
             evidence_count=len(evidence),
             risk_level=detector.get("risk_level", "HIGH"),
+            upstream_retrieval_degraded=upstream_degraded,
         ),
     }
 

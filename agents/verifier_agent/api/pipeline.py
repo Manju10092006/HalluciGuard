@@ -47,6 +47,27 @@ from utils.logging import setup_logger
 from api.certification import CertificationError
 
 
+def attach_retrieval_execution_trace(adapter, domain: str, *, hybrid: dict | None = None,
+                                     reranker: dict | None = None):
+    """Persist actual backend/reranker execution without changing passage scores."""
+    from schemas.retrieval_trace import RetrievalTrace, ModelExecutionTrace
+
+    trace = getattr(adapter, "last_retrieval_trace", None)
+    if trace is None:
+        trace = RetrievalTrace(
+            requested_domain=domain,
+            primary_adapter=getattr(adapter, "name", "unknown"),
+        )
+        adapter.last_retrieval_trace = trace
+    if hybrid is not None:
+        trace.hybrid_execution = dict(hybrid)
+        trace.evidence_degraded = trace.evidence_degraded or bool(hybrid.get("degraded"))
+    if reranker is not None:
+        trace.reranker_execution = ModelExecutionTrace(**reranker)
+        trace.evidence_degraded = trace.evidence_degraded or bool(reranker.get("degraded"))
+    return trace
+
+
 def append_retrieval_health_stage(
     pipeline_stages: List[PipelineStageStatus],
     adapter_failures: List[str],
@@ -610,10 +631,9 @@ class VerificationPipeline:
                                 all_raw.extend(n8n_res.passages)
                             elif not n8n_res.success:
                                 self.logger.warning(
-                                    "n8n retrieval failed (%s); falling back to Python adapters.",
-                                    n8n_res.error,
+                                    "n8n retrieval failed; falling back to Python adapters.",
                                 )
-                                adapter_failures.append(f"n8n:{str(n8n_res.error)[:80]}")
+                                adapter_failures.append("n8n:provider_failure")
 
                         # ── Retrieval query set through Python adapters ───────
                         # If n8n produced nothing, run the FULL query set (classic
@@ -635,12 +655,11 @@ class VerificationPipeline:
                                 all_raw.extend(q_passages)
                             except Exception as e:
                                 self.logger.error(
-                                    "Adapter retrieval failed for query '%s': %s",
-                                    q,
-                                    e,
+                                    "Adapter retrieval failed (%s)",
+                                    type(e).__name__,
                                 )
                                 adapter_failures.append(
-                                    f"{validated_domain}:{str(e)[:100]}"
+                                    f"{validated_domain}:{type(e).__name__}"
                                 )
 
                         # Attach n8n trace to adapter trace or initialize retrieval trace
@@ -709,6 +728,14 @@ class VerificationPipeline:
                             k=8,
                             dense_model=route.dense_model,
                         )
+                        _hybrid_diag = (
+                            self.hybrid_retriever.diagnostics()
+                            if hasattr(self.hybrid_retriever, "diagnostics")
+                            else {"route": "unknown", "degraded": True, "reason": "retrieval_diagnostics_unavailable"}
+                        )
+                        attach_retrieval_execution_trace(
+                            adapter, validated_domain, hybrid=_hybrid_diag,
+                        )
 
                     with tracker.track(PipelineStage.RERANKING):
                         reranked_passages = self.reranker.rerank(
@@ -732,12 +759,9 @@ class VerificationPipeline:
 
                         # §13/§26 BGE execution proof — record real-inference vs. fallback.
                         self._last_reranker_diag = self.reranker.diagnostics()
-                        _rr_trace = getattr(adapter, "last_retrieval_trace", None)
-                        if _rr_trace is not None:
-                            from schemas.retrieval_trace import ModelExecutionTrace
-                            _rr_trace.reranker_execution = ModelExecutionTrace(
-                                **self._last_reranker_diag
-                            )
+                        attach_retrieval_execution_trace(
+                            adapter, validated_domain, reranker=self._last_reranker_diag,
+                        )
                         # §28 certification: a fallback BGE score must never be certified.
                         self._enforce_certification_reranker(self._last_reranker_diag)
 

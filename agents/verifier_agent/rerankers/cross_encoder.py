@@ -29,6 +29,10 @@ class CrossEncoderReranker:
         self.last_device: str = "unknown"
         self.last_latency_ms: int = 0
         self.last_scored_count: int = 0
+        self.last_attempted: bool = False
+        self.last_initialization_attempted: bool = False
+        self.last_failure_stage: str | None = None
+        self.last_error_type: str | None = None
 
     def _reset_run_diagnostics(self) -> None:
         self.last_status = "not_run"
@@ -36,6 +40,10 @@ class CrossEncoderReranker:
         self.last_degraded = False
         self.last_latency_ms = 0
         self.last_scored_count = 0
+        self.last_attempted = False
+        self.last_initialization_attempted = False
+        self.last_failure_stage = None
+        self.last_error_type = None
 
     def _detect_device(self) -> str:
         """Best-effort device read from the loaded cross-encoder (never raises)."""
@@ -70,6 +78,10 @@ class CrossEncoderReranker:
             "device": self.last_device,
             "latency_ms": self.last_latency_ms,
             "scored_count": self.last_scored_count,
+            "attempted": self.last_attempted,
+            "initialization_attempted": self.last_initialization_attempted,
+            "failure_stage": self.last_failure_stage,
+            "error_type": self.last_error_type,
         }
 
     def _load_model(self) -> None:
@@ -80,14 +92,17 @@ class CrossEncoderReranker:
             return
 
         self._load_attempts += 1
+        self.last_initialization_attempted = True
         try:
             self.model = get_model_manager().load_reranker_model(self.model_name)
             self._load_attempts = 0
         except ImportError:
             logging.warning("transformers not installed. CrossEncoderReranker falling back.")
             self._is_available = False
+            self.last_failure_stage, self.last_error_type = "initialization", "ImportError"
         except Exception as exc:
-            logging.warning("Error loading cross-encoder model: %s", exc)
+            logging.warning("Error loading cross-encoder model (%s)", type(exc).__name__)
+            self.last_failure_stage, self.last_error_type = "initialization", type(exc).__name__
             if self._load_attempts >= 2:
                 self._is_available = False
 
@@ -116,6 +131,7 @@ class CrossEncoderReranker:
 
         if k <= 0 or not passages:
             return []
+        self.last_attempted = True
 
         if model_name and model_name != self.model_name:
             self.model_name = model_name
@@ -125,13 +141,14 @@ class CrossEncoderReranker:
 
         self._load_model()
 
-        if not self._is_available:
+        if not self._is_available or self.model is None:
             logging.warning(
                 "Reranking skipped (model unavailable); preserving hybrid retrieval order."
             )
             self.last_status = "unavailable"
             self.last_degraded = True
             self.last_inference_executed = False
+            self.last_failure_stage = self.last_failure_stage or "initialization"
             return self._fallback(passages, k)
 
         try:
@@ -163,15 +180,16 @@ class CrossEncoderReranker:
 
         except Exception as exc:
             logging.warning(
-                "Reranking failed for %d passages: %s. Preserving hybrid ranking.",
+                "Reranking failed for %d passages (%s). Preserving retrieval ranking.",
                 len(passages),
-                exc,
+                type(exc).__name__,
             )
             # Inference was attempted but failed — this is a DEGRADED result, not
             # a real BGE score. Downstream must not treat the fallback as BGE.
             self.last_status = "degraded"
             self.last_degraded = True
             self.last_inference_executed = False
+            self.last_failure_stage, self.last_error_type = "inference", type(exc).__name__
             return self._fallback(passages, k)
 
     @staticmethod
@@ -219,7 +237,7 @@ class CrossEncoderReranker:
             normalized = [self._normalize_gate_score(float(s)) for s in scores_list]
             return normalized, candidates
         except Exception as exc:
-            logging.warning("Gate BGE scoring failed: %s", exc)
+            logging.warning("Gate BGE scoring failed (%s)", type(exc).__name__)
             fallback_scores = [
                 max(0.0, min(1.0, float(getattr(p, "relevance_score", 0.0) or 0.0)))
                 for p in candidates
