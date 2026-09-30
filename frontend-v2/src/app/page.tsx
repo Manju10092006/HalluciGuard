@@ -889,15 +889,15 @@ function Contact() {
           <aside className="contact-card-left" data-reveal>
             <div className="info-box">
               <Phone size={18} color="#444" />
-              <span>412-483-8261</span>
+              <span>+1 (555) 010-2288</span>
             </div>
             <div className="info-box">
               <Mail size={18} color="#444" />
-              <span>support@zovasaas.com</span>
+              <span>hello@halluciguard.ai</span>
             </div>
             <div className="info-box">
               <Building2 size={18} color="#444" />
-              <span>210 Market St. Suite 402<br />San Francisco, CA</span>
+              <span>San Francisco, CA</span>
             </div>
             <div className="video-box">
                   <video src={videoSrc} autoPlay loop muted playsInline preload="metadata" className="contact-video-media" />
