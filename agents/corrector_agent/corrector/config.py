@@ -105,6 +105,13 @@ class CorrectorConfig:
 
     # OpenRouter model for the LLM-backed corrector path (env-tunable for credit control).
     openrouter_model: str = DEFAULT_CORRECTOR_OPENROUTER_MODEL
+    # ModelClient's direct generation path defaults to the local adapter; the
+    # orchestration layer may explicitly select a remote provider instead.
+    provider: str = "local"
+    groq_model: str = DEFAULT_CORRECTOR_GROQ_MODEL
+    groq_timeout_seconds: float = 30.0
+    groq_max_retries: int = 2
+    groq_reasoning_effort: str = "low"
 
     @classmethod
     def from_env(cls) -> "CorrectorConfig":
@@ -154,5 +161,16 @@ class CorrectorConfig:
             deterministic=_env_bool("HG_CORRECTOR_DETERMINISTIC", cls.deterministic),
             openrouter_model=_env_str(
                 "HG_CORRECTOR_OPENROUTER_MODEL", cls.openrouter_model
+            ),
+            provider=_env_str("HG_CORRECTOR_PROVIDER", cls.provider).strip().lower(),
+            groq_model=_env_str("HG_CORRECTOR_GROQ_MODEL", cls.groq_model),
+            groq_timeout_seconds=_env_float(
+                "HG_CORRECTOR_GROQ_TIMEOUT_SECONDS", cls.groq_timeout_seconds
+            ),
+            groq_max_retries=_env_int(
+                "HG_CORRECTOR_GROQ_MAX_RETRIES", cls.groq_max_retries
+            ),
+            groq_reasoning_effort=_env_str(
+                "HG_CORRECTOR_GROQ_REASONING_EFFORT", cls.groq_reasoning_effort
             ),
         )

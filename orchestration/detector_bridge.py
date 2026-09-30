@@ -82,6 +82,7 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
                 "label": claim.get("label", "UNVERIFIED"),
                 "hallucination_probability": claim_probability,
                 "probability_available": raw_risk is not None,
+                "phase1_risk": claim.get("phase1_risk"),
                 "risk_level": claim_level,
                 "requires_verification": bool(
                     claim.get("requires_verification", overall_verify)
@@ -112,17 +113,21 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         "diagnostics": diagnostics,
         "warnings": result.get("warnings") or [],
         "per_claim_results": per_claim_results,
+        "phase1": result.get("phase1"),
     }
 
 
-def run_detection(user_query: str, llm_response: str) -> dict[str, Any]:
+def run_detection(user_query: str, llm_response: str, generation_trace: dict[str, Any] | None = None, domain: str = "general") -> dict[str, Any]:
     """Run evidence-free pre-retrieval triage.
 
     This intentionally does not load the trained reference-grounded model.
     ``run_grounded_detection`` is the production inference entry point.
     """
     try:
-        result = _get_agent().detect(user_query, llm_response)
+        if generation_trace is None and domain == "general":
+            result = _get_agent().detect(user_query, llm_response)
+        else:
+            result = _get_agent().detect(user_query, llm_response, generation_trace=generation_trace, domain=domain)
         return _map_result(result)
     except Exception as exc:  # fail closed; the graph must still reach Verifier
         return _failclosed(f"detector_failed: {type(exc).__name__}: {str(exc)[:160]}")

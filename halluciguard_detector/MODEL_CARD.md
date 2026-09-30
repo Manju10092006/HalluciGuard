@@ -1,5 +1,7 @@
 # HalluciGuard Detector — Model Card
 
+This card reports **Phase 2 evidence-grounded DeBERTa** only. The optional Phase 1 logit-feature uncertainty head has no trained checkpoint or measured performance yet; its distinct contract and limitations are in [Detector Phase 1](../docs/detector-phase1.md). Do not apply the Phase 2 test metrics below to Phase 1.
+
 ## Intended use
 
 Triage factual sentences in an LLM draft against evidence supplied by a retrieval service. Output classes are `SUPPORTED`, `CONTRADICTED`, and `NOT_ENOUGH_INFO`. The detector is not an open-world truth oracle and is not the final HalluciGuard Judge.

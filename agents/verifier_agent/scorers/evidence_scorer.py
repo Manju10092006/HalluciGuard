@@ -137,6 +137,9 @@ class EvidenceScorer:
         if nli.get("nli_degraded", False) or nli.get("validity_factor", 1.0) == 0.0:
             return "NEUTRAL"
 
+        if self.relation_verifier.is_temporally_inapplicable(claim, passage):
+            return "NEUTRAL"
+
         # Structured Relation Verification Check
         rel_result = self.relation_verifier.verify_relation(claim, [passage])
         if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):

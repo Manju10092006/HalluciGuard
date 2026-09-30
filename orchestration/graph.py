@@ -196,6 +196,7 @@ async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
 
         draft = gen_result.get("draft_response", "")
         latency = gen_result.get("latency_ms", elapsed_ms(node_start))
+        generation_trace = gen_result.pop("generation_trace", None)
 
         bus = add_bus_message(
             state,
@@ -215,6 +216,7 @@ async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
             "llm_response": draft,
             "final_response": draft,
             "base_llm": gen_result,
+            "generation_trace": generation_trace,
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
             "trace": add_trace(
@@ -257,7 +259,11 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             raise ValueError("No LLM response available for detection.")
 
         def _run_detect():
-            return run_detection(state["user_query"], llm_resp)
+            trace = state.get("generation_trace")
+            domain = state.get("domain", "general")
+            if trace is None and domain == "general":
+                return run_detection(state["user_query"], llm_resp)
+            return run_detection(state["user_query"], llm_resp, trace, domain)
 
         detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))
@@ -300,6 +306,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             or not allow_fast_path
             or is_stress
             or detector_degraded
+            or not bool((detector.get("phase1") or {}).get("bypass_eligible"))
             or risk_level in {"MEDIUM", "HIGH"}
             or next_action.lower().endswith("verify")
         )
@@ -332,6 +339,8 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         return {
             "detector": detector,
             "detector_result": detector,
+            "phase1_result": detector.get("phase1") or {},
+            "generation_trace": None,
             "detected_claims": atomic_claims,
             "route": route,
             "hallucination_probability": float(

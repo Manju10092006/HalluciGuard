@@ -196,6 +196,9 @@ class GenerationResult:
     provider_used: str | None = None
     # Ordered, secret-free record of each provider attempt for observability.
     provider_attempts: list[dict[str, Any]] = field(default_factory=list)
+    # Present only for the explicitly selected local generator. Never persisted
+    # by the service; the graph passes it to the Detector in transient state.
+    generation_trace: dict[str, Any] | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Convert the generation result to a dictionary."""
@@ -358,6 +361,33 @@ class BaseLLMService:
                 if mode == "stress_test"
                 else self.config.temperature
             )
+
+        if self.config.provider.lower() == "local_uq":
+            try:
+                from halluciguard_detector.local_generation import get_local_generator
+                from halluciguard_detector.phase1 import Phase1Config
+
+                cfg = Phase1Config.from_env()
+                identifiers = (cfg.model_id, cfg.model_revision, cfg.tokenizer_id, cfg.tokenizer_revision)
+                generator = get_local_generator(identifiers)
+                messages = [*list(conversation_history or []), {"role": "user", "content": user_query}]
+                answer, generation_trace = await asyncio.to_thread(
+                    generator.generate, messages, max_tokens or 128, temp
+                )
+                return GenerationResult(
+                    user_query=user_query, draft_response=answer,
+                    model=cfg.model_id, provider="local_uq", provider_used="local_uq",
+                    generation_mode=mode, mode=mode, temperature=temp,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    finish_reason="completed", request_id=request_id, status="success",
+                    generation_trace=generation_trace,
+                )
+            except Exception as exc:
+                return self._failed(
+                    user_query, request_id, mode, temp, started,
+                    GenerationErrorCode.MODEL_UNAVAILABLE,
+                    f"local_uq: {type(exc).__name__}: {str(exc)[:150]}",
+                )
 
         if self._multi:
             return await self._generate_multi(

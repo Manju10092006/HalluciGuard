@@ -57,6 +57,8 @@ class HalluciGuardState(TypedDict, total=False):
     conversation_history: list[dict[str, str]]
     generation: dict[str, Any]
     base_llm: dict[str, Any]
+    generation_trace: dict[str, Any] | None
+    phase1_result: dict[str, Any]
     domain: str
     created_at: str
     updated_at: str

@@ -409,6 +409,8 @@ flowchart TD
 
 ## 📐 Evidence Scoring & Confidence Mathematics
 
+Temporal scope gate: a passage whose extracted relation statements are exclusively historical or traditional cannot contradict an unqualified present-tense claim solely because NLI assigns a high contradiction score. Such a passage is excluded from decision-grade aggregation; if it is the only evidence, the result remains `UNVERIFIED`. A passage that also states a current relation is still evaluated, and genuine current mismatches still contribute contradiction. This is separate from retrieval relevance: a historical passage can be topically relevant while inapplicable to the claim's time scope.
+
 The Verifier aggregates evidence using the following formulas:
 
 ### 1. Effective Passage Weight

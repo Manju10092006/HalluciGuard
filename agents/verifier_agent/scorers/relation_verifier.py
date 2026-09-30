@@ -145,7 +145,9 @@ class RelationVerifier:
                             subject=self._normalize_name(city_entity),
                             relation="capital_of",
                             object=self._normalize_name(country_entity),
-                            qualifiers=["historical_or_traditional"],
+                            qualifiers=(["historical_or_traditional"] if
+                                        re.search(r"\b(?:traditional|was|became)\b", cap_colon.group(0), re.IGNORECASE)
+                                        else []),
                             raw_text=sent_clean,
                         )
                     )
@@ -159,7 +161,9 @@ class RelationVerifier:
                             subject=self._normalize_name(city_entity),
                             relation="capital_of",
                             object=self._normalize_name(country_entity),
-                            qualifiers=["historical_or_traditional"],
+                            qualifiers=(["historical_or_traditional"] if
+                                        re.search(r"\b(?:traditional|was|became)\b", cap_inverted.group(0), re.IGNORECASE)
+                                        else []),
                             raw_text=sent_clean,
                         )
                     )
@@ -635,6 +639,33 @@ class RelationVerifier:
                 )
         return triples
 
+    @staticmethod
+    def _present_tense_claim(claim_text: str) -> bool:
+        """Only apply historical-scope abstention to an unqualified current claim."""
+        return bool(re.search(r"\b(?:is|are|serves\s+as|remains)\b", claim_text, re.IGNORECASE)) and not bool(
+            re.search(r"\b(?:was|were|in\s+\d{3,4}|during|formerly)\b", claim_text, re.IGNORECASE)
+        )
+
+    def is_temporally_inapplicable(self, claim_text: str, passage: Any) -> bool:
+        """Historical-only relation evidence cannot refute a present-tense claim.
+
+        This does not suppress a passage that also asserts a current relation or
+        explicitly updates the fact to the present day.
+        """
+        if not self._present_tense_claim(claim_text):
+            return False
+        claim_triples = self.extract_triples(claim_text)
+        if not claim_triples:
+            return False
+        snippet = str(getattr(passage, "snippet", "") or "")
+        if re.search(r"\b(?:currently|today|now|present-day|no\s+longer)\b", snippet, re.IGNORECASE):
+            return False
+        evidence_triples = self.extract_triples(
+            f"{getattr(passage, 'title', '')} {snippet}"
+        )
+        relevant = [e for e in evidence_triples if e.relation == claim_triples[0].relation]
+        return bool(relevant) and all("historical_or_traditional" in e.qualifiers for e in relevant)
+
     def verify_relation(
         self,
         claim_text: str,
@@ -727,6 +758,8 @@ class RelationVerifier:
 
         # Compare claim triple against candidate evidence triples
         for e_triple in all_evidence_triples:
+            if self._present_tense_claim(claim_text) and "historical_or_traditional" in e_triple.qualifiers:
+                continue
             # Check for subject alignment or reverse alignment
             subj_match = self._names_match(c_triple.subject, e_triple.subject)
             obj_match = self._names_match(c_triple.object, e_triple.object)

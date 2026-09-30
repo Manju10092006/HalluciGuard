@@ -330,6 +330,11 @@ class VerificationPipeline:
         for passage, result in pairs:
             if result.get("degraded", False):
                 continue
+            if relation_verifier and relation_verifier.is_temporally_inapplicable(claim, passage):
+                # The NLI pair classifier can mistake historical context for a
+                # refutation of a current fact. Exclude this passage from both
+                # contradiction aggregation and decision-grade citations.
+                continue
 
             entailment = float(result.get("entailment_score", 0.0))
             contradiction = float(result.get("contradiction_score", 0.0))

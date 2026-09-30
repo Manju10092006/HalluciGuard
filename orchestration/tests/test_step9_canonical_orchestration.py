@@ -141,8 +141,8 @@ async def test_verifier_receives_llm_response_not_user_query(monkeypatch):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_detector_low_risk_routes_to_accept(monkeypatch):
-    """Explicitly enabled low-risk fast path may bypass verification."""
+async def test_detector_low_risk_without_validated_phase1_still_verifies(monkeypatch):
+    """A legacy low-risk value cannot bypass without validated Phase 1 provenance."""
     class StubDetector:
         def detect(self, query, response):
             return {
@@ -163,10 +163,10 @@ async def test_detector_low_risk_routes_to_accept(monkeypatch):
     state = make_base_state()
     res = await _detector_node(state)
 
-    assert res["route"] == "accept"
-    assert res["verification_status"] == "detector_safe_fast_path"
+    assert res["route"] == "verify"
+    assert res["verification_status"] == "verification_required"
     assert res["detector_result"]["risk_level"] == "LOW"
-    assert _detector_route(res) == "accept"
+    assert _detector_route(res) == "verifier"
 
 
 @pytest.mark.asyncio

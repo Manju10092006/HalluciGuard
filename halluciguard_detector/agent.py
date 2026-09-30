@@ -9,11 +9,18 @@ from __future__ import annotations
 
 import os
 import threading
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
 from .detector import Detector
 from .text import sentence_spans
+
+
+@lru_cache(maxsize=1)
+def _phase1_service():
+    from .phase1 import Phase1Service
+    return Phase1Service()
 
 
 class DetectorAgent:
@@ -62,6 +69,8 @@ class DetectorAgent:
         context: Any = None,
         evidence: Any = None,
         draft_answer: str | None = None,
+        generation_trace: dict[str, Any] | None = None,
+        domain: str = "general",
     ) -> dict[str, Any]:
         answer = str(llm_response if llm_response is not None else draft_answer or "").strip()
         if not answer:
@@ -71,7 +80,27 @@ class DetectorAgent:
         if not evidence_texts:
             evidence_texts = self._evidence_from(context)
         if not evidence_texts:
-            return self._pre_verification_result(user_query, answer)
+            result = self._pre_verification_result(user_query, answer)
+            spans = sentence_spans(answer)
+            phase1 = _phase1_service().score(
+                answer,
+                [{"start": span.start, "end": span.end} for span in spans],
+                generation_trace,
+                domain,
+            )
+            result["phase1"] = phase1.as_dict()
+            if phase1.bypass_eligible:
+                result["next_action"] = "Accept"
+                result["risk_level"] = "LOW"
+                result["verification_reason"] = "phase1_validated_fast_path"
+                for claim, risk in zip(result["claims"], phase1.calibrated_risks):
+                    claim["phase1_risk"] = risk
+                    claim["requires_verification"] = False
+                    claim["risk_level"] = "LOW"
+            elif phase1.status == "scored":
+                for claim, risk in zip(result["claims"], phase1.calibrated_risks):
+                    claim["phase1_risk"] = risk
+            return result
 
         grounded = self._get_detector().detect(
             user_query=user_query,

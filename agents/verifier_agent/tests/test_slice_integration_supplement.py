@@ -88,7 +88,7 @@ _ENTAILING_NLI = [
 
 @pytest.mark.asyncio
 async def test_bge_reranker_receives_real_claim_and_evidence():
-    """The BGE reranker must be invoked with the REAL claim and the REAL retrieved snippet.
+    """The BGE reranker must receive a claim-derived query and the real snippet.
 
     We spy on VerificationPipeline.reranker.rerank via a MagicMock whose
     side_effect returns the same passages with a deterministic relevance score,
@@ -125,8 +125,10 @@ async def test_bge_reranker_receives_real_claim_and_evidence():
         passed_claim = call.args[0]
         passed_passages = call.args[1]
 
-        assert real_claim.lower().rstrip(".") in str(passed_claim).lower(), (
-            f"BGE reranker did not receive the real claim (got: {passed_claim!r})"
+        # The pipeline intentionally removes the claim subject from the BGE
+        # query to avoid ranking subject-matching but relation-irrelevant text.
+        assert str(passed_claim).lower() == "capital of france", (
+            f"BGE reranker did not receive the claim-derived relation (got: {passed_claim!r})"
         )
         assert any(real_snippet in getattr(p, "snippet", "") for p in passed_passages), (
             "BGE reranker did not receive the real retrieved snippet"

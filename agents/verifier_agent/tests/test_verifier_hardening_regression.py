@@ -539,12 +539,14 @@ class TestCertificationDisablesCache:
 
     def test_cache_enabled_in_normal_mode(self, monkeypatch):
         monkeypatch.delenv("CERTIFICATION_MODE", raising=False)
-        monkeypatch.delenv("CACHE_ENABLED", raising=False)
+        monkeypatch.setenv("CACHE_ENABLED", "true")
+        monkeypatch.setenv("VERIFIER_CACHE_ENABLED", "true")
         get_settings.cache_clear()
         try:
             pipeline = VerificationPipeline()
             assert pipeline.certification_mode is False
-            # Cache follows the normal verifier_cache_enabled default (True).
+            # Cache follows the explicit verifier setting even when the local
+            # .env disables it for interactive runs.
             assert pipeline.cache_enabled is True
         finally:
             get_settings.cache_clear()

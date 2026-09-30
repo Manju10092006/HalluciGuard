@@ -33,6 +33,8 @@ The design separates responsibilities deliberately. A language model can generat
 
 HalluciGuard does **not** claim perfect hallucination detection, universal factual coverage, or autonomous suitability for high-stakes decisions. Missing evidence remains missing evidence, and degraded components fail closed.
 
+The optional, experimental [Detector Phase 1 generation-bound uncertainty head](docs/detector-phase1.md) is disabled by default. It requires exact local generation traces and a separately trained, calibrated checkpoint; current hosted-provider answers continue through Verifier. No Phase 1 checkpoint or performance result is claimed yet.
+
 ## Implemented architecture
 
 The current backend has one Base LLM plus seven trust stages. The trained Detector has two phases: inexpensive pre-retrieval triage and evidence-grounded model inference after retrieval.
