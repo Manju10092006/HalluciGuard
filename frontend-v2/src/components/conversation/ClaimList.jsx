@@ -1,6 +1,15 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronRight, Layers } from 'lucide-react'
+import { AnimatedList } from '@/components/ui/animated-list'
+import { DonutChart } from '@/components/ui/charts'
 
+/**
+ * Atomic claim inspection card.
+ * - Magic UI "Animated List": claim rows stagger in when the panel expands
+ *   (all rows exist in markup; reduced-motion users get the full list).
+ * - Animata "Donut Chart": per-claim confidence ring, rendered ONLY when
+ *   the claim carries a real `confidence` value (0–100) — never invented.
+ */
 export function ClaimList({ claims }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [activeClaimIndex, setActiveClaimIndex] = useState(null)
@@ -31,58 +40,72 @@ export function ClaimList({ claims }) {
 
       {isExpanded && (
         <div className="claims-body">
-          {claims.map((claim, idx) => {
-            const isOpen = activeClaimIndex === idx
-            return (
-              <div
-                key={claim.number || idx}
-                className={`claim-item-row ${isOpen ? 'is-open' : ''}`}
-              >
-                <button
-                  type="button"
-                  className="claim-summary-btn"
-                  onClick={() => toggleClaim(idx)}
-                  aria-expanded={isOpen}
+          <AnimatedList className="claims-animated-list" stagger={0.07}>
+            {claims.map((claim, idx) => {
+              const isOpen = activeClaimIndex === idx
+              const hasConfidence =
+                typeof claim.confidence === 'number' &&
+                Number.isFinite(claim.confidence)
+              return (
+                <div
+                  key={claim.number || idx}
+                  className={`claim-item-row ${isOpen ? 'is-open' : ''}`}
                 >
-                  <div className="claim-number-and-text">
-                    <span className="claim-number">{claim.number}</span>
-                    <span className="claim-text truncate">{claim.text}</span>
-                  </div>
-                  <div className="claim-badge-group">
-                    <span className={`claim-status-pill status-${claim.tone}`}>
-                      {claim.status}
-                    </span>
-                    {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  </div>
-                </button>
-
-                {isOpen && (
-                  <div className="claim-details-panel">
-                    <div className="claim-detail-item">
-                      <span className="detail-label">Full claim statement</span>
-                      <p className="detail-value">“{claim.text}”</p>
+                  <button
+                    type="button"
+                    className="claim-summary-btn"
+                    onClick={() => toggleClaim(idx)}
+                    aria-expanded={isOpen}
+                  >
+                    <div className="claim-number-and-text">
+                      <span className="claim-number">{claim.number}</span>
+                      {hasConfidence && (
+                        <DonutChart
+                          value={claim.confidence}
+                          size={30}
+                          strokeWidth={3.5}
+                          className={`donut-tone-${claim.tone}`}
+                          label={`${claim.confidence}% confidence`}
+                        />
+                      )}
+                      <span className="claim-text truncate">{claim.text}</span>
                     </div>
+                    <div className="claim-badge-group">
+                      <span className={`claim-status-pill status-${claim.tone}`}>
+                        {claim.status}
+                      </span>
+                      {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    </div>
+                  </button>
 
-                    {claim.verdict && (
+                  {isOpen && (
+                    <div className="claim-details-panel">
                       <div className="claim-detail-item">
-                        <span className="detail-label">Verification verdict</span>
-                        <p className="detail-value verdict-highlight">{claim.verdict}</p>
+                        <span className="detail-label">Full claim statement</span>
+                        <p className="detail-value">“{claim.text}”</p>
                       </div>
-                    )}
 
-                    {claim.evidenceExcerpt && (
-                      <div className="claim-detail-item">
-                        <span className="detail-label">Grounding evidence</span>
-                        <p className="detail-value evidence-box">
-                          {claim.evidenceExcerpt}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                      {claim.verdict && (
+                        <div className="claim-detail-item">
+                          <span className="detail-label">Verification verdict</span>
+                          <p className="detail-value verdict-highlight">{claim.verdict}</p>
+                        </div>
+                      )}
+
+                      {claim.evidenceExcerpt && (
+                        <div className="claim-detail-item">
+                          <span className="detail-label">Grounding evidence</span>
+                          <p className="detail-value evidence-box">
+                            {claim.evidenceExcerpt}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </AnimatedList>
         </div>
       )}
 
@@ -135,6 +158,9 @@ export function ClaimList({ claims }) {
           padding: 8px 12px 12px;
           border-top: 1px solid var(--border);
           background: var(--surface-sunken);
+        }
+
+        .claims-animated-list {
           display: flex;
           flex-direction: column;
           gap: 8px;
@@ -181,6 +207,11 @@ export function ClaimList({ claims }) {
           color: var(--text-muted);
           flex-shrink: 0;
         }
+
+        .donut-tone-supported { color: var(--supported); }
+        .donut-tone-contradicted { color: var(--contradicted); }
+        .donut-tone-insufficient { color: var(--insufficient); }
+        .donut-tone-uncertain { color: var(--uncertain); }
 
         .claim-text {
           color: var(--text-primary);
@@ -244,6 +275,13 @@ export function ClaimList({ claims }) {
           padding: 6px 10px;
           border-radius: 4px;
           font-style: italic;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .claims-trigger-row,
+          .claim-item-row {
+            transition: none;
+          }
         }
       `}</style>
     </div>

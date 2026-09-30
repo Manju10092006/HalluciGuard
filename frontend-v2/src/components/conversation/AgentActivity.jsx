@@ -1,7 +1,18 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronRight, Cpu } from 'lucide-react'
 import { AGENT_PIPELINE } from '../../types/verification'
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from '@/components/ui/accordion'
 
+/**
+ * Verification pipeline disclosure — shadcn Accordion (Radix, WAI-ARIA,
+ * zero new deps). Outer toggle opens the drawer; each agent stage is an
+ * expandable row: trigger = status dot + mono index + name, content = role.
+ */
 export function AgentActivity() {
   const [isOpen, setIsOpen] = useState(false)
 
@@ -22,20 +33,30 @@ export function AgentActivity() {
 
       {isOpen && (
         <div className="pipeline-drawer">
-          <div className="pipeline-steps">
+          <Accordion type="multiple" className="w-full">
             {AGENT_PIPELINE.map((agent, index) => (
-              <div className="pipeline-step-item" key={agent.id}>
-                <div className="step-num-col">
-                  <span className="step-index">0{index + 1}</span>
-                  {index < AGENT_PIPELINE.length - 1 && <div className="step-line" />}
-                </div>
-                <div className="step-body">
-                  <span className="agent-title">{agent.name}</span>
-                  <span className="agent-role-desc">{agent.role}</span>
-                </div>
-              </div>
+              <AccordionItem
+                key={agent.id}
+                value={agent.id}
+                className="border-b border-hg-line last:border-b-0"
+              >
+                <AccordionTrigger className="py-2.5 hover:no-underline">
+                  <span className="flex items-center gap-3">
+                    <span className="step-index">0{index + 1}</span>
+                    <span className="agent-title">{agent.name}</span>
+                    <span className="stage-status-dot" aria-hidden="true" />
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <p className="agent-role-desc">{agent.role}</p>
+                  <p className="stage-timing">
+                    Stage {index + 1} of {AGENT_PIPELINE.length} · agent trace
+                    available after run
+                  </p>
+                </AccordionContent>
+              </AccordionItem>
             ))}
-          </div>
+          </Accordion>
         </div>
       )}
 
@@ -73,28 +94,10 @@ export function AgentActivity() {
 
         .pipeline-drawer {
           margin-top: 10px;
-          padding: 12px 16px;
+          padding: 6px 16px 10px;
           background: var(--surface-sunken);
           border: 1px solid var(--border);
           border-radius: var(--radius-inline);
-        }
-
-        .pipeline-steps {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .pipeline-step-item {
-          display: flex;
-          gap: 12px;
-        }
-
-        .step-num-col {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          width: 20px;
         }
 
         .step-index {
@@ -108,30 +111,37 @@ export function AgentActivity() {
           padding: 1px 3px;
         }
 
-        .step-line {
-          width: 1px;
-          flex: 1;
+        .stage-status-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
           background: var(--border-strong);
-          margin-top: 4px;
-          min-height: 12px;
-        }
-
-        .step-body {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
         }
 
         .agent-title {
-          font-size: 12px;
+          font-size: 12.5px;
           font-weight: 600;
           color: var(--text-primary);
         }
 
         .agent-role-desc {
-          font-size: 11.5px;
+          font-size: 12px;
           color: var(--text-secondary);
-          line-height: 1.4;
+          line-height: 1.5;
+          margin: 0 0 6px;
+        }
+
+        .stage-timing {
+          font-family: var(--font-mono);
+          font-size: 10.5px;
+          color: var(--text-muted);
+          margin: 0;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .disclosure-toggle {
+            transition: none;
+          }
         }
       `}</style>
     </div>

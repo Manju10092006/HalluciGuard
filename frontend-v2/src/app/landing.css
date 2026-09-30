@@ -781,32 +781,49 @@ h2 em {
   transition: transform 0.2s, background 0.2s;
 }
 
-.faq-item-card.open .plus-badge {
+.faq-item-card[data-state="open"] .plus-badge {
   background: #333333;
+  transform: rotate(45deg);
 }
 
-.faq-answer-collapse {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.3s ease;
-}
-
-.faq-item-card.open .faq-answer-collapse {
-  grid-template-rows: 1fr;
-}
-
-.faq-answer-collapse p {
-  min-height: 0;
+.faq-answer-collapse-radix {
   overflow: hidden;
+}
+
+.faq-answer-collapse-radix[data-state="open"] {
+  animation: faq-expand 0.24s ease;
+}
+
+.faq-answer-collapse-radix[data-state="closed"] {
+  animation: faq-collapse 0.2s ease;
+}
+
+@keyframes faq-expand {
+  from { height: 0; opacity: 0; }
+  to { height: var(--radix-accordion-content-height); opacity: 1; }
+}
+
+@keyframes faq-collapse {
+  from { height: var(--radix-accordion-content-height); opacity: 1; }
+  to { height: 0; opacity: 0; }
+}
+
+.faq-answer-collapse-radix p {
   margin: 0;
-  padding: 0 24px;
+  padding: 0 24px 20px;
   color: #1c1c1c;
   line-height: 1.6;
   font-size: 14px;
 }
 
-.faq-item-card.open .faq-answer-collapse p {
-  padding-bottom: 20px;
+@media (prefers-reduced-motion: reduce) {
+  .faq-answer-collapse-radix[data-state="open"],
+  .faq-answer-collapse-radix[data-state="closed"] {
+    animation: none;
+  }
+  .plus-badge {
+    transition: none;
+  }
 }
 
 @media (max-width: 820px) {
@@ -1812,6 +1829,9 @@ html.lenis, html.lenis body { height: auto; }
 .split-reveal { display: inline; perspective: 700px; }
 .split-mask { display: inline-block; overflow: hidden; vertical-align: -.08em; }
 .split-mask > span { display: inline-block; will-change: transform, opacity; }
+/* GSAP SplitText-generated structure */
+.split-reveal .split-word, .split-reveal .split-char { display: inline-block; will-change: transform, opacity; }
+.fold-text .fold-char { display: inline-block; transform-style: preserve-3d; }
 .fold-text { display: block; perspective: 800px; font-size: clamp(60px, 7vw, 110px); font-weight: 500; line-height: .9; letter-spacing: -.07em; }
 .fold-text > span, .fold-text i { display: inline-block; font-style: normal; transform-style: preserve-3d; }
 
@@ -1970,8 +1990,9 @@ html.lenis, html.lenis body { height: auto; }
 
 /* The FAQ keeps its design but avoids the delayed layout-heavy grid tween. */
 .faq-right-card { contain: layout paint; }
+/* legacy non-Radix collapse (superseded by .faq-answer-collapse-radix) */
 .faq-answer-collapse { display: block; max-height: 0; overflow: hidden; opacity: 0; transform: translateY(-6px); transition: max-height .24s ease, opacity .18s ease, transform .24s ease; }
-.faq-item-card.open .faq-answer-collapse { max-height: 180px; opacity: 1; transform: none; }
+.faq-item-card[data-state="open"] .faq-answer-collapse { max-height: 180px; opacity: 1; transform: none; }
 .faq-answer-collapse p { overflow: visible; }
 
 @media (max-width: 1100px) {
