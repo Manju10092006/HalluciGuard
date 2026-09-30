@@ -1,0 +1,529 @@
+{
+  "rows": 450,
+  "contradicted_support": 150,
+  "contradicted_true_positives": 32,
+  "contradicted_false_negatives": 118,
+  "contradicted_recall": 0.213333,
+  "false_positives": 15,
+  "category_counts": {
+    "UNSEGMENTED_SOURCE": 53,
+    "RETRIEVAL": 5,
+    "CLAIM_DECOMPOSITION": 9,
+    "NEGATION": 15,
+    "RELATION": 11,
+    "TEMPORAL": 1,
+    "NLI_MODEL": 24
+  },
+  "method": "Deterministic first-match rules over the claim and the selected evidence, using the same comparability guards the runtime uses. These are triage labels, not verified ground truth.",
+  "false_negative_examples": [
+    {
+      "id": "7202:165-243#0",
+      "claim": "Monday",
+      "evidence": "{\"address\": \"4421 Hollister Ave\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": false, \"divey\": false, \"hipster\": false, \"intimate\": null, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": false, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": false, \"RestaurantsGoodForGroups\": true, \"",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.011418,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "275:0-175#0",
+      "claim": "Somali-Canadian",
+      "evidence": "The sisters were born in the Somali capital but were forced to flee after war broke out in 1991. And we did some research about Dadaab refugee camp, it's a massive camp that has taken in Sudanese refugees, Somali refugees, Rwandan refugees -- pretty much anywhere there was a conflict. Iman: Yes, then we started a non-profit and we'd do small benefit concerts in Toronto and in San Diego -- wherever",
+      "evidence_shape": "lexical_joined",
+      "predicted": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.091328,
+      "category": "RELATION",
+      "reason": "claim and evidence share a subject but no relation word"
+    },
+    {
+      "id": "6982:170-323#0",
+      "claim": "an average rating of 4.4 stars out of 5",
+      "evidence": "I like to get the spicy salsa to top it off.\"}, {\"review_date\": \"2021-11-07 19:42:36\", \"review_stars\": 4.0, \"review_text\": \"What a friendly morning breakfast spot chock full of locals with their families. Enjoy!\"}, {\"review_date\": \"2021-11-06 18:53:25\", \"review_stars\": 5.0, \"review_text\": \"Everyone enjoyed brunch. Seating is available both inside and out. {\"address\": \"5782 Hollister Ave\", \"attribu",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.058458,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "7205:911-987#0",
+      "claim": "free Wi-Fi",
+      "evidence": "{\"address\": \"4421 Hollister Ave\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": false, \"divey\": false, \"hipster\": false, \"intimate\": null, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": false, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": false, \"RestaurantsGoodForGroups\": true, \"",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.027284,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "7238:190-302#0",
+      "claim": "take out orders",
+      "evidence": "{\"address\": \"5650 Calle Real\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": null, \"divey\": false, \"hipster\": true, \"intimate\": false, \"romantic\": null, \"touristy\": null, \"trendy\": null, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": null, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, \"Restauran",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.014258,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "2667:759-889#0",
+      "claim": "18 points and 10 rebounds",
+      "evidence": "National player of the year finalist Frank Kaminsky led Wisconsin with 20 points and 11 rebounds. Junior guard Denzel Valentine sparked the Spartans with three early three-pointers and finished with 22 points and a game-high 11 rebounds. Freshman Justise Winslow led Duke with 19 points while national freshman of the year Jahlil Okafor had 18 points, 10 of which came in the first half. 38 and home.",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.045583,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "485:556-649",
+      "claim": "Both were remembered by their colleagues as kind, dedicated, and passionate about their work.",
+      "evidence": "In a statement, Illinois State University President Larry Dietz remembered Ward and Leetch as \"well-respected and much-loved colleagues in our athletics department\" in the crash near Bloomington. That's about 5 miles from the campus of Illinois State, where Ward and Leetch both worked. Athletic Director Larry Lyons described Leetch as \"a shining star in the business,\" while lauding Ward as \"a tale",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.029504,
+      "category": "CLAIM_DECOMPOSITION",
+      "reason": "claim reads as two or more coordinated clauses"
+    },
+    {
+      "id": "7257:204-340#1",
+      "claim": "WiFi",
+      "evidence": "{\"address\": \"232 W Carrillo St\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": false, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": false, \"RestaurantsGoodForGroups\": true, \"R",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.010541,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "2374:6-244#1",
+      "claim": "Mitchell remains unconscious in the hospital",
+      "evidence": "She remains at the hospital, according to Leslie Morris' court petition filed April 28. In her April 28 petition, Morris says Mitchell is unconscious: \"At this time she (Mitchell) remains unconscious and unable to make any responses, and is therefore unable to provide for any of her personal needs. Mitchell, who was inducted into the Rock and Roll Hall of Fame in 1997, was taken to UCLA Medical Ce",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.054053,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "8909:659-769#0",
+      "claim": "takeout",
+      "evidence": "{\"address\": \"324 W Cabrillo Blvd\", \"attributes\": {\"Ambience\": {\"casual\": false, \"classy\": false, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": true, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, ",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.011472,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "8512:306-406#0",
+      "claim": "casual atmosphere",
+      "evidence": "{\"address\": \"509 State St\", \"attributes\": {\"Ambience\": {\"casual\": false, \"classy\": true, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": false, \"street\": false, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": null, \"Resta",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.011538,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "7298:617-763#0",
+      "claim": "It's worth noting that the restaurant has closed down",
+      "evidence": "Our waitress was just short of being an idiot and half the items on the menu were not available. My husband had the gluten free chicken alfredo pasta and he was impressed as well. \\n\\nWe'll definitely be back.\"}], \"state\": \"CA\"} I heard they are going out of business, not surprised.\"}, {\"review_date\": \"2018-02-23 21:48:43\", \"review_stars\": 5.0, \"review_text\": \"Really good food, nice and decent ser",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.050282,
+      "category": "RELATION",
+      "reason": "claim and evidence share a subject but no relation word"
+    },
+    {
+      "id": "6551:322-427#0",
+      "claim": "takes reservations",
+      "evidence": "{\"address\": \"973 Linden Ave\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": false, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, \"Rest",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.013257,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "3950:84-223#0",
+      "claim": "The house was divided against him,",
+      "evidence": "The house was united in its goal to get him out, mostly because he kept winning challenges. And the result was a Secret HOH taking the power. The other houseguest expressing that she missed Cameron was Blue. Before he got sent to the jury house, Cameron warned Blue that she was the next target and that Jag and Matt Klotz were coming after her. Cameron also had difficulties connecting with some of ",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.024784,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "359:0-150#0",
+      "claim": "on April 18-19 and 25-26",
+      "evidence": "It's all part of National Park Week, happening April 18 through April 26, and it's hosted by the National Park Service and the National Park Foundation. And for Saturday and Sunday, they're also free. Go to www.nationalparkweek.org for more ideas on how to explore. Then the park service wants people to share their stories using the hashtag #FindYourPark and at FindYourPark.com. From the giant sequ",
+      "evidence_shape": "lexical_joined",
+      "predicted": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.055543,
+      "category": "RELATION",
+      "reason": "claim and evidence share a subject but no relation word"
+    },
+    {
+      "id": "7205:692-823#0",
+      "claim": "Monday through Saturday",
+      "evidence": "{\"address\": \"4421 Hollister Ave\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": false, \"divey\": false, \"hipster\": false, \"intimate\": null, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": false, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": false, \"RestaurantsGoodForGroups\": true, \"",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.017944,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "11459:475-569#0",
+      "claim": "upscale",
+      "evidence": "{\"address\": \"131 Anacapa St, Ste A\", \"attributes\": {\"Ambience\": {\"casual\": false, \"classy\": true, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": true, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": false, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.008478,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "146:172-267",
+      "claim": "The cause of his dehydration was attributed to his busy schedule and not drinking enough water.",
+      "evidence": "Last year, the bluesman suffered from dehydration and exhaustion after a show in Chicago, forcing him to cancel the remainder of his tour. He was inducted into the Rock and Roll Hall of Fame in 1987, and has 30 Grammy nominations. Some of his hits include \"The Thrill Is Gone,\" which won him his first Grammy in 1970, \"There Must be a Better World Somewhere\" and \"When Love Comes to Town,\" a collabor",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.107326,
+      "category": "CLAIM_DECOMPOSITION",
+      "reason": "claim reads as two or more coordinated clauses"
+    },
+    {
+      "id": "8386:823-875#0",
+      "claim": "free WiFi",
+      "evidence": "{\"address\": \"14 W Figueroa St\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": true, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": false, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, \"Re",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.010149,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "6916:649-752#0",
+      "claim": "and intimate dining experience",
+      "evidence": "Their food was really really good and am really hoping they will relocate maybe. The food here was really good,fresh ,the people were nice,chai tea good,lunch buffet and dinner was good and they had a little salad bar my favorite part.Santa Barbara maybe upped the rent and drove them out just like all great places here\"}, {\"review_date\": \"2016-07-18 23:32:30\", \"review_stars\": 2.0, \"review_text\": \"",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.116905,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "5674:758-868#1",
+      "claim": "outdoor seating available",
+      "evidence": "{\"address\": \"31 W Carrillo St\", \"attributes\": {\"Ambience\": {\"casual\": false, \"classy\": true, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": true, \"lot\": false, \"street\": true, \"valet\": true, \"validated\": true}, \"Music\": false, \"OutdoorSeating\": false, \"RestaurantsGoodForGroups\": true, \"Res",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.061154,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "7258:538-619#0",
+      "claim": "they have validated parking",
+      "evidence": "I have a 40+ year history of patronage at Rustys, but, this is not okay. As of today, I have not had a response via email or phone. \\n\\nThat certainly sums it all up, unfortunately.\"}, {\"review_date\": \"2021-12-31 02:04:39\", \"review_stars\": 5.0, \"review_text\": \"Rustys is great for family and quick family dinners. {\"address\": \"232 W Carrillo St\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\":",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.032874,
+      "category": "NEGATION",
+      "reason": "evidence negates terms the claim also asserts"
+    },
+    {
+      "id": "11447:418-540#0",
+      "claim": "valet services available.",
+      "evidence": "{\"address\": \"37 E Victoria St\", \"attributes\": {\"Ambience\": {\"casual\": false, \"classy\": true, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": true, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": \"{dj: None, live: False, jkebox: False, video: False, backgrond_msic",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.011904,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "5853:696-791#1",
+      "claim": "street",
+      "evidence": "{\"address\": \"6980 Marketplace Dr\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": true, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": false, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, \"",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.013286,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "13210:341-549#0",
+      "claim": "so the exact cooking time may vary depending on the specific recipe and the size of the chicken pieces.",
+      "evidence": "{\"passages\": \"passage 1:Place any root vegetable such as onions, potatoes and carrots in the crock pot and set the chicken on top of the vegetables. Cook on low for 6 - 8 hours or until done. (you may cook on high for 1 hour, then on low about 5 hours or until done. ).dd half a cup of broth, white wine or water to the pot. Cook on low for 6 - 8 hours or until done. (you may cook on high for 1 hour",
+      "evidence_shape": "lexical_joined",
+      "predicted": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.043271,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "6777:616-808#0",
+      "claim": "Uncorked Wine Tasting and Kitchen has maintained a high overall rating of 4.5 stars",
+      "evidence": "Last night the prime rib was one of the best I have ever had with a delicious sauce, mashed potatoes, veggie salad and desert.\"}, {\"review_date\": \"2021-07-05 17:10:47\", \"review_stars\": 5.0, \"review_text\": \"We have ordered take out from Uncorked many times over the last year - probably more than anywhere else. {\"address\": \"432 E Haley St\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": true,",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.011654,
+      "category": "CLAIM_DECOMPOSITION",
+      "reason": "claim reads as two or more coordinated clauses"
+    },
+    {
+      "id": "6286:430-566#0",
+      "claim": "the atmosphere is described as romantic",
+      "evidence": "Come to find out, the person I came with who got a Swedish massage said Lizzie's pressure was weak and limp as well! I was particularly impressed, however, with the lovely, heart-centered service. The entire experience was fabulous from the front counter to the beautiful environment. From the way she timidly handled my head and neck to how I could uncomfortably feel her nails in my skin, everythin",
+      "evidence_shape": "lexical_joined",
+      "predicted": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.112519,
+      "category": "NEGATION",
+      "reason": "evidence negates terms the claim also asserts"
+    },
+    {
+      "id": "6676:698-868#0",
+      "claim": "one reviewer reported that they were given a single bed instead of double beds as requested",
+      "evidence": "So I called (many times) to our credit card company and to Ritz to make sure we would get 2 double beds instead of 1 single king bed. However a day before, I received an email from them that my room was changed to single bed. Originally we booked for double beds. The number of phone calls to change the number of beds did not happen only in one call, unfortunately. This is a resort,  their property",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.030823,
+      "category": "NEGATION",
+      "reason": "evidence negates terms the claim also asserts"
+    },
+    {
+      "id": "6416:366-466#0",
+      "claim": "including street parking,",
+      "evidence": "The location is real easy to pass by, but there was plenty of parking, and no one was there which was nice. {\"address\": \"2220 Bath St\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": null, \"divey\": false, \"hipster\": false, \"intimate\": null, \"romantic\": null, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": false, \"valet\": fal",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.098725,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "9554:120-205#0",
+      "claim": "valid parking lot",
+      "evidence": "{\"address\": \"261 Orange Ave\", \"attributes\": {\"Ambience\": {\"casual\": false, \"classy\": false, \"divey\": true, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, \"Rest",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.011436,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "1990:6-201#0",
+      "claim": "praising him in front of the media.",
+      "evidence": "But Police Commissioner Anthony Batts thanked her in remarks to the media. The name of the woman dressed in light blue jeans, a yellow lace tunic and a cropped yellow jacket was not immediately known. In video captured by CNN affiliate WMAR, the woman is seen pulling her masked son away from a crowd, smacking him in the head repeatedly, and screaming at him. \"And if you saw in one scene you had on",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.024113,
+      "category": "NEGATION",
+      "reason": "evidence negates terms the claim also asserts"
+    },
+    {
+      "id": "6416:366-466#1",
+      "claim": "valet parking.",
+      "evidence": "The location is real easy to pass by, but there was plenty of parking, and no one was there which was nice. {\"address\": \"2220 Bath St\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": null, \"divey\": false, \"hipster\": false, \"intimate\": null, \"romantic\": null, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": false, \"valet\": fal",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.275322,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "9730:1124-1209#0",
+      "claim": "portion sizes to be small",
+      "evidence": "Well dressed and looking forward to the prix fixe menu we walked in at 9pm to a half empty restaurant only to be sat on the patio. I protested to the hostess only to be told that the empty tables were \\\"reserved.\\\"  This is where I became enough of a pain in the ass to get the table we reserved. Need to come back and order the Firetini that seems so popular.\\n\\nFood: fresh, crispy but soft bread w",
+      "evidence_shape": "lexical_joined",
+      "predicted": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.093016,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "5692:390-468#0",
+      "claim": "reservations",
+      "evidence": "{\"address\": \"1201 State St\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": true, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": true, \"lot\": true, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": false, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, \"Restaur",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.021251,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "8909:659-769#1",
+      "claim": "validated parking lot",
+      "evidence": "{\"address\": \"324 W Cabrillo Blvd\", \"attributes\": {\"Ambience\": {\"casual\": false, \"classy\": false, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": true, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, ",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.011522,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "5692:469-537#0",
+      "claim": "upscale and trendy elements",
+      "evidence": "The burger was also unseasoned and not enjoyable. Additionally, the menu is too scattered and overwhelming. I had been craving clam chowder and ordered it here. The side salad is lettuce, cucumber, red onion, and tomato. The onion rings are beer battered and basically all batter. I ordered the BLAT with grilled chicken and a side salad.",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.086291,
+      "category": "RELATION",
+      "reason": "claim and evidence share a subject but no relation word"
+    },
+    {
+      "id": "11445:166-956#0",
+      "claim": "Hours: Monday - Saturday: 16:00-20:30, Sunday: 16:00-20:30",
+      "evidence": "{\"address\": \"37 E Victoria St\", \"attributes\": {\"Ambience\": {\"casual\": false, \"classy\": true, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": true, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": \"{dj: None, live: False, jkebox: False, video: False, backgrond_msic",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.029423,
+      "category": "UNSEGMENTED_SOURCE",
+      "reason": "the evidence side is a raw structured record, not a sentence; the sentence-level evidence pipeline did not segment this source"
+    },
+    {
+      "id": "7161:195-293#0",
+      "claim": "and intimate atmosphere.",
+      "evidence": "I work in food service, and there IS a way to speak to people. {\"address\": \"12 W Haley St\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": true, \"divey\": false, \"hipster\": true, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": true, \"upscale\": false}, \"BusinessParking\": {\"garage\": null, \"lot\": false, \"street\": true, \"valet\": false, \"validated\": false}, \"Music\": true, \"Outd",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.335691,
+      "category": "NEGATION",
+      "reason": "evidence negates terms the claim also asserts"
+    },
+    {
+      "id": "2468:257-375",
+      "claim": "Waze is the leading cause of felonious deaths of law enforcement officers in the line of duty for the past five years.",
+      "evidence": "1 cause of felonious deaths of law enforcement officers in the line of duty. For the fifth year in a row in 2014, ambush attacks on police officers were the No. Google, whose stated mission is \"to organize the world's information and make it universally accessible and useful,\" is now marketing an app with the potential to obstruct law enforcement and put the lives of police officers and deputies a",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.03638,
+      "category": "NLI_MODEL",
+      "reason": "the selected evidence is comparable to the claim and states a different fact, yet the model did not predict CONTRADICTED"
+    },
+    {
+      "id": "5674:758-868#0",
+      "claim": "The ambiance is intimate",
+      "evidence": "The restaurant is inside a VERY nice hotel, and I was shocked at how cheap the menu is, given how nice the ambiance is. \\n\\nOur server Matthew was great. 5 stars for food, ambiance, and service. We'll be back some day.\"}, {\"review_date\": \"2021-12-24 05:45:27\", \"review_stars\": 5.0, \"review_text\": \"main downside is that the food was overpriced. taste and quality of the food was great and service was",
+      "evidence_shape": "lexical_joined",
+      "predicted": "SUPPORTED",
+      "p_contradicted": 0.127631,
+      "category": "NEGATION",
+      "reason": "evidence negates terms the claim also asserts"
+    }
+  ],
+  "false_positive_examples": [
+    {
+      "id": "7062:271-395",
+      "claim": "While they don't offer reservations or valet parking, they do have a parking lot, allow takeouts and can accommodate groups.",
+      "evidence": "Fairview Ave.\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": false, \"divey\": false, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": false, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, \"RestaurantsReserva",
+      "true": "SUPPORTED",
+      "p_contradicted": 0.696049
+    },
+    {
+      "id": "9921:706-839#0",
+      "claim": "accommodating outdoor seating",
+      "evidence": "Not to mention the DJ Flamezz crew was super accommodating in holding a new wedding date for us for a whole year dealing with COVID postponement.",
+      "true": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.693158
+    },
+    {
+      "id": "9939:186-321#1",
+      "claim": "does not provide Business Parking or Restaurant Reservations.",
+      "evidence": "Now I don't mind paying a 20% service fee if I was aware of it, but this restaurant does not notify you about it. It's not stated anywhere on the menu, or by the servers. Do not be fooled. The granola was not bad. Would not come again.\"}, {\"review_date\": \"2021-09-10 01:53:26\", \"review_stars\": 5.0, \"review_text\": \"New hours and the system as of Sept 5...now the restaurant is open for breakfast from",
+      "true": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.557963
+    },
+    {
+      "id": "11287:260-330",
+      "claim": "The restaurant operates from 8:30 am to 9:30 pm every day of the week.",
+      "evidence": "Restaurant is right next to the lobby. I had the filet stroganoff. If I'm gonna spend $150 for dinner and drinks and no one else is in the place I want to TV turned on. The food was probably worth half of what we spent and the drinks were overpriced.\"}, {\"review_date\": \"2021-11-28 18:55:56\", \"review_stars\": 5.0, \"review_text\": \"I worked late both nights that I stayed at this hotel and I know the r",
+      "true": "SUPPORTED",
+      "p_contradicted": 0.739743
+    },
+    {
+      "id": "10882:334-434#0",
+      "claim": "the restaurant has a cozy atmosphere",
+      "evidence": "The great thing is it rarely has a line too because every college kid is lining up outside Fat Burger or Uncle Rocco's. I have been going to Chilango's for the past 7 years and it has always has fresh tasty food each time I have gone. Mole sauce is pretty killer.\"}, {\"review_date\": \"2010-01-07 00:10:04\", \"review_stars\": 5.0, \"review_text\": \"**Please see reviews under \\\"Chilango's Mexican Restauran",
+      "true": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.660002
+    },
+    {
+      "id": "9940:274-350#1",
+      "claim": "no parking is available",
+      "evidence": "The place is beautiful, but some issues with the bill and somewhat the food.\\n\\nI had both the Crispy Yukon grilled potatoes, and the Lido's breakfast sandwich. The potatoes also had a very generous serving.\\n\\nThe main issue I have, is the 20% service fee that is automatically added to your bill. Would not come again.\"}, {\"review_date\": \"2021-09-10 01:53:26\", \"review_stars\": 5.0, \"review_text\": \"",
+      "true": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.508381
+    },
+    {
+      "id": "8319:1228-1376",
+      "claim": "However, there are mixed opinions about the ambiance of the establishment, with some describing it as divey and others finding it casual and trendy.",
+      "evidence": "{\"address\": \"5723 Calle Real\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": false, \"divey\": false, \"hipster\": null, \"intimate\": false, \"romantic\": false, \"touristy\": false, \"trendy\": false, \"upscale\": false}, \"BusinessParking\": {\"garage\": false, \"lot\": true, \"street\": false, \"valet\": false, \"validated\": false}, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": true, \"Rest",
+      "true": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.530809
+    },
+    {
+      "id": "10006:266-331#0",
+      "claim": "open seven days a week",
+      "evidence": "Its in a location that is easily overlooked. Outdoors is really just the parking lot but the owners are very accommodating.\"}, {\"review_date\": \"2013-07-19 19:19:22\", \"review_stars\": 3.0, \"review_text\": \"i got the combo plate and it was not a very good value. the food is decent, but they are very stingy with their meat on this plate. its ok if youre really craving mediterranean, but otherwise i wou",
+      "true": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.492361
+    },
+    {
+      "id": "6926:265-318",
+      "claim": "The restaurant is open from 11 am to 11 pm every day.",
+      "evidence": "From my experience fish is best cooked and prepared by those who are in the market of selling it. These were not the famous ones from Antoine's. This place is legit for the mere fact that it is very unassuming. The oysters were definitely a miss. The clam chowder was off in its flavors. Don't over look the specials they offer.",
+      "true": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.73394
+    },
+    {
+      "id": "7007:232-326",
+      "claim": "While the shop does not offer reservations or valet parking, there is a parking lot available.",
+      "evidence": "And she said very unprofessionally, \\\"well he didn't know.\\\" I told her that is a failure on the training and not the customer. Go for soft rolls with the Bacon Went on a Date and add turkey. I placed a pick up order and put on the special instructions for the Mayo and Mustard to be on the side. The workers in general have a negative attitude and think the customers owe them a medal for showing up",
+      "true": "SUPPORTED",
+      "p_contradicted": 0.500683
+    },
+    {
+      "id": "11524:290-348",
+      "claim": "The restaurant has outdoor seating and takes reservations.",
+      "evidence": "Clam chowder is the real deal. Super quick and delicious food right by the beach what more could you want\"}, {\"review_date\": \"2021-11-02 16:21:26\", \"review_stars\": 5.0, \"review_text\": \"Best burgers, period. {\"address\": \"389 Linden Ave\", \"attributes\": {\"Ambience\": {\"casual\": true, \"classy\": false, \"divey\": null, \"hipster\": false, \"intimate\": false, \"romantic\": false, \"touristy\": null, \"trendy\": fal",
+      "true": "SUPPORTED",
+      "p_contradicted": 0.67634
+    },
+    {
+      "id": "9211:80-180",
+      "claim": "The restaurant offers a casual ambience and is open from 10:00 AM to 10:00 PM every day of the week.",
+      "evidence": "Another plus point is the type of food. No wonder it closed the owner has no knowledge of how to run a food business. We were shown a menu and then told they only had about half of the items. We ate outside because the interior is so dreary and stuffy. I once called 7 times in one day and they didn't pick up, i go in the shop and they asked me \\\"why didn't you call us to order\\\". SMFH, glad it's c",
+      "true": "SUPPORTED",
+      "p_contradicted": 0.755123
+    },
+    {
+      "id": "7050:300-398",
+      "claim": "However, it does not offer WiFi and the ambiance is not classified as trendy, upscale, or hipster.",
+      "evidence": "The flavors were all there, but with Pad Thai it is easy for there to be not enough flavor, which makes the dish taste terrible. This time is a Pad Thai from Pattaya Thai, and despite the chicken and shrimp being cooked very well and not overcooked, I unfortunately found this Pad Thai to be a bit bland. Ordered the spicy fried rice and it tasted bad, spicy in areas badly seasoned and food poisonin",
+      "true": "SUPPORTED",
+      "p_contradicted": 0.614074
+    },
+    {
+      "id": "7162:522-599#0",
+      "claim": "and the business offers takeout options.",
+      "evidence": "While the merger is a nice change the old prices and spot is missed.\"}, {\"review_date\": \"2021-10-26 20:55:00\", \"review_stars\": 1.0, \"review_text\": \"Came here from Orange County just to see they are closed. I work in food service, and there IS a way to speak to people. I wanted to try the new location but immediately walked away because of the way we were treated. {\"address\": \"12 W Haley St\", \"attr",
+      "true": "NOT_ENOUGH_INFO",
+      "p_contradicted": 0.374095
+    },
+    {
+      "id": "8623:606-681",
+      "claim": "The restaurant operates from Tuesday to Saturday, from 12:00 PM to 4:00 PM.",
+      "evidence": "They share the location with the carribean restaurant too.\"}], \"state\": \"CA\"} {\"address\": \"815 E Figueroa St\", \"attributes\": {\"Ambience\": null, \"BusinessParking\": null, \"Music\": null, \"OutdoorSeating\": true, \"RestaurantsGoodForGroups\": null, \"RestaurantsReservations\": null, \"RestaurantsTakeOut\": true, \"WiFi\": null}, \"business_stars\": 5.0, \"categories\": \"Ethiopian, Soul Food, Restaurants, Comfort F",
+      "true": "SUPPORTED",
+      "p_contradicted": 0.767483
+    }
+  ],
+  "checkpoint": "artifacts\\detector-best",
+  "split": "metric"
+}

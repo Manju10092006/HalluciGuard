@@ -6,6 +6,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from .calibration import DEFAULT_MAX_LENGTH, apply_temperature, load_calibration
 from .evidence import ClaimEvidenceEngine
+from .nli_input import encode_nli_pair
 from .schemas import ClaimLabel, DetectResponse, RiskLevel, SentenceResult
 from .text import (
     has_entity_conflict,
@@ -148,13 +149,11 @@ class Detector:
         evidence_text: str,
     ) -> dict[ClaimLabel, float]:
         """Classify a single (evidence, claim) pair with the trained model."""
-        encoded = self.tokenizer(
-            [evidence_text],
-            [claim],
-            padding=True,
-            truncation="longest_first",
+        encoded = encode_nli_pair(
+            self.tokenizer,
+            claim,
+            evidence_text,
             max_length=self.max_length,
-            return_tensors="pt",
         ).to(self.device)
         logits = self.model(**encoded).logits
         probs: list[float] = apply_temperature(logits, self.temperature)[0].cpu().tolist()

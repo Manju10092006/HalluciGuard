@@ -1,0 +1,411 @@
+{
+  "status": "ok",
+  "checkpoint": "artifacts\\detector-best",
+  "calibration": {
+    "temperature": 0.7586129307746887,
+    "contradiction_threshold": 0.4599999999999999,
+    "verification_risk_threshold": 0.625
+  },
+  "data_dir": "halluciguard_detector\\data",
+  "split": "test",
+  "rows_scored": 600,
+  "rows_available": 17935,
+  "truncated_by_limit": true,
+  "label_distribution": {
+    "SUPPORTED": 569,
+    "CONTRADICTED": 21,
+    "NOT_ENOUGH_INFO": 10
+  },
+  "metrics": {
+    "samples": 600,
+    "class_distribution": {
+      "SUPPORTED": 569,
+      "CONTRADICTED": 21,
+      "NOT_ENOUGH_INFO": 10
+    },
+    "three_class": {
+      "accuracy": 0.9383333333333334,
+      "macro_f1": 0.45849529324660215,
+      "confusion_matrix": {
+        "labels": [
+          "SUPPORTED",
+          "CONTRADICTED",
+          "NOT_ENOUGH_INFO"
+        ],
+        "rows_are_true": true,
+        "matrix": [
+          [
+            557,
+            0,
+            12
+          ],
+          [
+            15,
+            1,
+            5
+          ],
+          [
+            5,
+            0,
+            5
+          ]
+        ]
+      },
+      "per_class": {
+        "SUPPORTED": {
+          "support": 569,
+          "predicted": 577,
+          "correct": 557,
+          "recall": 0.97891,
+          "precision": 0.965338,
+          "f1": 0.972077
+        },
+        "CONTRADICTED": {
+          "support": 21,
+          "predicted": 1,
+          "correct": 1,
+          "recall": 0.047619,
+          "precision": 1.0,
+          "f1": 0.090909
+        },
+        "NOT_ENOUGH_INFO": {
+          "support": 10,
+          "predicted": 22,
+          "correct": 5,
+          "recall": 0.5,
+          "precision": 0.227273,
+          "f1": 0.3125
+        }
+      },
+      "class_distribution": {
+        "SUPPORTED": 569,
+        "CONTRADICTED": 21,
+        "NOT_ENOUGH_INFO": 10
+      },
+      "majority_class_share": 0.948333
+    },
+    "task_a_contradiction": {
+      "task": "contradiction",
+      "score": "P(CONTRADICTED)",
+      "positive_class": "CONTRADICTED",
+      "support": {
+        "positives": 21,
+        "negatives": 579,
+        "total": 600
+      },
+      "positive_rate": 0.035,
+      "accuracy": 0.965,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "false_positive_rate": 0.0,
+      "false_negative_rate": 1.0,
+      "confusion_matrix": {
+        "tn": 579,
+        "fp": 0,
+        "fn": 21,
+        "tp": 0
+      },
+      "threshold": 0.4599999999999999,
+      "brier": 0.03229116127537786,
+      "ece": 0.0032779037440195725,
+      "reliability": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 586,
+          "mean_confidence": 0.034366,
+          "empirical_rate": 0.032423
+        },
+        {
+          "lower": 0.1,
+          "upper": 0.2,
+          "count": 12,
+          "mean_confidence": 0.126706,
+          "empirical_rate": 0.083333
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 2,
+          "mean_confidence": 0.346025,
+          "empirical_rate": 0.5
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        }
+      ],
+      "roc_auc": 0.7725141870219591,
+      "pr_auc": 0.14727595453738693
+    },
+    "task_b_verification_needed": {
+      "task": "verification_needed",
+      "score": "P(CONTRADICTED)+P(NOT_ENOUGH_INFO)",
+      "positive_class": "CONTRADICTED+NOT_ENOUGH_INFO",
+      "support": {
+        "positives": 31,
+        "negatives": 569,
+        "total": 600
+      },
+      "positive_rate": 0.051666666666666666,
+      "accuracy": 0.9466666666666667,
+      "precision": 0.46153846153846156,
+      "recall": 0.1935483870967742,
+      "f1": 0.2727272727272727,
+      "false_positive_rate": 0.012302284710017574,
+      "false_negative_rate": 0.8064516129032258,
+      "confusion_matrix": {
+        "tn": 562,
+        "fp": 7,
+        "fn": 25,
+        "tp": 6
+      },
+      "threshold": 0.625,
+      "brier": 0.05134156944079191,
+      "ece": 0.07206078010921677,
+      "reliability": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 409,
+          "mean_confidence": 0.046104,
+          "empirical_rate": 0.01467
+        },
+        {
+          "lower": 0.1,
+          "upper": 0.2,
+          "count": 90,
+          "mean_confidence": 0.143695,
+          "empirical_rate": 0.066667
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 28,
+          "mean_confidence": 0.240209,
+          "empirical_rate": 0.0
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 20,
+          "mean_confidence": 0.342992,
+          "empirical_rate": 0.1
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "count": 21,
+          "mean_confidence": 0.444089,
+          "empirical_rate": 0.190476
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 17,
+          "mean_confidence": 0.55352,
+          "empirical_rate": 0.411765
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 9,
+          "mean_confidence": 0.645046,
+          "empirical_rate": 0.444444
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 6,
+          "mean_confidence": 0.72006,
+          "empirical_rate": 0.333333
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 0,
+          "mean_confidence": null,
+          "empirical_rate": null
+        }
+      ],
+      "roc_auc": 0.8457395543965077,
+      "pr_auc": 0.3025879513276349
+    }
+  },
+  "nli_contract": {
+    "pair_order": [
+      "evidence",
+      "claim"
+    ],
+    "evidence_snippets": 1,
+    "claim_prefix": null,
+    "evidence_prefix": null,
+    "separator": null,
+    "truncation": "longest_first",
+    "max_sequence_length": 256,
+    "max_claim_chars": null,
+    "max_evidence_chars": null,
+    "char_level_pre_truncation": false,
+    "note": "No character-level cap exists. The only length limit is the tokenizer's max_length, applied with truncation='longest_first', which trims the longer side. A dataset that joins several snippets onto the evidence side is therefore out of contract, and the tail of that evidence is what gets cut."
+  },
+  "environment": {
+    "python": "3.10.11",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "torch": "2.10.0+cpu",
+    "transformers": "4.57.6",
+    "cuda_available": false,
+    "git_commit": "573f778dd20dc3f2feb30cbb18259b0f3a6fbd59"
+  },
+  "pr53_regression_checks": [
+    {
+      "check": "decorated RAGTruth labels map to the right class ids",
+      "covered_by": "halluciguard_detector/tests/test_data_conversion.py"
+    },
+    {
+      "check": "no public symbol removed by the PR #53 refactor",
+      "covered_by": "halluciguard_detector/tests/test_schemas.py"
+    },
+    {
+      "check": "annotation overlap handling in dataset conversion",
+      "covered_by": "halluciguard_detector/tests/test_data_conversion.py"
+    },
+    {
+      "check": "numeric comparability guard",
+      "covered_by": "halluciguard_detector/tests/test_guard_comparability.py"
+    },
+    {
+      "check": "date comparability guard",
+      "covered_by": "halluciguard_detector/tests/test_guard_comparability.py"
+    },
+    {
+      "check": "entity comparability guard",
+      "covered_by": "halluciguard_detector/tests/test_guard_comparability.py"
+    },
+    {
+      "check": "bare-number extraction",
+      "covered_by": "halluciguard_detector/tests/test_text.py"
+    },
+    {
+      "check": "extra_special_tokens does not break checkpoint loading",
+      "covered_by": "halluciguard_detector/tests/test_detector_semantics.py"
+    },
+    {
+      "check": "train and serve sequence length agree",
+      "covered_by": "halluciguard_detector/tests/test_nli_input_contract.py, halluciguard_detector/tests/test_detector_semantics.py"
+    },
+    {
+      "check": "judge fails closed when the detector is degraded",
+      "covered_by": "halluciguard_judge/tests/test_detector.py"
+    }
+  ],
+  "shipped_artifact_metrics": {
+    "source": "artifacts\\detector-best\\test_metrics.json",
+    "samples": 18777,
+    "class_distribution": {
+      "SUPPORTED": 17258,
+      "CONTRADICTED": 592,
+      "NOT_ENOUGH_INFO": 927
+    },
+    "task_a_contradiction": {
+      "precision": 0.24486571879936808,
+      "recall": 0.5236486486486487,
+      "f1": 0.333692142088267,
+      "pr_auc": 0.23113876752964124,
+      "roc_auc": 0.8500465374640518
+    },
+    "task_b_verification_needed": {
+      "precision": 0.3095879861378514,
+      "recall": 0.5292955892034233,
+      "f1": 0.39067055393586003,
+      "pr_auc": 0.2886404815773609,
+      "roc_auc": 0.8211979583215683
+    },
+    "three_class": {
+      "macro_f1": 0.5072460675155973,
+      "accuracy": 0.8383128295254832,
+      "confusion_matrix": {
+        "labels": [
+          "SUPPORTED",
+          "CONTRADICTED",
+          "NOT_ENOUGH_INFO"
+        ],
+        "rows_are_true": true,
+        "matrix": [
+          [
+            15046,
+            954,
+            1258
+          ],
+          [
+            211,
+            325,
+            56
+          ],
+          [
+            427,
+            130,
+            370
+          ]
+        ]
+      }
+    }
+  },
+  "shipped_vs_recomputed": {
+    "note": "The shipped artifact was produced on a different data snapshot, so a small disagreement is expected and is reported here rather than reconciled. Neither number is silently preferred.",
+    "shipped_samples": 18777,
+    "recomputed_samples": 600
+  }
+}

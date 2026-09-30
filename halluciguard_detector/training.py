@@ -18,6 +18,7 @@ from .calibration import (
     save_calibration,
     verification_risk_score,
 )
+from .nli_input import TOKENIZER_KWARGS, prepare_nli_input
 
 
 ID_TO_LABEL = {0: "SUPPORTED", 1: "CONTRADICTED", 2: "NOT_ENOUGH_INFO"}
@@ -37,18 +38,66 @@ class JsonlDataset(Dataset):
 
 def _collator(tokenizer, max_length: int):
     def collate(rows):
+        # One shared NLI contract for training, dev and test. The pair order and
+        # the truncation policy must not drift from the runtime path, otherwise
+        # the model is scored on a distribution it never saw.
+        pairs = [prepare_nli_input(x["claim"], x["evidence"]) for x in rows]
         batch = tokenizer(
-            [x["evidence"] for x in rows],
-            [x["claim"] for x in rows],
-            padding=True,
-            truncation="longest_first",
+            [p[0] for p in pairs],
+            [p[1] for p in pairs],
             max_length=max_length,
             return_tensors="pt",
+            **TOKENIZER_KWARGS,
         )
         batch["labels"] = torch.tensor([x["label_id"] for x in rows], dtype=torch.long)
         return batch
 
     return collate
+
+
+def predict_rows(
+    model,
+    tokenizer,
+    rows,
+    *,
+    device,
+    max_length: int = DEFAULT_MAX_LENGTH,
+    batch_size: int = 16,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Score already-selected rows through the canonical NLI contract.
+
+    Every arm in the evidence-alignment study goes through this function, so a
+    difference between two arms can only come from the rows themselves and not
+    from a difference in how they were encoded. ``rows`` are dicts with
+    ``claim`` / ``evidence`` / ``label_id``; the order of the returned arrays
+    matches the input order, which is what makes a paired per-claim
+    comparison between arms valid.
+    """
+    loader = DataLoader(
+        _ListDataset(rows),
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=_collator(tokenizer, max_length),
+    )
+    return _evaluate(model, loader, device)
+
+
+class _ListDataset(Dataset):
+    """Adapter so in-memory rows can reuse the single shared collator."""
+
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, index):
+        return self.rows[index]
+
+
+def load_rows(path: Path) -> list[dict]:
+    with Path(path).open(encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle]
 
 
 def _evaluate(model, loader, device):
@@ -195,6 +244,12 @@ def three_class_metrics(logits: np.ndarray, labels: np.ndarray, temperature: flo
     labels = np.asarray(labels).astype(int)
     predicted = probabilities.argmax(axis=1)
     matrix = confusion_matrix(labels, predicted, labels=[0, 1, 2])
+    # Per-class P/R/F1 are reported alongside macro-F1 because macro-F1 hides
+    # which class is carrying the average. Contradiction F1 in particular is the
+    # axis this detector is weakest on, and it is invisible inside the mean.
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        labels, predicted, labels=[0, 1, 2], average=None, zero_division=0
+    )
     per_class = {}
     for index, name in ((0, "SUPPORTED"), (1, "CONTRADICTED"), (2, "NOT_ENOUGH_INFO")):
         support = int((labels == index).sum())
@@ -208,6 +263,7 @@ def three_class_metrics(logits: np.ndarray, labels: np.ndarray, temperature: flo
             "recall": round(hits / support, 6) if support else None,
             # Precision: of the predicted instances, how many were right.
             "precision": round(hits / predicted_count, 6) if predicted_count else None,
+            "f1": round(float(f1[index]), 6) if support or predicted_count else None,
         }
     return {
         "accuracy": float((labels == predicted).mean()),
@@ -472,13 +528,29 @@ def train(
     return report
 
 
-def evaluate(data_dir: Path, model_dir: Path, batch_size: int = 16, max_length: int = DEFAULT_MAX_LENGTH) -> dict:
+def evaluate(
+    data_dir: Path,
+    model_dir: Path,
+    batch_size: int = 16,
+    max_length: int = DEFAULT_MAX_LENGTH,
+    split: str = "test",
+    save: bool = True,
+) -> dict:
+    """Score a checkpoint on one split of a prepared data directory.
+
+    ``split`` selects the JSONL file. The evidence-alignment study adds a
+    class-capped ``metric`` split to the same directories, and both go through
+    the identical code path -- a different split must not mean different
+    encoding.
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     model = AutoModelForSequenceClassification.from_pretrained(model_dir).to(device)
-    loader = DataLoader(JsonlDataset(data_dir / "test.jsonl"), batch_size=batch_size, shuffle=False, collate_fn=_collator(tokenizer, max_length))
-    logits, labels = _evaluate(model, loader, device)
-    calibration = load_calibration(model_dir / "calibration.json")
+    rows = load_rows(Path(data_dir) / f"{split}.jsonl")
+    logits, labels = predict_rows(
+        model, tokenizer, rows, device=device, max_length=max_length, batch_size=batch_size
+    )
+    calibration = load_calibration(Path(model_dir) / "calibration.json")
     temperature = float(calibration.get("temperature", 1.0))
     contradiction_threshold = float(calibration.get("contradiction_threshold", 0.5))
     verification_risk_threshold = float(
@@ -491,11 +563,44 @@ def evaluate(data_dir: Path, model_dir: Path, batch_size: int = 16, max_length: 
         contradiction_threshold,
         verification_risk_threshold,
     )
+    metrics["split"] = split
     metrics["thresholds"] = {
         "contradiction": contradiction_threshold,
         "verification_risk": verification_risk_threshold,
     }
-    (model_dir / "test_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    np.savez_compressed(model_dir / "test_predictions.npz", logits=logits, labels=labels)
+    if save:
+        (Path(model_dir) / f"{split}_metrics.json").write_text(
+            json.dumps(metrics, indent=2), encoding="utf-8"
+        )
+        np.savez_compressed(Path(model_dir) / f"{split}_predictions.npz", logits=logits, labels=labels)
     return metrics
+
+
+def train_arm(
+    data_dir: Path,
+    output_dir: Path,
+    base_model: str = "microsoft/deberta-v3-xsmall",
+    epochs: int = 3,
+    batch_size: int = 8,
+    learning_rate: float = 2e-5,
+    max_length: int = DEFAULT_MAX_LENGTH,
+    seed: int = 42,
+) -> dict:
+    """Train one evidence-shape arm.
+
+    A thin alias for :func:`train` that exists so the experiment runner can
+    state, in one place, that every arm shares the architecture, optimizer,
+    learning rate, epoch count, seed, label map and max sequence length. Only
+    the ``data_dir`` -- i.e. the evidence the rows carry -- is allowed to vary.
+    """
+    return train(
+        data_dir,
+        output_dir,
+        base_model=base_model,
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        max_length=max_length,
+        seed=seed,
+    )
 
