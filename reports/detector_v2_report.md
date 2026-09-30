@@ -18,7 +18,7 @@ weak contradiction recall (F1 0.3337, precision 0.2449).
 **The measurement does not support that explanation.** Three independent
 measurements point the same way:
 
-1. **Serving the shipped checkpoint the *production-shaped* single snippet
+1. Serving the shipped checkpoint the *production-shaped* single snippet
    instead of the joined training blob **improves** contradiction F1 by
    4.3 points rather than degrading it ([§4](#4-experiment-1-shape-sensitivity)).
    Retraining under identical settings replicates the direction from a second
@@ -333,7 +333,7 @@ Generated reports:
 
 | Suite | Result |
 | --- | --- |
-| `halluciguard_detector/tests` (13 files) | **185 passed** |
+| `halluciguard_detector/tests` (13 files) | **186 passed** |
 | `halluciguard_judge/tests/test_detector.py` | **10 passed** |
 | `halluciguard_judge/tests/test_claim_extractor.py` + `test_verifier_contract.py` | **12 passed** |
 
