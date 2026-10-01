@@ -291,22 +291,20 @@ class JudgeAgent:
         # 3. Claim-Level Decision Processing (Task 4 & 5 & 6 & 7)
         # -------------------------------------------------------------------
         claim_reports = normalized_verifier.claim_reports
-        for report in claim_reports:
-            verdict = _verdict_value(report.verdict)
-            expected_label = {"verified": "entailment", "contradicted": "contradiction"}.get(verdict)
-            if expected_label and not any(
+
+        def _has_decision_grade_evidence(report, expected_label: str) -> bool:
+            """A decisive verdict needs >=1 evidence item whose OWN entailment label
+            matches it with a non-empty snippet (HG-012). Applied PER CLAIM below: a
+            decisive claim lacking it is demoted to unverified, NEVER aborting the
+            whole response -- so a genuine CONTRADICTED claim is still routed to
+            correction even if an unrelated VERIFIED claim is only weakly grounded
+            (M5/#11: the old whole-evaluation ABSTAIN suppressed both ACCEPT and
+            CORRECT on the first weak claim)."""
+            return any(
                 str(getattr(e, "entailment_label", "")).lower().rsplit(".", 1)[-1] == expected_label
                 and bool(str(getattr(e, "snippet", "")).strip())
                 for e in report.evidence
-            ):
-                return JudgeResult(
-                    decision=JudgeDecision.ABSTAIN, severity=SeverityLevel.HIGH,
-                    reason="Decisive verifier verdict is missing decision-grade evidence.",
-                    explanation="A verdict or score alone cannot establish factual correctness.",
-                    confidence=0.0, correction_request=None,
-                    decision_basis=DecisionBasis.INVALID_VERIFIER_INPUT,
-                    status=ExecutionStatus.DEGRADED,
-                )
+            )
 
         claims_to_correct: List[ClaimReport] = []
         claims_to_preserve: List[ClaimReport] = []
@@ -317,7 +315,7 @@ class JudgeAgent:
 
         for claim in claim_reports:
             verdict_str = _verdict_value(claim.verdict)
-            if verdict_str == VerdictLabel.CONTRADICTED.value:
+            if verdict_str == VerdictLabel.CONTRADICTED.value and _has_decision_grade_evidence(claim, "contradiction"):
                 claims_to_correct.append(claim)
                 # A contradicted claim's evidence is the refuting context for THAT
                 # claim and is kept as contradictory_evidence, cleanly separated from
@@ -327,10 +325,15 @@ class JudgeAgent:
                 # buckets, so it always has the replacement fact to write from.
                 for ev in claim.evidence:
                     contradictory_evidence.append(ev)
-            elif verdict_str == VerdictLabel.VERIFIED.value:
+            elif verdict_str == VerdictLabel.VERIFIED.value and _has_decision_grade_evidence(claim, "entailment"):
                 claims_to_preserve.append(claim)
                 for ev in claim.evidence:
                     trusted_evidence.append(ev)
+            elif verdict_str in (VerdictLabel.CONTRADICTED.value, VerdictLabel.VERIFIED.value):
+                # Decisive verdict WITHOUT decision-grade evidence (HG-012): demote
+                # this one claim to unverified rather than trust a bare verdict, and
+                # keep processing the rest of the response (M5/#11).
+                unverified_claims.append(claim)
             elif verdict_str == VerdictLabel.CONFLICTED.value:
                 conflicted_claims.append(claim)
             elif verdict_str == VerdictLabel.UNVERIFIED.value:
