@@ -69,10 +69,12 @@ class TestV2RegressionFailures:
 
         nli = {"label": "entailment", "entailment_score": 0.93, "contradiction_score": 0.05, "neutral_score": 0.02}
         ev_class = self.scorer.classify_evidence(claim, passage, nli)
-        assert ev_class == "NEUTRAL"  # rule-model disagreement requires abstention
+        # OBJECT_MISMATCH is high-precision: NLI "entailing" a mismatched claim is
+        # an NLI error, so the structural check wins -> CONTRADICTING (audit H1).
+        assert ev_class == "CONTRADICTING"
 
         scores = self.scorer.score_evidence(claim, [passage], [nli], domain="general")
-        assert scores["verdict"] == VerdictLabel.UNVERIFIED
+        assert scores["verdict"] == VerdictLabel.CONTRADICTED
 
     def test_eiffel_tower_location_relation_check(self):
         """Failure 2: Eiffel Tower located in London -> OBJECT_MISMATCH -> CONTRADICTED."""
@@ -89,10 +91,12 @@ class TestV2RegressionFailures:
         # Notice NLI gives 0.00 contradiction, neutral label
         nli = {"label": "neutral", "entailment_score": 0.01, "contradiction_score": 0.02, "neutral_score": 0.97}
         ev_class = self.scorer.classify_evidence(claim, passage, nli)
-        assert ev_class == "NEUTRAL"  # neutral NLI cannot become a neural contradiction
+        # Structural OBJECT_MISMATCH (London vs Paris) carries the contradiction
+        # even when NLI is silent; it floors the passage weight, not the NLI score.
+        assert ev_class == "CONTRADICTING"
 
         scores = self.scorer.score_evidence(claim, [passage], [nli], domain="general")
-        assert scores["verdict"] == VerdictLabel.UNVERIFIED
+        assert scores["verdict"] == VerdictLabel.CONTRADICTED
 
     def test_allu_arjun_father_relation_check(self):
         """Failure 3: Chiranjeevi is father of Allu Arjun -> OBJECT_MISMATCH -> CONTRADICTED."""
@@ -108,10 +112,11 @@ class TestV2RegressionFailures:
 
         nli = {"label": "neutral", "entailment_score": 0.02, "contradiction_score": 0.10, "neutral_score": 0.88}
         ev_class = self.scorer.classify_evidence(claim, passage, nli)
-        assert ev_class == "NEUTRAL"
+        # OBJECT_MISMATCH (Chiranjeevi vs Allu Aravind) -> CONTRADICTING.
+        assert ev_class == "CONTRADICTING"
 
         scores = self.scorer.score_evidence(claim, [passage], [nli], domain="general")
-        assert scores["verdict"] == VerdictLabel.UNVERIFIED
+        assert scores["verdict"] == VerdictLabel.CONTRADICTED
 
     def test_java_creator_relation_check(self):
         """Failure 4: Java created by James Gosling -> MATCH -> VERIFIED."""

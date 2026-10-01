@@ -16,20 +16,31 @@ def neutral():
             "neutral_score": .95, "validity_factor": 1.0}
 
 
-@pytest.mark.parametrize("claim,text", [
-    ("Java was created by Snehith.", "Java was created by James Gosling."),
-    ("Java was created by James Gosling.", "Java was created by James Gosling."),
-    ("Nottingham is in England.", "An unrelated claim about medicine is false."),
-    ("Rust was created by Graydon Hoare.", "Rust is memory safe. A different rumor was debunked."),
+@pytest.mark.parametrize("claim,text,expected_class", [
+    # Confident relation OBJECT_MISMATCH -> CONTRADICTING even when the (mocked)
+    # NLI is silent. The deterministic relation check IS corroborating evidence;
+    # letting it vote restores the wrong-creator/wrong-location contradictions the
+    # pure-NLI path misses (audit H1/H7-H9). NLI probabilities are NOT mutated.
+    ("Java was created by Snehith.", "Java was created by James Gosling.", "CONTRADICTING"),
+    # Confident relation MATCH on verbatim evidence -> SUPPORTING.
+    ("Java was created by James Gosling.", "Java was created by James Gosling.", "SUPPORTING"),
+    # No extractable relation triple -> defer entirely to NLI (neutral -> NEUTRAL).
+    ("Nottingham is in England.", "An unrelated claim about medicine is false.", "NEUTRAL"),
+    ("Rust was created by Graydon Hoare.", "Rust is memory safe. A different rumor was debunked.", "NEUTRAL"),
 ])
-def test_rules_cannot_promote_neutral_nli(claim, text):
+def test_relation_votes_as_corroboration_without_mutating_nli(claim, text, expected_class):
     p, nli = passage(text), neutral()
     original = dict(nli)
+    # HG-007 guarantee preserved: the scorer never rewrites model probabilities.
+    assert EvidenceScorer().classify_evidence(claim, p, nli) == expected_class
+    assert nli == original
+    # Decision-grade SELECTION still requires a real NLI signal, so a neutral-NLI
+    # passage is not promoted into the selected set by the rule alone (relation-
+    # grounded selection without any NLI signal is tracked separately as H8).
     selected, predictions = VerificationPipeline._select_decision_grade_evidence(
         [p], [nli], claim, RelationVerifier())
     assert nli == original
     assert selected == predictions == []
-    assert EvidenceScorer().classify_evidence(claim, p, nli) == "NEUTRAL"
 
 
 def test_selected_model_output_is_not_mutated_by_relation():

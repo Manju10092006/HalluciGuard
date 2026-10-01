@@ -67,7 +67,10 @@ def test_structured_founder_mismatch_survives_low_reranker_score() -> None:
         domain="general",
     )
 
-    # Low relevance must not be raised to a fabricated 0.80 by a regex match.
-    assert scores["verdict"].value == "unverified"
-    assert scores["contradiction_score"] < 0.25
-    assert scores["confidence_score"] == 0.0
+    # A structurally-grounded OBJECT_MISMATCH with 0.999 NLI contradiction must
+    # SURVIVE a miscalibrated reranker (relevance 0.01). The relevance WEIGHT is
+    # floored for grounded pairs (the NLI probability is NOT rewritten), so the
+    # false founder claim is CONTRADICTED rather than erased to UNVERIFIED.
+    assert scores["verdict"].value == "contradicted"
+    assert scores["contradiction_score"] >= 0.50
+    assert scores["confidence_score"] >= 0.40
