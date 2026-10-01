@@ -449,6 +449,23 @@ class VerificationPipeline:
                         if isinstance(cached_data, dict)
                         else cached_data
                     )
+                    # The cache is keyed by (domain, claim TEXT); the stored report
+                    # still carries the claim_id/claim_text of whatever run first
+                    # populated it. Rebind them to the CURRENT request so the graph's
+                    # exact claim-coverage contract (claim_id + text) holds on a
+                    # warm/cross-pass cache hit and on same-text duplicate claims
+                    # within one call (audit H4/M5/M11). Evidence is text-keyed, so
+                    # only the request-scoped identifiers are corrected.
+                    try:
+                        report = report.model_copy(
+                            update={"claim_id": claim.claim_id, "claim_text": claim.text}
+                        )
+                    except Exception:
+                        try:
+                            report.claim_id = claim.claim_id
+                            report.claim_text = claim.text
+                        except Exception:
+                            pass
                     claim_reports.append(report)
                     any_cache_hit = True
                     continue
