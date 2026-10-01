@@ -241,15 +241,28 @@ class NLIEngine:
                 raise ValueError("NLI batch output is not aligned with input batch")
             id2label = self._get_id2label()
             outputs = []
+            malformed = 0
             for raw_item in raw_batch:
-                scores = _normalize_scores(_flatten_predictions(raw_item), id2label)
-                outputs.append(
-                    _decision(scores) if sum(scores.values()) > 0 else self._neutral()
+                try:
+                    scores = _normalize_scores(_flatten_predictions(raw_item), id2label)
+                    outputs.append(
+                        _decision(scores) if sum(scores.values()) > 0 else self._neutral()
+                    )
+                except Exception:
+                    # A single malformed prediction becomes NEUTRAL; it must NOT
+                    # abort the whole batch and mis-mark a real DeBERTa run as
+                    # degraded/not-executed, nor silently collapse every item
+                    # (audit #16/#17). The degradation below is observable.
+                    malformed += 1
+                    outputs.append(self._neutral())
+            if malformed:
+                logger.warning(
+                    "NLI batch: %d/%d predictions malformed -> NEUTRAL", malformed, len(evidences)
                 )
-            # Real DeBERTa inference succeeded — record execution proof.
-            self.last_status = "executed"
+            # Real DeBERTa inference ran; only FULLY degraded if every item failed.
+            self.last_status = "executed" if malformed < len(evidences) else "degraded"
             self.last_inference_executed = True
-            self.last_degraded = False
+            self.last_degraded = malformed == len(evidences)
             self.last_device = self._detect_device()
             self.last_batch_size = len(evidences)
             return outputs
