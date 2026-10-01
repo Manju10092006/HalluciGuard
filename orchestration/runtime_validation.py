@@ -95,7 +95,7 @@ def validate_detector_model_reference() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=False,
             component="detector",
-            detail=f"HalluciGuard detector package is not importable: {type(exc).__name__}",
+            detail=f"HalluciGuard detector package is not importable: {type(exc).__name__}: {str(exc)[:200]}",
             metadata={"detector": "halluciguard_detector", "model_dir": str(model_dir)},
         )
 
@@ -147,8 +147,8 @@ def validate_verifier_configuration() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=False,
             component="verifier",
-            detail=f"{type(exc).__name__}",
-            metadata={"error_type": type(exc).__name__},
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            metadata={"error_type": type(exc).__name__, "error": str(exc)[:200]},
         )
 
 
@@ -166,8 +166,8 @@ def validate_memory_configuration() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=False,
             component="memory",
-            detail=f"{type(exc).__name__}",
-            metadata={"error_type": type(exc).__name__},
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            metadata={"error_type": type(exc).__name__, "error": str(exc)[:200]},
         )
 
 
@@ -185,8 +185,8 @@ def validate_judge_configuration() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=False,
             component="judge",
-            detail=f"{type(exc).__name__}",
-            metadata={"error_type": type(exc).__name__},
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            metadata={"error_type": type(exc).__name__, "error": str(exc)[:200]},
         )
 
 

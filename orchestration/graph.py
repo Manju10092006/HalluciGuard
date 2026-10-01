@@ -368,7 +368,17 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
     except Exception as exc:
         update = _failure_update(state, "detector", RuntimeError(type(exc).__name__))
         if str(state.get("llm_response") or "").strip():
-            update.update(route="verify", verification_status="verification_required")
+            # The detector is OPTIONAL triage: on its failure we fail SAFE to the
+            # Verifier, so the request has NOT failed. Clear the terminal
+            # 'fallback'/error that _failure_update set so a later-accepted answer
+            # is not mislabelled as a fallback; the detector error stays in
+            # `errors` for observability (#35).
+            update.update(
+                route="verify",
+                verification_status="verification_required",
+                terminal_status=state.get("terminal_status"),
+                error=None,
+            )
         return update
 
 
