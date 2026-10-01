@@ -14,11 +14,27 @@ def test_structured_fields_and_source_ids_survive_normalization():
     rows, meta = normalize_evidence({"source_id": "S1", "rating": 4,
         "documents": [{"text": "Shop closes on 2025-01-02", "price": 12.5},
                       {"details": {"city": "Paris", "open": False}, "missing": None}]})
-    assert len(rows) == 2
-    assert "rating: 4" in rows[0] and "price: 12.5" in rows[0]
-    assert "details.city: Paris" in rows[1] and "details.open: False" in rows[1]
-    assert meta["source_ids"] == ["S1", "S1"]
+    # The parent's own fields are now their OWN record, not glued onto every child
+    # passage -- that gluing manufactured false lexical signal (audit M7).
+    assert len(rows) == 3
+    assert any("rating: 4" in r for r in rows)
+    assert any("price: 12.5" in r and "Shop closes on 2025-01-02" in r for r in rows)
+    assert any("details.city: Paris" in r and "details.open: False" in r for r in rows)
+    # Child passages must NOT carry the parent's "rating: 4" metadata.
+    child_rows = [r for r in rows if "price: 12.5" in r or "details.city" in r]
+    assert child_rows and all("rating: 4" not in r for r in child_rows)
+    assert meta["source_ids"] == ["S1", "S1", "S1"]
     assert meta["null_fields"] == 1
+
+
+def test_sibling_fact_survives_empty_wrapper_collection():
+    # #10: a usable sibling fact must not vanish (with degraded silently False)
+    # when the wrapper list is empty -- the known n8n zero-passages payload shape.
+    rows, meta = normalize_evidence(
+        {"query": "q", "summary": "Paris is the capital of France", "passages": []}
+    )
+    assert any("Paris is the capital of France" in r for r in rows)
+    assert meta["normalized_count"] >= 1
 
 
 def test_normalization_preserves_prose_and_reports_all_truncation_modes():
