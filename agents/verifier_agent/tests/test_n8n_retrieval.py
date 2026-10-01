@@ -151,7 +151,9 @@ async def test_http_403_auth_error_handling():
         assert result.http_status == 403
         assert result.passages == []
         assert "403" in result.error
-        assert "Authorization data is wrong" in result.error
+        # HG-014/#12: the raw upstream response body must NOT leak into the error
+        # (or the trace/logs it feeds). Classification (status code) is retained.
+        assert "Authorization data is wrong" not in result.error
 
 
 

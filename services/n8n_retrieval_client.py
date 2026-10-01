@@ -135,7 +135,8 @@ class N8NRetrievalClient:
                 try:
                     result["data"] = resp.json()
                 except Exception:
-                    result["text"] = resp.text[:200]
+                    # HG-014: never surface the raw upstream body; report shape only.
+                    result["text"] = f"<non-JSON body: {len(resp.text or '')} bytes, redacted>"
                 return result
         except Exception as exc:
             latency_ms = int((time.time() - start_time) * 1000)
@@ -385,7 +386,7 @@ class N8NRetrievalClient:
 
                 if response.status_code != 200:
                     err_msg = (
-                        f"n8n webhook returned HTTP {response.status_code}: {response.text[:200]}"
+                        f"n8n webhook returned HTTP {response.status_code}"
                     )
                     logger.warning("[N8N Client] %s", err_msg)
                     return N8NRetrievalResult(
@@ -406,7 +407,7 @@ class N8NRetrievalClient:
                 try:
                     data = response.json()
                 except Exception as json_err:
-                    err_msg = f"n8n response is not valid JSON: {str(json_err)}"
+                    err_msg = f"n8n response is not valid JSON: {type(json_err).__name__}"
                     logger.error("[N8N Client] %s", err_msg)
                     return N8NRetrievalResult(
                         success=False,
@@ -510,7 +511,7 @@ class N8NRetrievalClient:
                 latency_ms = int((time.time() - start_time) * 1000)
 
                 if response.status_code != 200:
-                    err_msg = f"n8n batch webhook returned HTTP {response.status_code}: {response.text[:200]}"
+                    err_msg = f"n8n batch webhook returned HTTP {response.status_code}"
                     return N8NRetrievalResult(
                         success=False,
                         passages=[],
