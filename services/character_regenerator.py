@@ -350,7 +350,7 @@ class CharacterRegenerator:
                     max_tokens=budget,
                 )
             except Exception as exc:  # noqa: BLE001 - boundary must not raise
-                last_reason = f"generation_error: {type(exc).__name__}: {exc}"
+                last_reason = f"generation_error: {type(exc).__name__}"
                 saw_provider_failure = True
                 continue
 

@@ -339,13 +339,7 @@ class ModelClient:
             try:
                 from .groq_client import GroqGenerator
 
-                self._generator = GroqGenerator(
-                    api_key=api_key,
-                    model=self.config.groq_model,
-                    timeout_seconds=self.config.groq_timeout_seconds,
-                    max_retries=self.config.groq_max_retries,
-                    reasoning_effort=self.config.groq_reasoning_effort,
-                )
+                self._generator = GroqGenerator.from_config(self.config, api_key=api_key)
                 self._status = ModelStatus(
                     available=True,
                     kind="groq_api",
@@ -361,7 +355,7 @@ class ModelClient:
             except Exception as exc:
                 self._status = _unavailable(
                     ModelUnavailableReason.MODEL_LOAD_FAILED,
-                    f"Groq client initialization failed: {type(exc).__name__}: {exc}",
+                    f"Groq client initialization failed: {type(exc).__name__}",
                     base_model=self.config.groq_model,
                 )
                 return self._status
@@ -391,7 +385,7 @@ class ModelClient:
             )
             self._status = _unavailable(
                 reason,
-                f"{type(exc).__name__}: {exc}",
+                f"model initialization failed: {type(exc).__name__}",
                 status.tried_paths,
                 status.base_model,
             )
@@ -459,7 +453,7 @@ class ModelClient:
             return rejected_candidate(
                 bundle,
                 RejectionReason.GENERATION_FAILED,
-                f"{type(exc).__name__}: {exc}",
+                f"generation failed: {type(exc).__name__}",
             )
 
         return parse_candidate(raw, bundle)

@@ -102,65 +102,29 @@ def test_unknown_claim_with_only_related_evidence(monkeypatch):
 
 
 def test_class_mapping_normalization_keeps_the_sum_to_one_invariant():
-    """A partial or malformed classifier output is coerced, never trusted raw.
-
-    The three class probabilities are read as a distribution everywhere
-    downstream, so a head that omits a class (or reports values that do not sum
-    to 1) must be normalized rather than crashing or skewing the scores.
-    """
-    normalize = Detector._normalize_class_mapping
-
-    # Missing CONTRADICTED becomes exactly 0.0, and the rest still sum to 1.
-    mapping = normalize({S: 0.2, N: 0.8})
-    assert mapping[C] == pytest.approx(0.0)
+    mapping = Detector._normalize_class_mapping({S: 0.2, C: 0.3, N: 0.5})
     assert sum(mapping.values()) == pytest.approx(1.0)
-
-    # Values that do not sum to 1 are renormalized over the classes present.
-    mapping = normalize({S: 0.5, N: 0.5})
-    assert mapping[S] == pytest.approx(0.5)
-    assert mapping[C] == pytest.approx(0.0)
-    assert sum(mapping.values()) == pytest.approx(1.0)
-
-    # Out-of-range and non-numeric input is clamped rather than trusted.
-    mapping = normalize({S: 5.0, C: "nope", N: -2.0})
-    assert all(0.0 <= v <= 1.0 for v in mapping.values())
-    assert sum(mapping.values()) == pytest.approx(1.0)
-
-    # Nothing usable at all: stay conservative and unverified rather than
-    # defaulting to a distribution that implies support.
-    mapping = normalize({})
-    assert mapping[N] == pytest.approx(1.0)
-    assert mapping[C] == pytest.approx(0.0)
-    assert mapping[S] == pytest.approx(0.0)
+    assert mapping[C] == pytest.approx(0.3)
 
 
-def test_absent_contradiction_probability_yields_zero_contradiction_mass(monkeypatch):
-    """The exact invariant: no refutation probability -> contradiction_mass == 0.
+@pytest.mark.parametrize("raw", [
+    {S: 0.2, N: 0.8}, {}, {S: 5.0, C: "nope", N: -2.0},
+    {S: float("nan"), C: .5, N: .5}, {S: .1, C: .1, N: .1},
+])
+def test_invalid_classifier_probabilities_raise_instead_of_implying_support(raw):
+    with pytest.raises(ValueError):
+        Detector._normalize_class_mapping(raw)
 
-    ``contradiction_mass`` is max(P(CONTRADICTED)). When the classifier assigns
-    no contradiction probability at all, that maximum is exactly zero -- it must
-    not be borrowed from the unknown mass or defaulted to a small positive
-    number that would read as a weak refutation.
-    """
+
+def test_absent_contradiction_probability_cannot_authorize_inference(monkeypatch):
     claim = "The company operates globally."
     detector = make_detector(
-        monkeypatch,
-        claims=[(claim, (0, len(claim)))],
+        monkeypatch, claims=[(claim, (0, len(claim)))],
         classify=lambda c, e: {S: 0.10, N: 0.90},
-        evidence_stub=EvidenceStub(snippets={claim: ["The company operates in 50+ countries."]}),
+        evidence_stub=EvidenceStub(snippets={claim: ["The company operates in 50 countries."]}),
     )
-    result = detector.detect(
-        draft_answer=claim,
-        evidence=["The company operates in more than 50 countries."],
-    )
-    assert result.sentences[0].label == N
-    assert result.sentences[0].contradicted_probability == pytest.approx(0.0)
-    assert result.contradiction_mass == pytest.approx(0.0)
-    assert result.contradicted_count == 0
-    # Zero refutation is NOT acceptance: the claim is still merely unverified.
-    assert result.requires_verification is True
-    assert result.verification_risk == pytest.approx(0.90)
-    assert result.label == "NO_HALLUCINATION"
+    with pytest.raises(ValueError, match="incomplete_detector"):
+        detector.detect(draft_answer=claim, evidence=["The company operates in 50 countries."])
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +281,8 @@ def test_entity_guard_direct_contradiction_reinforced(monkeypatch):
     # Same relation ("acquired") -> contradiction reinforced beyond its floor.
     assert has_entity_conflict(claim, "Apple acquired Company B.") is True
     assert "acquired" in shared_relation(claim, "Apple acquired Company B.")
-    assert item.contradicted_probability > 0.10
+    assert item.contradicted_probability == pytest.approx(0.10)
+    assert item.requires_verification is True
     assert item.contradicted_probability < 0.90
     assert any("shared relation" in w for w in result.warnings)
 
@@ -388,7 +353,8 @@ def test_numeric_and_temporal_mismatch_reinforced(monkeypatch, claim, evidence, 
     result = detector.detect(draft_answer=claim, evidence=[evidence])
     item = result.sentences[0]
     assert any(conflicts_with in w.lower() for w in result.warnings)
-    assert item.contradicted_probability > 0.05
+    assert item.contradicted_probability == pytest.approx(0.05)
+    assert item.requires_verification is True
     assert item.contradicted_probability < 0.90
     # Remains normalized.
     total = item.supported_probability + item.contradicted_probability + item.unknown_probability
@@ -417,9 +383,11 @@ def test_numeric_mismatch_end_to_end_reaches_contradicted(monkeypatch):
         draft_answer=claim,
         evidence=["The city has a population of 12 million."],
     )
-    assert result.sentences[0].label == C
-    assert result.contradicted_count == 1
-    assert result.label == "HALLUCINATION"
+    assert result.sentences[0].label == S
+    assert result.sentences[0].contradicted_probability == pytest.approx(0.30)
+    assert result.contradicted_count == 0
+    assert result.label == "NO_HALLUCINATION"
+    assert result.requires_verification is True
 
 
 # ---------------------------------------------------------------------------
@@ -473,7 +441,7 @@ def test_reranker_empty_output_keeps_hybrid_order_as_traceable_fallback(monkeypa
         "The Earth orbits the Sun.", ["The Earth revolves around the Sun."], trace=trace
     )
     assert snippets == ["The Earth revolves around the Sun."]
-    assert trace["route"] == "hybrid_order"
+    assert trace["route"] == "hybrid_pre_rerank"
     assert trace["degraded"] is True
     assert "reranker" in trace["reason"].lower()
 
@@ -511,6 +479,9 @@ class _FakeRetriever:
         self.calls.append(("retrieve", query, k, dense_model))
         return list(passages)[:k]
 
+    def diagnostics(self):
+        return {"route": "hybrid", "degraded": False}
+
 
 class _FakeReranker:
     def __init__(self):
@@ -520,6 +491,9 @@ class _FakeReranker:
         # Record the exact query the reranker received to prove it is the claim.
         self.calls.append(("rerank", query, k))
         return list(passages)[:k]
+
+    def diagnostics(self):
+        return {"inference_executed": True, "degraded": False}
 
 
 def _install_fake_shared_stack(monkeypatch, retriever, reranker):

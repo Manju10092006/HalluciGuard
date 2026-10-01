@@ -76,6 +76,11 @@ class VerifierInputV2(BaseModel):
 
 
 class EvidenceItem(BaseModel):
+    source_id: str = ""
+    model_input_snippet: str = ""
+    snippet_truncated: bool = False
+    score_provenance: str = "nli"
+    relation_status: str = "NO_TRIPLE_EXTRACTED"
     title: str
     source: str
     url: str

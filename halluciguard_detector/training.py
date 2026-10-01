@@ -325,8 +325,9 @@ def calibration_report(logits: np.ndarray, labels: np.ndarray, temperature: floa
         ),
         "per_class": per_class,
         "interpretation": (
-            "Temperature scaling is fitted on dev only. These numbers describe the dev "
-            "distribution and do not transfer to other domains without re-measurement."
+            "These metrics describe the supplied evaluation labels. Temperature-fitting "
+            "provenance must be established separately; metrics do not transfer to other "
+            "domains without re-measurement."
         ),
     }
 
@@ -366,6 +367,11 @@ def evaluate_saved_predictions(
     verification_risk_threshold: float,
 ) -> dict:
     """Assemble the full honest report for one split."""
+    labels = np.asarray(labels)
+    if labels.ndim != 1 or len(labels) != len(logits) or not len(labels):
+        raise ValueError("evaluation labels must be nonempty and aligned with logits")
+    if not np.isin(labels, [0, 1, 2]).all():
+        raise ValueError("evaluation labels must use the exact three-class mapping")
     return {
         "samples": int(len(labels)),
         "class_distribution": {
@@ -401,6 +407,23 @@ def train(
     max_length: int = DEFAULT_MAX_LENGTH,
     seed: int = 42,
 ) -> dict:
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError(f"model output already exists: {output_dir}")
+    recovery_dir = output_dir.parent / f"{output_dir.name}-last"
+    if recovery_dir.exists() and any(recovery_dir.iterdir()):
+        raise FileExistsError(f"recovery output already exists: {recovery_dir}")
+    train_rows = load_rows(data_dir / "train.jsonl")
+    dev_rows = load_rows(data_dir / "dev.jsonl")
+    if not train_rows or not dev_rows:
+        raise ValueError("train and dev splits must be nonempty")
+    for name, rows in (("train", train_rows), ("dev", dev_rows)):
+        for row in rows:
+            if row.get("label_id") not in ID_TO_LABEL or row.get("label") != ID_TO_LABEL[row["label_id"]]:
+                raise ValueError(f"invalid {name} label")
+    train_groups = {str(row["source_id"]) for row in train_rows if row.get("source_id") is not None}
+    dev_groups = {str(row["source_id"]) for row in dev_rows if row.get("source_id") is not None}
+    if train_groups & dev_groups:
+        raise ValueError("train/dev source groups overlap")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -543,6 +566,13 @@ def evaluate(
     the identical code path -- a different split must not mean different
     encoding.
     """
+    model_dir = Path(model_dir)
+    calibration = load_calibration(model_dir / "calibration.json")
+    saved_length = int(calibration.get("max_length", DEFAULT_MAX_LENGTH))
+    if max_length != saved_length:
+        raise ValueError(f"evaluation max_length {max_length} differs from checkpoint {saved_length}")
+    if save and any((model_dir / f"{split}_{suffix}").exists() for suffix in ("metrics.json", "predictions.npz")):
+        raise FileExistsError(f"evaluation artifacts already exist for split {split}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     model = AutoModelForSequenceClassification.from_pretrained(model_dir).to(device)
@@ -550,7 +580,6 @@ def evaluate(
     logits, labels = predict_rows(
         model, tokenizer, rows, device=device, max_length=max_length, batch_size=batch_size
     )
-    calibration = load_calibration(Path(model_dir) / "calibration.json")
     temperature = float(calibration.get("temperature", 1.0))
     contradiction_threshold = float(calibration.get("contradiction_threshold", 0.5))
     verification_risk_threshold = float(

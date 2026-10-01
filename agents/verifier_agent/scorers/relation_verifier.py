@@ -77,6 +77,19 @@ class RelationVerifier:
         words = [w for w in clean.split() if w not in stopwords]
         return " ".join(words) if words else clean
 
+    @staticmethod
+    def _creator_names(raw: str) -> List[str]:
+        """Split an explicit pair of proper names without splitting generic prose."""
+        core = re.split(r"\b(?:in|at|with|which|for|as|on)\b", raw, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,")
+        pair = re.fullmatch(
+            r"([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+)+)\s+and\s+"
+            r"([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+)+)",
+            core,
+        )
+        if pair:
+            return [pair.group(1), pair.group(2)]
+        return [re.split(r"\band\b", core, maxsplit=1, flags=re.IGNORECASE)[0].strip()]
+
     def extract_triples(self, text: str) -> List[Triple]:
         """Extract all candidate (subject, relation, object) triples from a text."""
         triples: List[Triple] = []
@@ -88,6 +101,10 @@ class RelationVerifier:
         for sent in sentences:
             sent_clean = sent.strip()
             if not sent_clean:
+                continue
+            # Reported/qualified assertions are not direct factual triples.
+            # Defer their polarity and scope to NLI instead of stripping qualifiers.
+            if re.search(r"\b(?:alleged|allegedly|claimed|claims|reportedly|rumor|falsely|myth|according to)\b", sent_clean, re.IGNORECASE):
                 continue
 
             # Record where this sentence's triples begin, and detect negation once
@@ -325,17 +342,16 @@ class RelationVerifier:
             if create_match:
                 subj = create_match.group(1).strip()
                 verb = create_match.group(2).lower()
-                obj = create_match.group(3).strip()
-                obj = re.split(r"\b(in|at|and|with|which|for|as|on)\b", obj, flags=re.IGNORECASE)[0].strip()
-                triples.append(
-                    Triple(
-                        subject=self._normalize_name(subj),
-                        relation="created_by",
-                        object=self._normalize_name(obj),
-                        qualifiers=[verb],
-                        raw_text=sent_clean,
+                for obj in self._creator_names(create_match.group(3)):
+                    triples.append(
+                        Triple(
+                            subject=self._normalize_name(subj),
+                            relation="created_by",
+                            object=self._normalize_name(obj),
+                            qualifiers=[verb],
+                            raw_text=sent_clean,
+                        )
                     )
-                )
 
             # Direct subject-verb-object: "James Gosling created Java"
             svo_match = re.search(
@@ -561,8 +577,8 @@ class RelationVerifier:
         if not passive:
             return []
 
-        creator = passive.group(2).strip(" ,")
-        if not creator:
+        creators = self._creator_names(passive.group(2))
+        if not creators or not creators[0]:
             return []
         return [
             Triple(
@@ -572,7 +588,7 @@ class RelationVerifier:
                 qualifiers=[passive.group(1).lower(), "title_anchored"],
                 negated=bool(self._NEGATION_CUE.search(passive.group(0))),
                 raw_text=passive.group(0),
-            )
+            ) for creator in creators
         ]
 
     def _contextual_location_triples(self, passage: Any) -> List[Triple]:
@@ -644,7 +660,12 @@ class RelationVerifier:
         Extract triples from the claim and all evidence passages,
         and perform relational consistency checks.
         """
-        claim_triples = self.extract_triples(claim_text)
+        # Two templates may recognize the same fact; qualifiers are parser
+        # metadata, not a second independently verifiable relation.
+        claim_triples = list({
+            (t.subject, t.relation, t.object, t.negated): t
+            for t in self.extract_triples(claim_text)
+        }.values())
         if not claim_triples:
             return RelationCheckResult(
                 status="NO_TRIPLE_EXTRACTED",
@@ -652,6 +673,19 @@ class RelationVerifier:
             )
 
         c_triple = claim_triples[0]
+        if len(claim_triples) > 1 or re.search(
+            r"\b(?:and|but|while|whereas)\s+[^.;!?]{1,80}?\s+(?:is|are|was|were|has|have)\b",
+            claim_text, re.IGNORECASE,
+        ):
+            return RelationCheckResult(
+                claim_triple=c_triple, status="NO_TRIPLE_EXTRACTED",
+                mismatch_detail="Compound relation requires claim decomposition and NLI",
+            )
+        if re.search(r"\b(?:currently|today|now|formerly|previously|until|since)\b|\b\d{4}\b", claim_text, re.IGNORECASE):
+            return RelationCheckResult(
+                claim_triple=c_triple, status="NO_TRIPLE_EXTRACTED",
+                mismatch_detail="Temporal qualifiers require NLI rather than timeless relation comparison",
+            )
 
         # Polarity gate (fail-safe). The extractor is polarity-blind: it collapses
         # "X was NOT created by Y" into the positive triple (X, created_by, Y). If a
@@ -672,11 +706,17 @@ class RelationVerifier:
         all_evidence_triples: List[Triple] = []
 
         for p in evidence_passages:
-            text = f"{getattr(p, 'title', '')} {getattr(p, 'snippet', '')}"
-            e_triples = self.extract_triples(text)
+            # A title is metadata, not a prefix to the first snippet sentence.
+            # Concatenating them used to produce fabricated subjects such as
+            # "25 years of Java Java" and miss real creator mismatches.
+            e_triples = self.extract_triples(str(getattr(p, "title", "") or ""))
+            e_triples.extend(self.extract_triples(str(getattr(p, "snippet", "") or "")))
             e_triples.extend(self._contextual_creation_triples(p))
             e_triples.extend(self._contextual_location_triples(p))
             all_evidence_triples.extend(e_triples)
+
+        # Positive matching cannot establish the meaning of negated/reported facts.
+        all_evidence_triples = [t for t in all_evidence_triples if not t.negated]
 
         if not all_evidence_triples:
             return RelationCheckResult(

@@ -323,7 +323,8 @@ class TestFounderTitleGrounding:
             relevance_score=0.85,
         )
         res = self.rv.verify_relation(claim, [evidence])
-        assert res.status == "MATCH"
+        assert res.status == "NO_TRIPLE_EXTRACTED"
+        assert "Temporal qualifiers" in res.mismatch_detail
 
 
 class TestOrgLocationGrounding:
@@ -365,7 +366,8 @@ class TestOrgLocationGrounding:
         # (raw NLI mislabels this true statement as a contradiction).
         claim = "Microsoft's headquarters remain in Redmond, Washington today."
         res = self.rv.verify_relation(claim, [self._ms_hq(), self._ms_founding()])
-        assert res.status == "MATCH"
+        assert res.status == "NO_TRIPLE_EXTRACTED"
+        assert "Temporal qualifiers" in res.mismatch_detail
 
     def test_wrong_city_is_object_mismatch(self):
         # Tolerance must NOT hide a genuine contradiction: a subject-aligned
@@ -428,8 +430,9 @@ class TestDecisionGradeTopicality:
 
         assert passages == []
         assert results == []
-        assert nli[0]["contradiction_score"] == 0.0
-        assert nli[0]["label"] == "neutral"
+        # Exclude irrelevant evidence without modifying the original model result.
+        assert nli[0]["contradiction_score"] == 0.98
+        assert nli[0]["label"] == "contradiction"
 
     def test_subject_aligned_wrong_location_remains_contradiction(self):
         claim = "Microsoft was started in Boston, Massachusetts."
@@ -452,6 +455,7 @@ class TestDecisionGradeTopicality:
             [microsoft_page], nli, claim=claim, relation_verifier=self.rv
         )
 
-        assert passages == [microsoft_page]
-        assert results[0]["label"] == "contradiction"
-        assert results[0]["contradiction_score"] >= 0.95
+        # The rule diagnosis is not a substitute for the neutral model signal.
+        assert self.rv.verify_relation(claim, [microsoft_page]).status == "OBJECT_MISMATCH"
+        assert passages == results == []
+        assert nli[0]["contradiction_score"] == 0.08

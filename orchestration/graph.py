@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import sys
 import uuid
@@ -32,6 +33,12 @@ def _dump(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_dump(v) for v in value]
     return value
+
+
+def _valid_detector_score(value: Any) -> float | None:
+    if type(value) not in (float, int) or not math.isfinite(value) or not 0 <= value <= 1:
+        return None
+    return float(value)
 
 
 _QUERY_STOPWORDS = frozenset({
@@ -129,12 +136,12 @@ def _failure_update(
         source_agent=node,
         target_agent="supervisor",
         message_type="ERROR_EVENT",
-        payload={"error_type": etype, "message": str(exc)},
+        payload={"error_type": etype, "message": "agent execution failed"},
         status="failed",
     )
     return {
-        "errors": add_error(state, node, exc, retryable=retryable, error_type=etype),
-        "error": f"{node} failed: {etype}: {exc}",
+        "errors": add_error(state, node, RuntimeError("agent execution failed"), retryable=retryable, error_type=etype),
+        "error": f"{node} failed: {etype}",
         "route": "error",
         "terminal_status": "human_review" if retryable else "fallback",
         "verification_status": "agent_failed",
@@ -231,7 +238,7 @@ async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
         update["base_llm"] = {
             "provider": "openrouter",
             "status": "failed",
-            "error": str(exc),
+            "error": type(exc).__name__,
         }
         update["final_response"] = "Base LLM generation failed. Please try again."
         return update
@@ -260,6 +267,8 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             return run_detection(state["user_query"], llm_resp)
 
         detector = _dump(await asyncio.to_thread(_run_detect))
+        if not isinstance(detector, dict):
+            raise ValueError("invalid_detector_result")
         next_action = str(detector.get("next_action", ""))
         risk_level = str(detector.get("risk_level", "LOW")).upper()
         per_claim_results = list(detector.get("per_claim_results") or [])
@@ -267,9 +276,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             {
                 "claim_id": str(item.get("claim_id") or f"c{index}"),
                 "text": str(item.get("text") or "").strip(),
-                "hallucination_probability": float(
-                    item.get("hallucination_probability", 0.0)
-                ),
+                "hallucination_probability": _valid_detector_score(item.get("hallucination_probability")),
                 "risk_level": str(item.get("risk_level", "LOW")).upper(),
                 "requires_verification": bool(
                     item.get("requires_verification", False)
@@ -283,9 +290,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
                 {
                     "claim_id": "c1",
                     "text": llm_resp,
-                    "hallucination_probability": float(
-                        detector.get("hallucination_probability", 0.0)
-                    ),
+                    "hallucination_probability": _valid_detector_score(detector.get("hallucination_probability")),
                     "risk_level": risk_level,
                     "requires_verification": True,
                 }
@@ -295,11 +300,19 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         always_verify = os.environ.get("ALWAYS_VERIFY", "true").lower() in ("true", "1")
         is_stress = state.get("generation_mode") == "stress_test"
         detector_degraded = bool(detector.get("detector_degraded")) or str(detector.get("status", "")).lower() in {"failed", "degraded", "fallback", "unavailable"}
+        score_valid = _valid_detector_score(detector.get("hallucination_probability")) is not None
+        safe_fast_path = (score_valid and detector.get("probability_available") is True
+                          and detector.get("grounded") is True
+                          and detector.get("calibrated") is True
+                          and detector.get("inference_executed") is True
+                          and str(detector.get("status", "")).lower() == "completed"
+                          and risk_level == "LOW" and next_action.lower() == "accept")
         should_verify = (
             always_verify
             or not allow_fast_path
             or is_stress
             or detector_degraded
+            or not safe_fast_path
             or risk_level in {"MEDIUM", "HIGH"}
             or next_action.lower().endswith("verify")
         )
@@ -334,10 +347,8 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             "detector_result": detector,
             "detected_claims": atomic_claims,
             "route": route,
-            "hallucination_probability": float(
-                detector.get("hallucination_probability", 0.0)
-            ),
-            "confidence": float(detector.get("confidence_score", 0.0)),
+            "hallucination_probability": _valid_detector_score(detector.get("hallucination_probability")),
+            "confidence": _valid_detector_score(detector.get("confidence_score")),
             "verification_status": (
                 "detector_safe_fast_path"
                 if route == "accept"
@@ -355,13 +366,22 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             ),
         }
     except Exception as exc:
-        return _failure_update(state, "detector", exc)
+        update = _failure_update(state, "detector", RuntimeError(type(exc).__name__))
+        if str(state.get("llm_response") or "").strip():
+            update.update(route="verify", verification_status="verification_required")
+        return update
 
 
 def _detector_route(state: HalluciGuardState) -> str:
+    if state.get("route") == "verify" and str(state.get("llm_response") or "").strip():
+        return "verifier"
     if state.get("route") == "error":
         return "human_escalation"
-    return "verifier" if state.get("route") == "verify" else "accept"
+    if state.get("route") == "verify":
+        return "verifier"
+    if state.get("route") == "accept":
+        return "accept"  # Only the validated Detector node may set this route.
+    return "verifier" if str(state.get("llm_response") or "").strip() else "human_escalation"
 
 
 def _get_verifier_imports():
@@ -416,9 +436,9 @@ def _build_canonical_verifier_result(
         # Unknown strings like "verifed" raise ContractViolation.
         if verdict_raw in ("verified", "supported"):
             c_verdict = CanonicalVerdictLabel.VERIFIED
-        elif "contradict" in verdict_raw or "hallucinat" in verdict_raw:
+        elif verdict_raw in ("contradicted", "contradiction", "hallucinated"):
             c_verdict = CanonicalVerdictLabel.CONTRADICTED
-        elif "conflict" in verdict_raw:
+        elif verdict_raw == "conflicted":
             c_verdict = CanonicalVerdictLabel.CONFLICTED
         elif verdict_raw in ("unverified", "unsupported", "unknown"):
             c_verdict = CanonicalVerdictLabel.UNVERIFIED
@@ -441,9 +461,9 @@ def _build_canonical_verifier_result(
                 canonical_ev_list.append(ev)
                 continue
             entail_raw = str(ev.get("entailment_label", "neutral")).lower()
-            if "contra" in entail_raw:
+            if entail_raw in {"contradiction", "contradicted", "contradicts", "refutes", "refuted"}:
                 entail_lbl = CanonicalEntailmentLabel.CONTRADICTION
-            elif "entail" in entail_raw or "support" in entail_raw:
+            elif entail_raw in {"entailment", "entails", "supported", "supports", "support"}:
                 entail_lbl = CanonicalEntailmentLabel.ENTAILMENT
             else:
                 entail_lbl = CanonicalEntailmentLabel.NEUTRAL
@@ -451,9 +471,10 @@ def _build_canonical_verifier_result(
             # BUG-001 FIX: Missing scores use 0.0, not optimistic defaults
             canonical_ev_list.append(
                 CanonicalEvidence(
-                    evidence_id=str(ev.get("evidence_id") or uuid.uuid4())[:8],
+                    evidence_id=str(ev.get("evidence_id") or uuid.uuid4()),
                     title=ev.get("title", ""),
                     source=ev.get("source", "Unknown"),
+                    source_id=ev.get("source_id"),
                     url=ev.get("url"),
                     snippet=ev.get("snippet", ""),
                     entailment_label=entail_lbl,
@@ -492,6 +513,13 @@ def _build_canonical_verifier_result(
     # from the worst stage instead: any failed -> FAILED, any degraded ->
     # DEGRADED, else COMPLETED. Absence of grounding is never "authoritative".
     stage_statuses: list[str] = []
+    explicit_status = verifier.get("status")
+    if explicit_status is not None:
+        normalized_status = str(explicit_status).lower().rsplit(".", 1)[-1]
+        stage_statuses.append(
+            normalized_status if normalized_status in {"completed", "success", "failed", "degraded"}
+            else "degraded"
+        )
     for stage in verifier.get("pipeline_stages", []) or []:
         if isinstance(stage, dict):
             stage_statuses.append(str(stage.get("status", "")).lower())
@@ -671,6 +699,12 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
                 f"Verifier failed: {type(exc).__name__}: {exc}"
             ) from exc
 
+        expected_claims = {str(c.claim_id): str(c.text) for c in suspicious_claims}
+        returned_reports = verifier.get("claim_evidence", [])
+        returned_claims = {str(r.get("claim_id")): str(r.get("claim_text")) for r in returned_reports}
+        if len(returned_reports) != len(expected_claims) or returned_claims != expected_claims:
+            raise ValueError("Verifier report does not cover the requested claims exactly")
+
         judge_pairs: list[dict[str, Any]] = []
         evidence_all: list[dict[str, Any]] = []
         nli_results: list[dict[str, Any]] = []
@@ -817,10 +851,8 @@ async def _grounded_detector_node(state: HalluciGuardState) -> dict[str, Any]:
     return {
         "detector": detector,
         "detector_result": detector,
-        "hallucination_probability": float(
-            detector.get("hallucination_probability", 0.0)
-        ),
-        "confidence": float(detector.get("confidence_score", 0.0)),
+        "hallucination_probability": _valid_detector_score(detector.get("hallucination_probability")),
+        "confidence": _valid_detector_score(detector.get("confidence_score")),
         "inter_agent_bus": bus,
         "updated_at": utc_now(),
         "trace": add_trace(
@@ -1207,10 +1239,19 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             1 for r in canonical_v_res.claim_reports
             if str(getattr(r, "verdict", "")).lower() in ("contradicted", "verdictlabel.contradicted")
         )
+        expected_claims = {c.claim_id: c.text for c in suspicious_claims}
+        actual_claims = {r.claim_id: r.claim_text for r in canonical_v_res.claim_reports}
+        complete_coverage = (
+            len(canonical_v_res.claim_reports) == len(expected_claims)
+            and actual_claims == expected_claims
+        )
         positively_verified = bool(canonical_v_res.claim_reports) and all(
             str(getattr(r, "verdict", "")).lower()
             in ("verified", "supported", "verdictlabel.verified")
             for r in canonical_v_res.claim_reports
+        )
+        evidence_grounded = all(
+            _has_supporting_evidence(_dump(r)) for r in canonical_v_res.claim_reports
         )
         # The ReVerifier is the final safety gate for generated corrections.
         # Absence of a contradiction is not proof: an UNVERIFIED or CONFLICTED
@@ -1220,6 +1261,8 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             canonical_v_res.status == ExecutionStatus.COMPLETED
             and remaining_contradictions == 0
             and positively_verified
+            and complete_coverage
+            and evidence_grounded
         )
 
         # PHASE-4 INVARIANT (generic, no per-domain rule): a correction may be
@@ -1248,6 +1291,8 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
                 failure_category = "REMAINING_CONTRADICTION"
             elif canonical_v_res.status == ExecutionStatus.FAILED:
                 failure_category = "VERIFIER_FAILURE"
+            elif not complete_coverage:
+                failure_category = "INCOMPLETE_VERIFICATION"
             else:
                 failure_category = "DEGRADED_REVERIFICATION"
 
@@ -1342,7 +1387,7 @@ def _judge_route(state: HalluciGuardState) -> str:
     """
     if state.get("route") == "error":
         return "human_escalation"
-    decision = str(state.get("judge_decision", "ACCEPT")).upper()
+    decision = str(state.get("judge_decision", "")).upper()
     if decision == "ACCEPT":
         return "memory"
     elif decision == "CORRECT":
@@ -1428,6 +1473,17 @@ def _build_agent_outcomes(
     }
 
 
+def _has_supporting_evidence(report: dict[str, Any]) -> bool:
+    """Require an actual supporting passage, not merely an optimistic verdict."""
+    return any(
+        isinstance(e, dict)
+        and isinstance(e.get("snippet"), str) and bool(e["snippet"].strip())
+        and str(e.get("entailment_label", "")).lower().rsplit(".", 1)[-1]
+            in {"entailment", "supported", "support"}
+        for e in report.get("evidence", []) or []
+    )
+
+
 async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
     from agents.memory_agent.memory.memory_agent import MemoryAgent
     from agents.memory_agent.schemas.models import StoreFactRequest
@@ -1465,6 +1521,23 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                     if str(r.get("verdict", "")).lower()
                     in {"verified", "verdictlabel.verified"}
                 ]
+
+    # Legacy outputs may omit top-level status; reject explicit unhealthy status
+    # and independently require evidence. Missing provenance is never invented.
+    selected_verifier = (
+        rev_res.get("verifier_result", {}) if isinstance(rev_res, dict)
+        else state.get("verifier_result") or state.get("verifier") or {}
+    )
+    verifier_status = str(selected_verifier.get("status", "completed")).lower().rsplit(".", 1)[-1]
+    unhealthy_stages = any(
+        str(s.get("status", "")).lower() in {"failed", "degraded"}
+        for s in selected_verifier.get("pipeline_stages", []) or [] if isinstance(s, dict)
+    )
+    verified_reports = [
+        r for r in verified_reports
+        if verifier_status in {"completed", "success"} and not unhealthy_stages
+        and _has_supporting_evidence(r)
+    ]
 
     if not verified_reports:
         memory = {
@@ -1520,7 +1593,7 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                     verdict="verified",
                     evidence=[
                         {
-                            "source_id": e.get("source", ""),
+                            "source_id": e.get("source_id") or e.get("source", ""),
                             "title": e.get("title", ""),
                             "url": e.get("url"),
                             "snippet": e.get("snippet", ""),
@@ -1528,9 +1601,9 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                         for e in report.get("evidence", [])
                     ],
                     source_ids=[
-                        str(e.get("source", ""))
+                        str(e.get("source_id") or e.get("source", ""))
                         for e in report.get("evidence", [])
-                        if e.get("source")
+                        if e.get("source_id") or e.get("source")
                     ],
                     confidence=float(
                         report.get("confidence_score", report.get("trust_score", 0.0))
@@ -1628,7 +1701,7 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             state,
             memory_result={
                 "status": "failed",
-                "reason": f"{type(exc).__name__}: {str(exc)[:160]}",
+                "reason": f"memory execution failed: {type(exc).__name__}",
             },
         )
         return update

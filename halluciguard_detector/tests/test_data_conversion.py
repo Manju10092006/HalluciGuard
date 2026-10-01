@@ -252,7 +252,8 @@ def test_iter_ragtruth_reports_unknown_vocabulary_in_stats(tmp_path):
     (dataset / "response.jsonl").write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
     stats: Counter = Counter()
-    list(iter_ragtruth_examples(dataset, "train", stats=stats))
+    with pytest.raises(ValueError, match="invalid response.jsonl row"):
+        list(iter_ragtruth_examples(dataset, "train", stats=stats))
     assert stats["unknown_label_type:brand_new_label"] >= 1
 
 
@@ -286,7 +287,11 @@ def _write_two_split_dataset(tmp_path: Path) -> Path:
     train_row = json.loads((dataset / "response.jsonl").read_text(encoding="utf-8").splitlines()[0])
     dev_row = dict(train_row, id=2, split="dev", response="Java was created by James Gosling in 1995.", labels=[])
     test_row = dict(train_row, id=3, split="test", response="Python was created by Guido van Rossum in 1991.", labels=[])
+    second_train = dict(train_row, id=4, source_id=1, response="Java was created by James Gosling in 1995.", labels=[])
+    with (dataset / "source_info.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"source_id": 1, "task_type": "QA", "source_info": "Java was created by James Gosling in 1995."}) + "\n")
     with (dataset / "response.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(second_train) + "\n")
         handle.write(json.dumps(dev_row) + "\n")
         handle.write(json.dumps(test_row) + "\n")
     return dataset

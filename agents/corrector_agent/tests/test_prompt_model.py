@@ -1060,7 +1060,8 @@ def test_model_load_failure_is_captured_as_degraded(tmp_path, monkeypatch):
     status = mc.ModelClient(CorrectorConfig(model_path=str(d))).ensure_loaded()
     assert status.available is False
     assert status.reason == ModelUnavailableReason.MODEL_LOAD_FAILED.value
-    assert "checkpoint is corrupt" in status.detail
+    # Exception bodies can include credentials or provider request content.
+    assert status.detail == "model initialization failed: OSError"
 
 
 def test_adapter_load_failure_is_reported_as_adapter_failure(tmp_path, monkeypatch):
@@ -1164,7 +1165,8 @@ def test_generation_failure_is_rejected_not_raised():
     candidate = outcome.candidates[0]
     assert candidate.status == CandidateStatus.REJECTED.value
     assert candidate.rejection_reason == RejectionReason.GENERATION_FAILED.value
-    assert "CUDA out of memory" in candidate.rejection_detail
+    assert "RuntimeError" in candidate.rejection_detail
+    assert "CUDA out of memory" not in candidate.rejection_detail
     assert candidate.corrected_text == ""
 
 

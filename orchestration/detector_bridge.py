@@ -8,6 +8,7 @@ Any runtime failure fails closed to verification.
 from __future__ import annotations
 
 import threading
+import math
 from typing import Any
 
 
@@ -28,9 +29,9 @@ def _get_agent() -> Any:
 
 def _failclosed(reason: str) -> dict[str, Any]:
     return {
-        "hallucination_probability": 0.0,
+        "hallucination_probability": None,
         "probability_available": False,
-        "confidence_score": 0.0,
+        "confidence_score": None,
         "risk_level": "HIGH",
         "next_action": "Verify",
         "model_source": "halluciguard_detector_unavailable",
@@ -55,16 +56,29 @@ def _failclosed(reason: str) -> dict[str, Any]:
 
 
 def _map_result(result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise ValueError("invalid_detector_result")
+    def valid_score(value: Any) -> float | None:
+        if value is None:
+            return None
+        if type(value) not in (float, int) or not math.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError("invalid_detector_score")
+        return float(value)
+
     raw_probability = result.get("hallucination_probability")
     probability_available = raw_probability is not None
-    probability = float(raw_probability) if probability_available else 0.0
+    probability = valid_score(raw_probability)
     raw_confidence = result.get("confidence_score")
-    confidence = float(raw_confidence) if raw_confidence is not None else 0.0
+    confidence = valid_score(raw_confidence)
     status = str(result.get("status", "completed")).lower()
-    degraded = bool(result.get("detector_degraded", status != "completed"))
+    degraded = bool(result.get("detector_degraded", status != "completed")) or status != "completed"
     next_action = str(result.get("next_action", "Verify"))
     risk_level = str(result.get("risk_level", "HIGH")).upper()
-    if status != "completed" or degraded:
+    if risk_level not in {"LOW", "MEDIUM", "HIGH"} or next_action.lower() not in {"verify", "accept"}:
+        raise ValueError("invalid_detector_route")
+    grounded = bool(result.get("grounded", False))
+    calibrated = bool(result.get("calibration_applied", False))
+    if degraded or not grounded or not calibrated or probability is None or confidence is None:
         next_action = "Verify"
         risk_level = "HIGH"
 
@@ -75,7 +89,7 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         if not text:
             continue
         raw_risk = claim.get("claim_risk")
-        claim_probability = float(raw_risk) if raw_risk is not None else 0.0
+        claim_probability = valid_score(raw_risk)
         claim_level = str(
             claim.get("risk_level") or ("HIGH" if overall_verify else "LOW")
         ).upper()
@@ -109,11 +123,11 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
     if not probability_available:
         contradiction_mass: float | None = None
     elif result.get("contradiction_mass") is not None:
-        contradiction_mass = float(result["contradiction_mass"] or 0.0)
+        contradiction_mass = valid_score(result["contradiction_mass"])
     else:
         contradiction_mass = max(
             (
-                float(claim["contradicted_probability"] or 0.0)
+                valid_score(claim["contradicted_probability"]) or 0.0
                 for claim in per_claim_results
                 if not claim["non_factual"]
             ),
@@ -127,9 +141,8 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         # P(NOT_ENOUGH_INFO)), NOT a probability that the answer is false;
         # ``verification_risk`` below is the canonical name.
         "hallucination_probability": probability,
-        "verification_risk": float(
-            result.get("verification_risk", probability) or 0.0
-        ),
+        "phase1": result.get("phase1"),
+        "verification_risk": valid_score(result.get("verification_risk", probability)),
         # The only signal about actual refutation, kept separate from the
         # verification risk so downstream cannot mistake "unverified" for
         # "refuted". Verifier and Judge read this alongside the claim counts.
@@ -140,14 +153,14 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         "next_action": next_action,
         "model_source": str(result.get("model_source", "halluciguard_detector")),
         "status": status,
-        "calibrated": bool(result.get("calibration_applied", False)),
-        "calibration_applied": bool(result.get("calibration_applied", False)),
+        "calibrated": calibrated,
+        "calibration_applied": calibrated,
         "inference_executed": bool(result.get("inference_executed", False)),
         "model_loaded": bool(result.get("model_loaded", False)),
         "model_version": result.get("model_version"),
         "calibrator_version": result.get("calibrator_version"),
         "detector_degraded": degraded,
-        "grounded": bool(result.get("grounded", False)),
+        "grounded": grounded,
         "probability_semantics": result.get("probability_semantics"),
         "verification_reason": result.get("verification_reason"),
         "degraded_reason": diagnostics.get("degraded_reason") or result.get("degraded_reason"),
@@ -172,7 +185,7 @@ def run_detection(user_query: str, llm_response: str) -> dict[str, Any]:
         result = _get_agent().detect(user_query, llm_response)
         return _map_result(result)
     except Exception as exc:  # fail closed; the graph must still reach Verifier
-        return _failclosed(f"detector_failed: {type(exc).__name__}: {str(exc)[:160]}")
+        return _failclosed(f"detector_failed: {type(exc).__name__}")
 
 
 def run_grounded_detection(
@@ -190,5 +203,5 @@ def run_grounded_detection(
         return _map_result(result)
     except Exception as exc:  # fail closed; Judge still receives verifier truth
         return _failclosed(
-            f"grounded_detector_failed: {type(exc).__name__}: {str(exc)[:160]}"
+            f"grounded_detector_failed: {type(exc).__name__}"
         )

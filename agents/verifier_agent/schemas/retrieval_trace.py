@@ -69,6 +69,10 @@ class ModelExecutionTrace(BaseModel):
     latency_ms: int = 0
     scored_count: int = 0          # reranker: passages scored
     batch_size: int = 0            # nli: pairs classified
+    attempted: bool = False
+    initialization_attempted: bool = False
+    failure_stage: Optional[str] = None
+    error_type: Optional[str] = None
 
 
 class EvidencePassageTrace(BaseModel):
@@ -116,6 +120,7 @@ class GateRelevanceAuditTrace(BaseModel):
     source_confidence_hint: float = 0.0
     gate_time_relevance_signal: float = 0.0
     final_bge_relevance_score: float = 0.0
+    final_bge_score_available: bool = False
     signals_agree: bool = True
 
 
@@ -156,5 +161,7 @@ class RetrievalTrace(BaseModel):
     # §26 model-execution proof (populated from reranker/nli .diagnostics()):
     reranker_execution: Optional[ModelExecutionTrace] = None
     nli_execution: Optional[ModelExecutionTrace] = None
+    backend_execution: Dict[str, Any] = Field(default_factory=dict)
+    retrieval_degraded: bool = False
     timings: dict = Field(default_factory=dict)
 

@@ -5,7 +5,7 @@ import re
 import urllib.parse
 from typing import List, Optional
 
-from config.settings import get_settings
+from agents.verifier_agent.config.settings import get_settings
 from schemas.models import Passage, AdapterMetadata
 from utils.async_executor import gather_results
 from utils.http_client import ResilientHttpClient, get_client

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 from typing import Dict, Any, List
 from schemas.models import EntailmentLabel
 
@@ -33,12 +34,24 @@ class ConflictResolver:
                 label = getattr(item, 'entailment_label', None)
                 credibility = getattr(item, 'credibility_score', 0.5)
 
-            entailment_s = float(item.get('entailment_score', 0.5) if isinstance(item, dict) else getattr(item, 'entailment_score', 0.5))
-
             if label in (EntailmentLabel.ENTAILMENT, 'entailment', 'supports'):
-                support_weight += credibility * entailment_s
+                raw_score = item.get('entailment_score', 0.0) if isinstance(item, dict) else getattr(item, 'entailment_score', 0.0)
             elif label in (EntailmentLabel.CONTRADICTION, 'contradiction', 'contradicts'):
-                contradict_weight += credibility * entailment_s
+                raw_score = (item.get('nli_contradiction', item.get('contradiction_score', 0.0))
+                             if isinstance(item, dict) else getattr(item, 'nli_contradiction', 0.0))
+            else:
+                continue
+            try:
+                score, credibility = float(raw_score), float(credibility)
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(score) and math.isfinite(credibility)
+                    and 0 <= score <= 1 and 0 <= credibility <= 1):
+                continue
+            if label in (EntailmentLabel.ENTAILMENT, 'entailment', 'supports'):
+                support_weight += credibility * score
+            else:
+                contradict_weight += credibility * score
 
         if contradict_weight == 0 and support_weight > 0:
             return {

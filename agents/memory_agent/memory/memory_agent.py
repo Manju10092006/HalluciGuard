@@ -255,6 +255,9 @@ class MemoryAgent:
 
         trust_updates: list[TrustUpdate] = []
         for sid in request.source_ids:
+            if request.verdict not in ("verified", "likely_verified", "contradicted", "likely_hallucinated"):
+                # Uncertainty is not evidence that a source was incorrect.
+                continue
             reason = (
                 TrustChangeReason.VERIFIED_CORRECT
                 if request.verdict in ("verified", "likely_verified")

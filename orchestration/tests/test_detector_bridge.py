@@ -193,7 +193,7 @@ def test_pre_verification_triage_does_not_fabricate_probability(monkeypatch):
     monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(payload))
     out = db.run_detection("q", "A factual claim.")
     assert out["next_action"] == "Verify"
-    assert out["hallucination_probability"] == 0.0
+    assert out["hallucination_probability"] is None
     assert out["probability_available"] is False
     assert out["per_claim_results"][0]["probability_available"] is False
     assert out["detector_degraded"] is False
@@ -229,3 +229,13 @@ def test_empty_claim_text_is_skipped(monkeypatch):
     monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(payload))
     out = db.run_detection("q", "r")
     assert [item["claim_id"] for item in out["per_claim_results"]] == ["c2"]
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -0.1, 1.1, "0.02"])
+def test_invalid_probability_cannot_authorize_fast_path(monkeypatch, bad):
+    monkeypatch.setattr(db, "_get_agent", lambda: _StubAgent(_grounded(
+        hallucination_probability=bad, risk_level="LOW", next_action="Accept")))
+    out = db.run_detection("q", "r")
+    assert out["next_action"] == "Verify"
+    assert out["detector_degraded"] is True
+    assert out["probability_available"] is False

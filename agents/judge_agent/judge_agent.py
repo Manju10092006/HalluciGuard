@@ -291,6 +291,22 @@ class JudgeAgent:
         # 3. Claim-Level Decision Processing (Task 4 & 5 & 6 & 7)
         # -------------------------------------------------------------------
         claim_reports = normalized_verifier.claim_reports
+        for report in claim_reports:
+            verdict = _verdict_value(report.verdict)
+            expected_label = {"verified": "entailment", "contradicted": "contradiction"}.get(verdict)
+            if expected_label and not any(
+                str(getattr(e, "entailment_label", "")).lower().rsplit(".", 1)[-1] == expected_label
+                and bool(str(getattr(e, "snippet", "")).strip())
+                for e in report.evidence
+            ):
+                return JudgeResult(
+                    decision=JudgeDecision.ABSTAIN, severity=SeverityLevel.HIGH,
+                    reason="Decisive verifier verdict is missing decision-grade evidence.",
+                    explanation="A verdict or score alone cannot establish factual correctness.",
+                    confidence=0.0, correction_request=None,
+                    decision_basis=DecisionBasis.INVALID_VERIFIER_INPUT,
+                    status=ExecutionStatus.DEGRADED,
+                )
 
         claims_to_correct: List[ClaimReport] = []
         claims_to_preserve: List[ClaimReport] = []
@@ -830,11 +846,11 @@ class JudgeAgent:
             try:
                 return VerifierResult.model_validate(verifier_result)
             except Exception as e:
-                logger.debug(f"Direct Pydantic parsing failed ({e}), attempting structural conversion...")
+                logger.debug("Direct Pydantic parsing failed (%s), attempting structural conversion", type(e).__name__)
 
             query_id = verifier_result.get("query_id", "Q-001")
             domain = verifier_result.get("domain", fallback_domain or "General Knowledge")
-            overall_conf = verifier_result.get("overall_confidence", verifier_result.get("confidence_score", 0.8))
+            overall_conf = verifier_result.get("overall_confidence", verifier_result.get("confidence_score", 0.0))
 
             claim_reports: List[ClaimReport] = []
 
@@ -857,11 +873,11 @@ class JudgeAgent:
                         c_id = c.get("claim_id", f"C{i+1}")
                         c_text = c.get("claim_text", c.get("claim", ""))
                         v_str = str(c.get("verdict", "unverified")).lower()
-                        if "contradict" in v_str:
+                        if v_str in {"contradicted", "refuted"}:
                             verdict = VerdictLabel.CONTRADICTED
-                        elif "conflict" in v_str:
+                        elif v_str == "conflicted":
                             verdict = VerdictLabel.CONFLICTED
-                        elif "verified" in v_str or "supported" in v_str:
+                        elif v_str in {"verified", "supported"}:
                             verdict = VerdictLabel.VERIFIED
                         else:
                             verdict = VerdictLabel.UNVERIFIED
@@ -870,9 +886,9 @@ class JudgeAgent:
                         for j, ev_data in enumerate(c.get("evidence", [])):
                             if isinstance(ev_data, dict):
                                 entail_str = str(ev_data.get("entailment_label", "neutral")).lower()
-                                if "contra" in entail_str:
+                                if entail_str in {"contradiction", "contradicted", "refutes"}:
                                     e_label = EntailmentLabel.CONTRADICTION
-                                elif "entail" in entail_str or "support" in entail_str:
+                                elif entail_str in {"entailment", "entails", "support", "supports", "supported"}:
                                     e_label = EntailmentLabel.ENTAILMENT
                                 else:
                                     e_label = EntailmentLabel.NEUTRAL
@@ -884,17 +900,18 @@ class JudgeAgent:
                                     url=ev_data.get("url"),
                                     snippet=ev_data.get("snippet", ev_data.get("evidence_snippet", "")),
                                     entailment_label=e_label,
-                                    entailment_score=ev_data.get("entailment_score", 0.8),
-                                    credibility_score=ev_data.get("credibility_score", 0.8)
+                                    entailment_score=ev_data.get("entailment_score", 0.0),
+                                    credibility_score=ev_data.get("credibility_score", 0.0),
+                                    source_id=ev_data.get("source_id")
                                 ))
 
                         claim_reports.append(ClaimReport(
                             claim_id=c_id,
                             claim_text=c_text,
                             verdict=verdict,
-                            support_score=c.get("support_score", 0.9 if verdict == VerdictLabel.VERIFIED else 0.1),
-                            contradiction_score=c.get("contradiction_score", 0.9 if verdict == VerdictLabel.CONTRADICTED else 0.1),
-                            confidence_score=c.get("confidence_score", c.get("trust_score", 0.8)),
+                            support_score=c.get("support_score", 0.0),
+                            contradiction_score=c.get("contradiction_score", 0.0),
+                            confidence_score=c.get("confidence_score", c.get("trust_score", 0.0)),
                             evidence=ev_list
                         ))
                     elif isinstance(c, str):
@@ -902,62 +919,47 @@ class JudgeAgent:
                             claim_id=f"C{i+1}",
                             claim_text=c,
                             verdict=VerdictLabel.UNVERIFIED,
-                            support_score=0.5,
+                            support_score=0.0,
                             contradiction_score=0.0,
-                            confidence_score=0.5,
+                            confidence_score=0.0,
                             evidence=[]
                         ))
 
-            # Format C: "claim_evidence_pairs" (Structural adapter for legacy benchmark/dict inputs)
+            # Format C: retain explicit legacy decisions, never infer truth
+            # from lexical cues or manufacture confidence/model probabilities.
             elif "claim_evidence_pairs" in verifier_result:
-                pairs = verifier_result["claim_evidence_pairs"]
-                import re
-                for i, pair in enumerate(pairs):
+                for i, pair in enumerate(verifier_result["claim_evidence_pairs"]):
                     c_text = pair.get("claim", "")
                     ev_text = pair.get("evidence", pair.get("evidence_snippet", ""))
                     src = pair.get("source", "Unknown")
-                    rel = pair.get("nli_relation", pair.get("top_relation", pair.get("relation", ""))).lower()
-                    v_raw = str(pair.get("verifier_verdict", pair.get("verdict", ""))).lower()
-                    ev_lower = ev_text.lower()
-
-                    c_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', c_text.lower()))
-                    ev_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', ev_lower))
-                    is_num_mismatch = bool(c_nums and ev_nums and not c_nums.intersection(ev_nums))
-                    is_refutation_text = any(w in ev_lower for w in ["not directly", "is not ", "false", "incorrect", "contraindicated", "refutes", "denied", "contrary"])
-
-                    is_contradiction_signal = (
-                        "contra" in rel
-                        or "contradict" in v_raw
-                        or pair.get("contradiction_score", 0) >= 0.5
-                        or is_num_mismatch
-                        or (bool(ev_text) and is_refutation_text)
-                    )
-
-                    if is_contradiction_signal:
-                        verdict = VerdictLabel.CONTRADICTED
-                    elif "entail" in rel or "verified" in v_raw or pair.get("entailment_score", 0) >= 0.5 or (ev_text and not rel):
-                        verdict = VerdictLabel.VERIFIED
-                    else:
-                        verdict = VerdictLabel.UNVERIFIED
-
+                    raw = _verdict_value(pair.get("verifier_verdict", pair.get("verdict", "")))
+                    verdict = {
+                        "verified": VerdictLabel.VERIFIED,
+                        "supported": VerdictLabel.VERIFIED,
+                        "contradicted": VerdictLabel.CONTRADICTED,
+                        "refuted": VerdictLabel.CONTRADICTED,
+                        "conflicted": VerdictLabel.CONFLICTED,
+                    }.get(raw, VerdictLabel.UNVERIFIED)
+                    rel = str(pair.get("nli_relation", pair.get("top_relation", pair.get("relation", "")))).lower()
+                    label = {
+                        "entailment": EntailmentLabel.ENTAILMENT,
+                        "contradiction": EntailmentLabel.CONTRADICTION,
+                    }.get(rel, EntailmentLabel.NEUTRAL)
                     ev = Evidence(
-                        evidence_id=f"E{i+1}",
-                        title=src,
-                        source=src,
-                        snippet=ev_text,
-                        entailment_label=EntailmentLabel.CONTRADICTION if verdict == VerdictLabel.CONTRADICTED else EntailmentLabel.ENTAILMENT,
-                        entailment_score=pair.get("entailment_score", 0.85),
-                        credibility_score=pair.get("credibility_score", 0.80)
+                        evidence_id=pair.get("evidence_id", f"E{i+1}"),
+                        title=src, source=src, snippet=ev_text,
+                        source_id=pair.get("source_id"),
+                        entailment_label=label,
+                        entailment_score=pair.get("entailment_score", 0.0),
+                        credibility_score=pair.get("credibility_score", 0.0),
                     )
-
                     claim_reports.append(ClaimReport(
-                        claim_id=f"C{i+1}",
-                        claim_text=c_text,
-                        verdict=verdict,
-                        support_score=0.85 if verdict == VerdictLabel.VERIFIED else 0.1,
-                        contradiction_score=0.85 if verdict == VerdictLabel.CONTRADICTED else 0.1,
-                        confidence_score=0.85,
-                        evidence=[ev] if ev_text else []
+                        claim_id=pair.get("claim_id", f"C{i+1}"),
+                        claim_text=c_text, verdict=verdict,
+                        support_score=pair.get("support_score", 0.0),
+                        contradiction_score=pair.get("contradiction_score", 0.0),
+                        confidence_score=pair.get("confidence_score", 0.0),
+                        evidence=[ev] if ev_text else [],
                     ))
 
             return VerifierResult(
@@ -1036,7 +1038,19 @@ class JudgeAgent:
                 # would launder a real signal into an Accept).
                 raw_prob = detector_result.get("verification_risk")
                 if raw_prob is None:
-                    raw_prob = detector_result.get("hallucination_probability", 0.0)
+                    raw_prob = detector_result.get("hallucination_probability")
+                if raw_prob is None:
+                    # The public Detector contract marks absent inference with
+                    # None. The legacy Judge schema requires a float, so use a
+                    # schema placeholder ONLY inside a degraded VERIFY result.
+                    # It is never interpreted as a measured low-risk score.
+                    return DetectorResult(
+                        hallucination_probability=0.0,
+                        confidence_score=0.0,
+                        risk_level=RiskLevel.HIGH,
+                        next_action=NextAction.VERIFY,
+                        status=ExecutionStatus.DEGRADED,
+                    )
                 prob = float(raw_prob)
                 conf = float(detector_result.get("confidence_score", 0.8))
                 # Honesty gate: a degraded / non-completed detector run has no

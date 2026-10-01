@@ -61,7 +61,7 @@ class SqliteCache:
         if env_val in ("true", "1", "on", "yes"):
             return True
         try:
-            from config.settings import get_settings
+            from agents.verifier_agent.config.settings import get_settings
             return get_settings().verifier_cache_enabled
         except Exception:
             return True

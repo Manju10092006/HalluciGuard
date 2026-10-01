@@ -102,7 +102,7 @@ def make_mock_verifier_output(retrieved=5, verified=2, confidence=0.85):
 
 
 @pytest.mark.asyncio
-async def test_low_detector_result_skips_verifier():
+async def test_ungrounded_low_detector_result_still_invokes_verifier():
     gen_result = GenerationResult(
         user_query="Low risk question",
         draft_response="Standard low risk text.",
@@ -138,9 +138,8 @@ async def test_low_detector_result_skips_verifier():
 
     assert result.detector["risk_tier"] == "LOW"
     assert result.detector["decision"] == "ACCEPT"
-    assert result.verifier["executed"] is False
-    assert "skipped" in result.verifier["reason"].lower()
-    mock_verifier_pipeline.verify.assert_not_called()
+    assert result.verifier["executed"] is True
+    mock_verifier_pipeline.verify.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -227,7 +226,7 @@ async def test_high_detector_result_invokes_verifier():
 
 
 @pytest.mark.asyncio
-async def test_detector_failure_does_not_invoke_verifier():
+async def test_detector_failure_still_invokes_verifier_without_leaking_error():
     gen_result = GenerationResult(
         user_query="Detector error test",
         draft_response="Valid draft response.",
@@ -243,9 +242,10 @@ async def test_detector_failure_does_not_invoke_verifier():
     )
 
     mock_verifier_pipeline = AsyncMock()
+    mock_verifier_pipeline.verify.return_value = make_mock_verifier_output()
 
     llm_stub = StubBaseLLMService(gen_result)
-    det_stub = DummyDetectorAgent(RuntimeError("Detector model crash"))
+    det_stub = DummyDetectorAgent(RuntimeError("Detector model crash dummy-secret"))
     service = BaseLLMDetectorVerifierService(
         llm_service=llm_stub,
         detector_agent=det_stub,
@@ -255,9 +255,32 @@ async def test_detector_failure_does_not_invoke_verifier():
     result = await service.execute_slice("Detector error test")
 
     assert result.detector["status"] == "failed"
-    assert "Detector model crash" in result.detector["error"]
-    assert result.verifier is None
-    mock_verifier_pipeline.verify.assert_not_called()
+    assert "dummy-secret" not in result.detector["error"]
+    assert result.verifier["executed"] is True
+    mock_verifier_pipeline.verify.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_certification_does_not_block_evidence_free_triage(monkeypatch):
+    monkeypatch.setenv("CERTIFICATION_MODE", "true")
+    generation = GenerationResult(
+        user_query="Who created Java?", draft_response="Java was created by James Gosling.",
+        model="fixture", provider="fixture", generation_mode="normal", mode="normal",
+        temperature=0.0, latency_ms=1, finish_reason="stop", request_id="fixture",
+        status="success",
+    )
+    triage = {"status": "completed", "risk_level": "LOW", "next_action": "Accept",
+              "hallucination_probability": None, "grounded": False,
+              "inference_executed": False, "calibration_applied": False}
+    verifier = AsyncMock()
+    verifier.verify.return_value = make_mock_verifier_output()
+    result = await BaseLLMDetectorVerifierService(
+        llm_service=StubBaseLLMService(generation), detector_agent=DummyDetectorAgent(triage),
+        verifier_pipeline=verifier,
+    ).execute_slice("Who created Java?")
+    verifier.verify.assert_called_once()
+    assert result.detector["certification_status"] == "pending_grounded_detection"
+    assert result.verifier["executed"] is True
 
 
 @pytest.mark.asyncio
@@ -337,7 +360,7 @@ async def test_verifier_failure_handled_cleanly():
 
     assert result.verifier["executed"] is True
     assert result.verifier["status"] == "failed"
-    assert "Retrieval API timed out" in result.verifier["error"]
+    assert result.verifier["error"] == "Verifier error: TimeoutError"
     assert result.verifier["claim_evidence"] == []
 
 

@@ -67,6 +67,7 @@ def test_structured_founder_mismatch_survives_low_reranker_score() -> None:
         domain="general",
     )
 
-    assert scores["verdict"].value == "contradicted"
-    assert scores["contradiction_score"] >= 0.50
-    assert scores["confidence_score"] >= 0.40
+    # Low relevance must not be raised to a fabricated 0.80 by a regex match.
+    assert scores["verdict"].value == "unverified"
+    assert scores["contradiction_score"] < 0.25
+    assert scores["confidence_score"] == 0.0

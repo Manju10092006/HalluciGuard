@@ -23,6 +23,7 @@ from orchestration.schemas import (
     ClaimReport,
     VerdictLabel,
     ExecutionStatus,
+    Evidence,
 )
 
 
@@ -38,7 +39,8 @@ def _cr(cid, verdict, sup, con, conf):
         support_score=sup,
         contradiction_score=con,
         confidence_score=conf,
-        evidence=[],
+        evidence=[Evidence(evidence_id=f"fixture-{cid}", source="diagnostic_fixture",
+                           snippet=cid, entailment_label="contradiction" if _str(verdict) == "contradicted" else "entailment")],
     )
 
 

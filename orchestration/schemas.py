@@ -286,6 +286,7 @@ class Evidence(BaseModel):
         ...,
         description="Name or provider of the source (e.g. wikipedia, pubmed, sec_edgar).",
     )
+    source_id: Optional[str] = None
     url: Optional[str] = Field(
         default=None,
         description="Direct URL to the source document if available.",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import sys
 import uuid
@@ -12,6 +13,10 @@ from halluciguard_detector import DetectorAgent
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 
 logger = logging.getLogger(__name__)
+
+
+def _valid_risk_score(value: Any) -> bool:
+    return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
 
 
 def _load_verifier_imports():
@@ -66,10 +71,10 @@ class BaseLLMDetectorVerifierService:
                                                                │
                                                      ┌─────────┴─────────┐
                                                      │                   │
-                                                   LOW              MEDIUM/HIGH
-                                                     │                   │
-                                                     ▼                   ▼
-                                                  ACCEPT             Verifier -> Evidence & NLI
+                                              Evidence-free triage
+                                                     │
+                                                     ▼
+                                              Verifier -> Evidence & NLI
     """
 
     def __init__(
@@ -151,11 +156,13 @@ class BaseLLMDetectorVerifierService:
                 llm_response=draft_response,
             )
 
+            if not isinstance(detection_result, dict):
+                raise ValueError("invalid_detector_result")
             status = str(detection_result.get("status", "completed")).lower()
             completed = status == "completed"
             risk_tier = str(detection_result.get("risk_level", "HIGH")).upper()
             next_act_str = str(detection_result.get("next_action", "Verify")).upper()
-            decision = "VERIFY" if next_act_str == "VERIFY" else "ACCEPT"
+            decision = "ACCEPT" if next_act_str == "ACCEPT" else "VERIFY"
             model_source = str(detection_result.get("model_source", "halluciguard_detector"))
             # Prefer the explicit degraded flag and preserve execution diagnostics.
             degraded = bool(detection_result.get("detector_degraded", not completed))
@@ -165,11 +172,13 @@ class BaseLLMDetectorVerifierService:
                 "hallucination_probability": detection_result.get("hallucination_probability"),
                 "risk_tier": risk_tier,
                 "decision": decision,
+                "status": status,
                 "model_source": model_source,
                 # §6 execution diagnostics — prove real inference vs. degraded fallback.
                 "detector_model_loaded": bool(detection_result.get("model_loaded", False)),
                 "detector_inference_executed": bool(detection_result.get("inference_executed", False)),
                 "detector_degraded": degraded,
+                "calibrated": bool(detection_result.get("calibration_applied", False)),
                 "detector_model_source": model_source,
                 "probability_available": detection_result.get("hallucination_probability") is not None,
                 "grounded": bool(detection_result.get("grounded", False)),
@@ -177,41 +186,45 @@ class BaseLLMDetectorVerifierService:
                 "verification_reason": detection_result.get("verification_reason"),
             }
         except Exception as exc:
-            logger.error(
-                f"[LLMDetectorVerifierService] Detector execution failed: {exc}",
-                exc_info=True,
-            )
+            logger.error("[LLMDetectorVerifierService] Detector failed (%s)", type(exc).__name__)
             detector_dict = {
                 "status": "failed",
-                "error": f"Detector error: {type(exc).__name__} — {str(exc)[:200]}",
+                "error": f"Detector error: {type(exc).__name__}",
                 "risk_tier": "UNKNOWN",
                 "decision": "VERIFY",
             }
-            # Detector failure prevents Verifier execution
-            return LLMDetectorVerifierSliceResult(
-                user_query=user_query,
-                draft_response=draft_response,
-                generation=gen_dict,
-                detector=detector_dict,
-                verifier=None,
-            )
+            decision, risk_tier = "VERIFY", "UNKNOWN"
 
         # §28 certification: a degraded detector (baseline heuristic) must not be
-        # silently certified. Fail-closed BEFORE routing to the verifier. Import is
+        # silently certified. Initial triage cannot be certified as grounded. Import is
         # guarded so normal (non-certification) runs are never affected.
         try:
             _enforce_detector, _cert_from_env, _CertErr = _load_certification()
         except Exception as _imp_exc:  # pragma: no cover - defensive
             _enforce_detector = None
             logger.debug("Certification helpers unavailable: %s", _imp_exc)
-        if _enforce_detector is not None:
-            _enforce_detector(detector_dict, _cert_from_env())
+        # This is evidence-free triage, not the grounded Detector stage. A
+        # certification failure here must not prevent evidence retrieval.
+        certification_requested = bool(_enforce_detector and _cert_from_env())
+        detector_dict["certification_status"] = (
+            "pending_grounded_detection" if certification_requested else "not_requested"
+        )
 
         # Step 3: Conditional Verifier Routing
         should_verify = (
             force_verifier
             or decision == "VERIFY"
             or risk_tier in {"MEDIUM", "HIGH"}
+            or risk_tier not in {"LOW", "MEDIUM", "HIGH"}
+            or detector_dict.get("status") != "completed"
+            or detector_dict.get("detector_degraded", True)
+            or not detector_dict.get("grounded", False)
+            or not detector_dict.get("detector_inference_executed", False)
+            or not detector_dict.get("probability_available", False)
+            or not detector_dict.get("calibrated", False)
+            or not _valid_risk_score(detector_dict.get("hallucination_probability"))
+            or os.environ.get("ALWAYS_VERIFY", "true").lower() in {"true", "1"}
+            or os.environ.get("ALLOW_DETECTOR_FAST_PATH", "false").lower() not in {"true", "1"}
         )
         if not should_verify:
             logger.info(
@@ -231,7 +244,7 @@ class BaseLLMDetectorVerifierService:
 
         # Execute Verifier Pipeline
         logger.info(
-            f"[LLMDetectorVerifierService] Invoking Verifier Pipeline for query: '{user_query[:60]}...'"
+            "[LLMDetectorVerifierService] Invoking Verifier Pipeline"
         )
         try:
             VerificationPipelineClass, SuspiciousClaim, VerifierInputV2 = (
@@ -351,6 +364,10 @@ class BaseLLMDetectorVerifierService:
 
             verifier_dict = {
                 "executed": True,
+                "status": "degraded" if len(sub_claims) > len(suspicious_claims) else "completed",
+                "candidate_claim_count": len(sub_claims),
+                "submitted_claim_count": len(suspicious_claims),
+                "claim_limit_reached": len(sub_claims) > len(suspicious_claims),
                 "domain": str(getattr(verifier_output, "domain", domain)),
                 "domain_validated": bool(getattr(verifier_output, "domain_validated", True)),
                 "retrieved_sources": int(_safe_float(getattr(verifier_output, "retrieved_sources", 0))),
@@ -363,14 +380,11 @@ class BaseLLMDetectorVerifierService:
                 "claim_evidence": claims_data,
             }
         except Exception as exc:
-            logger.error(
-                f"[LLMDetectorVerifierService] Verifier execution failed cleanly: {exc}",
-                exc_info=True,
-            )
+            logger.error("[LLMDetectorVerifierService] Verifier failed (%s)", type(exc).__name__)
             verifier_dict = {
                 "executed": True,
                 "status": "failed",
-                "error": f"Verifier error: {type(exc).__name__} — {str(exc)[:200]}",
+                "error": f"Verifier error: {type(exc).__name__}",
                 "claim_evidence": [],
             }
 

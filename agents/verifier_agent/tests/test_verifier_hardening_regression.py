@@ -78,7 +78,7 @@ except Exception as _e:  # pragma: no cover - environment dependent
 
 try:
     from api.pipeline import VerificationPipeline
-    from config.settings import get_settings
+    from agents.verifier_agent.config.settings import get_settings
 
     _HAS_PIPELINE = True
     _PIPELINE_ERR = ""

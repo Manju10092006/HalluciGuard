@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 import time
 import logging
+import math
 from typing import List, Dict, Any, Tuple
 
 from schemas.models import (
@@ -123,7 +124,7 @@ class VerificationPipeline:
         self.cache = SqliteCache()
         self.metrics = MetricsCollector()
         self.logger = setup_logger("pipeline")
-        from config.settings import get_settings
+        from agents.verifier_agent.config.settings import get_settings
         self.settings = get_settings()
         self._n8n_client = None
 
@@ -309,126 +310,35 @@ class VerificationPipeline:
         if not pairs:
             return [], []
 
-        # Aggregate relation check across ALL passages first. Creation/leadership
-        # relations are multi-valued (Microsoft has TWO founders); a per-passage
-        # check sees each co-founder in isolation and would force a contradiction
-        # on the "Paul Allen" passage while the "Bill Gates" passage entails —
-        # colliding into a false CONFLICTED verdict on a true claim. The
-        # match-first aggregate tells us whether the claimed person is confirmed
-        # anywhere, so we can suppress that spurious per-passage contradiction.
-        aggregate_rel_status = "NO_TRIPLE_EXTRACTED"
-        aggregate_claim_rel = ""
-        aggregate_claim_subject = ""
-        if relation_verifier and claim:
-            aggregate_rel_check = relation_verifier.verify_relation(claim, passages)
-            aggregate_rel_status = aggregate_rel_check.status
-            if aggregate_rel_check.claim_triple:
-                aggregate_claim_rel = aggregate_rel_check.claim_triple.relation
-                aggregate_claim_subject = aggregate_rel_check.claim_triple.subject
-
+        # Selection must not rewrite neural probabilities. Relation extraction is
+        # diagnostic and may restrict off-topic evidence, never synthesize scores.
         selected = []
-        for passage, result in pairs:
-            if result.get("degraded", False):
+        aggregate = relation_verifier.verify_relation(claim, passages) if relation_verifier and claim else None
+        subject = aggregate.claim_triple.subject if aggregate and aggregate.claim_triple else ""
+        for passage, raw_result in pairs:
+            if raw_result.get("degraded") or raw_result.get("nli_degraded") or raw_result.get("validity_factor", 1.0) == 0:
                 continue
-
-            entailment = float(result.get("entailment_score", 0.0))
-            contradiction = float(result.get("contradiction_score", 0.0))
-
-            rel_status = "NO_TRIPLE_EXTRACTED"
-            if relation_verifier and claim:
-                rel_check = relation_verifier.verify_relation(claim, [passage])
-                rel_status = rel_check.status
-                claim_rel = rel_check.claim_triple.relation if rel_check.claim_triple else ""
-                # Multi-valued creation/leadership: if the whole evidence set
-                # confirms the claimed holder, a single passage naming a DIFFERENT
-                # valid holder (co-founder) must not manufacture a contradiction.
-                if (
-                    rel_status in ("OBJECT_MISMATCH", "RELATION_MISMATCH")
-                    and claim_rel in ("created_by", "leads", "location_of")
-                    and aggregate_rel_status == "MATCH"
-                ):
-                    rel_status = "NO_TRIPLE_EXTRACTED"
-                if rel_status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
-                    contradiction = max(contradiction, 0.95)
-                    result["contradiction_score"] = contradiction
-                    result["entailment_score"] = 0.0
-                    result["label"] = "contradiction"
-                elif rel_status == "MATCH":
-                    entailment = max(entailment, 0.95)
-                    result["entailment_score"] = entailment
-                    result["contradiction_score"] = 0.0
-                    result["label"] = "entailment"
-
-            # Check explicit refutation in snippet
-            refutation_phrases = (
-                "disproven", "debunked", "misconception", "hoax", "untrue",
-                "falsely", "refuted", "no evidence", "scientifically disproven",
-                "incorrectly claimed", "not true", "not associated", "is false",
-            )
-            snippet_lower = f"{passage.title} {passage.snippet}".lower()
-            has_explicit_refutation = any(rf in snippet_lower for rf in refutation_phrases)
-            claim_is_negative = any(neg in claim.lower() for neg in ("not", "never", "disproven", "false", "myth"))
-
-            # Generic NLI models frequently label a biography of one co-founder
-            # as contradicting a true claim about the other co-founder. Once the
-            # aggregate structured check has positively grounded this
-            # multi-valued relation, raw NLI-only contradictions are noise. Keep
-            # genuinely explicit refutations so conflicting sources still reach
-            # the conflict resolver.
-            if (
-                aggregate_rel_status == "MATCH"
-                and aggregate_claim_rel in ("created_by", "leads", "location_of")
-                and contradiction > entailment
-                and not has_explicit_refutation
-            ):
-                contradiction = 0.0
-                result["contradiction_score"] = 0.0
-                if rel_status != "MATCH":
-                    result["label"] = "neutral"
-                    result["neutral_score"] = max(
-                        float(result.get("neutral_score", 0.0)),
-                        max(0.0, 1.0 - entailment),
-                    )
-
-            # A raw NLI contradiction is not decision-grade evidence for a
-            # structured relation when the passage never mentions the claim's
-            # subject. Example: an Albuquerque city page can lexically match
-            # "Microsoft was started in Albuquerque" but says nothing about
-            # Microsoft. Treating it as a refutation caused a false correction
-            # request. Genuine structured mismatches and explicit refutations
-            # remain untouched.
-            subject_mentioned = True
-            if aggregate_claim_subject and relation_verifier:
-                normalized_context = relation_verifier._normalize_name(
-                    f"{passage.title} {passage.snippet}"
-                )
-                context_tokens = set(normalized_context.split())
-                subject_tokens = set(aggregate_claim_subject.split())
-                subject_mentioned = bool(subject_tokens) and subject_tokens.issubset(
-                    context_tokens
-                )
-            if (
-                aggregate_claim_rel
-                and rel_status == "NO_TRIPLE_EXTRACTED"
-                and contradiction > entailment
-                and not subject_mentioned
-                and not has_explicit_refutation
-            ):
-                contradiction = 0.0
-                result["contradiction_score"] = 0.0
-                result["label"] = "neutral"
-                result["neutral_score"] = max(
-                    float(result.get("neutral_score", 0.0)),
-                    max(0.0, 1.0 - entailment),
-                )
-
-            if has_explicit_refutation and not claim_is_negative:
-                contradiction = max(contradiction, 0.95)
-                result["contradiction_score"] = contradiction
-                result["entailment_score"] = 0.0
-                result["label"] = "contradiction"
-
-            if max(entailment, contradiction) >= 0.35 or rel_status in ("MATCH", "OBJECT_MISMATCH", "RELATION_MISMATCH"):
+            try:
+                entailment = float(raw_result.get("entailment_score", 0.0))
+                contradiction = float(raw_result.get("contradiction_score", 0.0))
+                if not all(math.isfinite(v) and 0 <= v <= 1 for v in (entailment, contradiction)):
+                    continue
+            except (TypeError, ValueError):
+                continue
+            relation = relation_verifier.verify_relation(claim, [passage]) if relation_verifier and claim else None
+            if (aggregate and aggregate.claim_triple and relation and contradiction > entailment
+                    and aggregate.claim_triple.relation in {"created_by", "leads", "location_of"}
+                    and not any(t.relation == aggregate.claim_triple.relation for t in relation.evidence_triples)):
+                # Topical overlap is not evidence about the claimed relation.
+                continue
+            if subject and contradiction > entailment:
+                context = relation_verifier._normalize_name(f"{passage.title} {passage.snippet}")
+                if not set(subject.split()).issubset(set(context.split())):
+                    continue
+            result = dict(raw_result)
+            result["relation_status"] = relation.status if relation else "NO_TRIPLE_EXTRACTED"
+            result["score_provenance"] = "nli"
+            if max(entailment, contradiction) >= 0.35:
                 selected.append((passage, result))
 
         if not selected:
@@ -704,6 +614,9 @@ class VerificationPipeline:
                             k=8,
                             dense_model=route.dense_model,
                         )
+                        backend_diag = (self.hybrid_retriever.diagnostics()
+                                        if hasattr(self.hybrid_retriever, "diagnostics") else
+                                        {"route": "untraced", "degraded": True})
 
                     with tracker.track(PipelineStage.RERANKING):
                         reranked_passages = self.reranker.rerank(
@@ -715,11 +628,13 @@ class VerificationPipeline:
                         claim_reranked += len(reranked_passages)
 
                         # Update retrieval audit trace with real BGE score
-                        if reranked_passages and getattr(adapter, "last_retrieval_trace", None):
+                        if (reranked_passages and getattr(adapter, "last_retrieval_trace", None)
+                                and self.reranker.diagnostics().get("inference_executed", False)):
                             trace_obj = getattr(adapter, "last_retrieval_trace")
                             top_bge = max([p.relevance_score for p in reranked_passages], default=0.0)
                             if trace_obj.gate_relevance_audit:
                                 trace_obj.gate_relevance_audit.final_bge_relevance_score = round(top_bge, 4)
+                                trace_obj.gate_relevance_audit.final_bge_score_available = True
                                 trace_obj.gate_relevance_audit.signals_agree = (
                                     (trace_obj.gate_relevance_audit.gate_time_relevance_signal >= 0.25 and top_bge >= 0.25)
                                     or (trace_obj.gate_relevance_audit.gate_time_relevance_signal < 0.25 and top_bge < 0.25)
@@ -730,6 +645,10 @@ class VerificationPipeline:
                         _rr_trace = getattr(adapter, "last_retrieval_trace", None)
                         if _rr_trace is not None:
                             from schemas.retrieval_trace import ModelExecutionTrace
+                            _rr_trace.backend_execution = backend_diag
+                            _rr_trace.retrieval_degraded = bool(
+                                backend_diag.get("degraded", True) or self._last_reranker_diag.get("degraded", True)
+                            )
                             _rr_trace.reranker_execution = ModelExecutionTrace(
                                 **self._last_reranker_diag
                             )
@@ -895,7 +814,10 @@ class VerificationPipeline:
                         verified_evidence=len(claim_evidence_items),
                         retrieval_trace=(
                             getattr(adapter, "last_retrieval_trace", None).model_dump()
-                            if getattr(adapter, "last_retrieval_trace", None) else None
+                            if getattr(adapter, "last_retrieval_trace", None) else
+                            {"backend_execution": backend_diag,
+                             "retrieval_degraded": bool(backend_diag.get("degraded", True) or
+                                                        self._last_reranker_diag.get("degraded", True))}
                         ),
                     )
 

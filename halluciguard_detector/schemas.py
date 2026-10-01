@@ -44,6 +44,10 @@ class SentenceResult(BaseModel):
     hallucination_probability: float
     risk: RiskLevel
     evidence_snippets: list[str] = Field(default_factory=list)
+    # Exactly the selected pre-tokenizer evidence string passed to _classify.
+    # None means no classifier call; this does not claim token-level visibility.
+    model_input_evidence: str | None = None
+    evidence_selection_trace: dict = Field(default_factory=dict)
     # ------------------------------------------------------------------
     # Claim-level evidence verification fields (additive, backward compatible).
     # ``SUPPORTED`` = evidence supports the claim, ``CONTRADICTED`` = evidence

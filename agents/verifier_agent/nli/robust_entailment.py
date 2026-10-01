@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any, Dict, List, Optional
 
@@ -14,11 +15,11 @@ def _canonical_label(
     raw_label: Any, id2label: Optional[Dict[Any, str]] = None
 ) -> Optional[str]:
     label = str(raw_label or "").strip().lower()
-    if "entail" in label or label in {"supports", "support"}:
+    if label in {"entailment", "entails", "supported", "supports", "support"}:
         return "entailment"
-    if "contradict" in label or "refute" in label or label in {"refutes", "refutation"}:
+    if label in {"contradiction", "contradicted", "contradicts", "refuted", "refutes", "refutation"}:
         return "contradiction"
-    if "neutral" in label:
+    if label in {"neutral", "not_enough_info"}:
         return "neutral"
     if label.startswith("label_"):
         try:
@@ -57,18 +58,23 @@ def _normalize_scores(
     id2label: Optional[Dict[Any, str]] = None,
 ) -> Dict[str, float]:
     scores = {"entailment": 0.0, "contradiction": 0.0, "neutral": 0.0}
+    seen = set()
     for item in items:
         label = _canonical_label(item.get("label"), id2label)
         if label is None:
-            continue
+            raise ValueError("Unknown NLI label")
         try:
-            score = max(0.0, float(item.get("score", 0.0)))
-        except (TypeError, ValueError):
-            continue
-        scores[label] = max(scores[label], score)
+            score = float(item["score"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Missing or invalid NLI score") from exc
+        if label in seen or not math.isfinite(score) or not 0 <= score <= 1:
+            raise ValueError("Duplicate label or invalid NLI probability")
+        seen.add(label)
+        scores[label] = score
     total = sum(scores.values())
-    if total > 0:
-        scores = {key: value / total for key, value in scores.items()}
+    if seen != set(scores) or not math.isclose(total, 1.0, abs_tol=1e-5):
+        raise ValueError("Incomplete or inconsistent NLI probabilities")
+    scores = {key: value / total for key, value in scores.items()}
     return scores
 
 
@@ -197,7 +203,7 @@ class NLIEngine:
             scores = _normalize_scores(_flatten_predictions(raw), self._get_id2label())
             return _decision(scores) if sum(scores.values()) > 0 else self._neutral()
         except Exception as exc:
-            logger.warning("NLI classification failed: %s", exc)
+            logger.warning("NLI classification failed: %s", type(exc).__name__)
             return self._neutral()
 
     def predict(self, claim: str, evidence: str) -> EntailmentLabel:
@@ -248,7 +254,7 @@ class NLIEngine:
             self.last_batch_size = len(evidences)
             return outputs
         except Exception as exc:
-            logger.warning("Batched NLI failed; retrying individually: %s", exc)
+            logger.warning("Batched NLI failed; retrying individually: %s", type(exc).__name__)
             self.last_status = "degraded"
             self.last_degraded = True
             self.last_inference_executed = False

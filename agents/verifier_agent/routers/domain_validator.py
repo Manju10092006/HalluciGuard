@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 from typing import Tuple
 
-from config.settings import get_settings
+from agents.verifier_agent.config.settings import get_settings
 from models.domain_intelligence import get_domain_intelligence_registry
 from models.model_manager import get_model_manager
 

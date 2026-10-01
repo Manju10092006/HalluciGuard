@@ -32,7 +32,7 @@ class EvidenceScorer:
     def _get_relevance_gate_threshold(self) -> float:
         """Get the relevance gate threshold from settings, fallback to 0.20."""
         try:
-            from config.settings import get_settings
+            from agents.verifier_agent.config.settings import get_settings
             return float(get_settings().evidence_relevance_gate)
         except Exception:
             return 0.20
@@ -41,7 +41,7 @@ class EvidenceScorer:
         """Confidence ceiling for a VERIFIED verdict that no structured relation
         check could ground (F-1). Falls back to 0.70 if settings are unavailable."""
         try:
-            from config.settings import get_settings
+            from agents.verifier_agent.config.settings import get_settings
             return float(get_settings().ungrounded_confidence_ceiling)
         except Exception:
             return 0.70
@@ -107,6 +107,22 @@ class EvidenceScorer:
 
         return False
 
+    @staticmethod
+    def _historical_only_against_present_claim(claim: str, snippet: str) -> bool:
+        """Abstain on an explicitly bounded past premise, not infer present truth.
+
+        This deliberately narrow guard does not resolve dates, infer a new
+        capital, or modify NLI probabilities. Mixed past/present passages and
+        dated hypotheses remain eligible for ordinary scoring.
+        """
+        if re.search(r"\b\d{4}\b", claim) or not re.search(r"\b(?:is|are)\b", claim, re.I):
+            return False
+        # Adapter headings are labels, not assertions about the claim.
+        text = re.sub(r"^(?:Section|Article)\s*\[[^\]]*\]\s*:\s*", "", snippet, flags=re.I)
+        interval = re.search(r"\b(?:from\s+\d{4}\s+to|between\s+\d{4}\s+and)\s+\d{4}\b", text, re.I)
+        return bool(interval and re.search(r"\b(?:was|were)\b", text, re.I)
+                    and not re.search(r"\b(?:is|are)\b", text, re.I))
+
     def classify_evidence(
         self,
         claim: str,
@@ -139,12 +155,12 @@ class EvidenceScorer:
 
         # Structured Relation Verification Check
         rel_result = self.relation_verifier.verify_relation(claim, [passage])
+        # Relation matches/mismatches are diagnostics, not calibrated NLI.
+        # Classification below must still have a real model signal.
         if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
-            # Direct contradiction at relation level overrides false entailment or neutral
-            # Bypasses the word-coverage suppression check completely
-            return "CONTRADICTING"
-        elif rel_result.status == "MATCH":
-            return "SUPPORTING"
+            # A rule-model disagreement may abstain, never fabricate contradiction.
+            if self._bounded(nli.get("entailment_score")) >= self._bounded(nli.get("contradiction_score")):
+                return "NEUTRAL"
 
         # Guard against myths / proverbs / common misconceptions matching
         # assertively if the passage qualifies them as untrue, figurative, or an idiom.
@@ -156,8 +172,6 @@ class EvidenceScorer:
             "incorrectly claimed", "not true", "not associated", "is false",
         )
         has_explicit_refutation = any(rf in snippet_lower for rf in refutation_phrases)
-        if has_explicit_refutation and not any(neg in claim.lower() for neg in ("not", "never", "disproven", "false", "myth")):
-            return "CONTRADICTING"
 
         if self._is_non_assertive_claim_context(claim, full_text):
             return "NEUTRAL"
@@ -173,6 +187,8 @@ class EvidenceScorer:
             return "NEUTRAL"
         elif ("contradiction" in label or contradiction >= self.MIN_NLI_SIGNAL) and contradiction > entailment:
             if contradiction >= self.MIN_NLI_SIGNAL:
+                if self._historical_only_against_present_claim(claim, passage.snippet):
+                    return "NEUTRAL"
                 # If passage lacks key predicate terms and has no explicit refutation phrases, it is neutral context
                 claim_words = [
                     w.lower() for w in re.findall(r"[a-zA-Z0-9]+", claim)
@@ -267,15 +283,7 @@ class EvidenceScorer:
             neutral = self._bounded(nli.get("neutral_score"))
             validity_factor = 0.0 if nli.get("nli_degraded", False) else float(nli.get("validity_factor", 1.0))
 
-            # Apply relation verification signal calibration
-            if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
-                contradiction = max(contradiction, 0.95)
-                entailment = 0.0
-                neutral = 0.05
-            elif rel_result.status == "MATCH":
-                entailment = max(entailment, 0.95)
-                contradiction = 0.0
-                neutral = 0.05
+            # Never replace model probabilities with deterministic rule values.
 
             source_id = str(
                 getattr(passage, "source_id", "")
@@ -296,17 +304,6 @@ class EvidenceScorer:
             relevance = self.relevance_weight(
                 getattr(passage, "relevance_score", 0.5)
             )
-            # A decisive structured relation comparison already proves that the
-            # passage discusses the same subject and predicate.  Do not let a
-            # poorly calibrated cross-encoder score erase that deterministic
-            # grounding signal; retain source/NLI weighting, but apply a strong
-            # relevance floor for the confirmed relation pair.
-            if rel_result.status in (
-                "MATCH",
-                "OBJECT_MISMATCH",
-                "RELATION_MISMATCH",
-            ):
-                relevance = max(relevance, 0.80)
 
             # Canonical URL / doc key for deduplication
             url_key = (getattr(passage, "url", "") or source_id or getattr(passage, "title", "")).strip().lower()

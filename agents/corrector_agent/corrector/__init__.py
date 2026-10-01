@@ -173,7 +173,7 @@ class CorrectorAgent:
         except CorrectionInputError as exc:
             original = _safe_extract_original(request)
             return build_failed_result(
-                original, f"invalid_correction_request: {exc}"
+                original, "invalid_correction_request"
             )
 
         original = internal.original_response
@@ -184,7 +184,7 @@ class CorrectorAgent:
             # and not raise, but the canonical contract guarantees no exception
             # crosses the boundary. Any surprise preserves the original.
             return build_failed_result(
-                original, f"correction_pipeline_error: {type(exc).__name__}: {exc}"
+                original, f"correction_pipeline_error: {type(exc).__name__}"
             )
 
     # -- internal pipeline ---------------------------------------------------

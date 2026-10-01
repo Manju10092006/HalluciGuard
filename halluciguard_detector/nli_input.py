@@ -24,10 +24,10 @@ Traced from ``detector.Detector.detect``:
   prefix and no separator string. Adding them would move the model off the
   distribution it was trained and shipped on, so they are explicitly ``None``
   here rather than merely absent.
-* **Truncation.** ``longest_first``, so the longer of the two is trimmed. There
-  is no character-level pre-truncation in production: the tokenizer's
-  ``max_length`` (256, from the checkpoint's ``calibration.json``) is the only
-  length limit that exists.
+* **Truncation.** ``longest_first`` trims the longer of the two sequences.
+  Evidence normalization applies separate bounded character/field/document
+  limits before selection. Tokenizer truncation is observed separately, when
+  the tokenizer exposes sequence IDs; it is never inferred from selection.
 * **Length.** ``max_length`` is supplied by the caller so the shipped
   calibration value stays the single source of truth.
 
@@ -126,6 +126,7 @@ def encode_nli_pair(
     evidence: str,
     *,
     max_length: int,
+    trace: dict[str, Any] | None = None,
 ) -> Any:
     """Tokenize one claim against one evidence string, per the contract.
 
@@ -135,13 +136,40 @@ def encode_nli_pair(
     convention.
     """
     evidence_seq, claim_seq = prepare_nli_input(claim, evidence)
-    return tokenizer(
+    encoded = tokenizer(
         [evidence_seq],
         [claim_seq],
         return_tensors="pt",
         max_length=max_length,
         **TOKENIZER_KWARGS,
     )
+    if trace is not None:
+        trace.update(status="not_measured", max_length=max_length)
+        try:
+            # Inspect the exact encoding sent to inference. This is diagnostic
+            # only; it never changes input ordering, truncation or token IDs.
+            sequence_ids = encoded.sequence_ids(0)
+            ids = encoded["input_ids"][0].tolist()
+            evidence_ids = [token for token, seq in zip(ids, sequence_ids) if seq == 0]
+            claim_ids = [token for token, seq in zip(ids, sequence_ids) if seq == 1]
+            full = tokenizer(evidence_seq, claim_seq, truncation=False, padding=False)
+            full_sequences = full.sequence_ids()
+            evidence_before = sum(seq == 0 for seq in full_sequences)
+            claim_before = sum(seq == 1 for seq in full_sequences)
+            trace.update(
+                status="measured", evidence_tokens_before=evidence_before,
+                evidence_tokens_consumed=len(evidence_ids),
+                claim_tokens_before=claim_before, claim_tokens_consumed=len(claim_ids),
+                evidence_truncated=len(evidence_ids) < evidence_before,
+                claim_truncated=len(claim_ids) < claim_before,
+                truncated=len(evidence_ids) < evidence_before or len(claim_ids) < claim_before,
+                consumed_evidence=tokenizer.decode(evidence_ids, skip_special_tokens=True),
+                consumed_claim=tokenizer.decode(claim_ids, skip_special_tokens=True),
+            )
+        except (AttributeError, KeyError, TypeError, ValueError, NotImplementedError):
+            # Slow/custom tokenizers may not expose sequence ownership.
+            trace.update(status="unavailable", reason="tokenizer_sequence_metadata_unavailable")
+    return encoded
 
 
 def contract_spec(max_length: int) -> dict[str, Any]:

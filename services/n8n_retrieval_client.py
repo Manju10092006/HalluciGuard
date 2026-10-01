@@ -139,13 +139,13 @@ class N8NRetrievalClient:
                 return result
         except Exception as exc:
             latency_ms = int((time.time() - start_time) * 1000)
-            logger.warning("n8n health check failed: %s", exc)
+            logger.warning("n8n health check failed: %s", type(exc).__name__)
             return {
                 "healthy": False,
                 "status_code": None,
                 "latency_ms": latency_ms,
                 "url": self.health_url,
-                "error": f"{type(exc).__name__}: {str(exc)}",
+                "error": f"n8n health check failed: {type(exc).__name__}",
             }
 
     @staticmethod
@@ -451,8 +451,8 @@ class N8NRetrievalClient:
             )
         except Exception as exc:
             latency_ms = int((time.time() - start_time) * 1000)
-            err_msg = f"n8n retrieval communication error: {type(exc).__name__} — {str(exc)[:200]}"
-            logger.error("[N8N Client] %s", err_msg, exc_info=True)
+            err_msg = f"n8n retrieval communication error: {type(exc).__name__}"
+            logger.error("[N8N Client] %s", err_msg)
             return N8NRetrievalResult(
                 success=False,
                 passages=[],
@@ -538,7 +538,7 @@ class N8NRetrievalClient:
 
         except Exception as exc:
             latency_ms = int((time.time() - start_time) * 1000)
-            err_msg = f"n8n batch retrieval error: {type(exc).__name__} — {str(exc)[:200]}"
+            err_msg = f"n8n batch retrieval error: {type(exc).__name__}"
             return N8NRetrievalResult(
                 success=False,
                 passages=[],
