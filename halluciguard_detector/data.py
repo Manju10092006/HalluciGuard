@@ -375,9 +375,9 @@ def iter_ragtruth_examples(
                 continue
             task_type = (sources.get(str(row["source_id"])) or {}).get("task_type", "")
             annotations = row.get("labels") or []
-            for vocabulary in unknown_label_types(annotations):
-                if stats is not None:
-                    stats[f"unknown_label_type:{vocabulary or '<empty>'}"] += 1
+            # (removed: unreachable unknown-label counter loop — any unknown
+            # label_type already raises in the pre-filter validation above, so this
+            # was dead code whose counts never reached stats.json; audit #21.)
             for span in sentence_spans(row["response"]):
                 record = _evidence_for(
                     span.text, sources, row["source_id"], evidence_shape, pool_k, stats

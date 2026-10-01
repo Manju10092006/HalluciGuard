@@ -321,8 +321,13 @@ class Detector:
                 # pair stays within max_length; the fuller snippet list is kept
                 # on the result for inspection.
                 best = snippets[0]
+                # The tokenization diagnostic re-tokenizes the full (untruncated)
+                # pair a SECOND time per claim; keep it off the hot path unless
+                # explicitly enabled for debugging (audit #26).
+                import os
+                _trace_tokens = os.environ.get("HG_DETECTOR_TRACE_TOKENS", "").strip().lower() in ("1", "true", "yes", "on")
                 tokenization_trace: dict = {}
-                if _supports_trace(self._classify):
+                if _trace_tokens and _supports_trace(self._classify):
                     raw_mapping = self._classify(claim_text, best, trace=tokenization_trace)
                 else:
                     raw_mapping = self._classify(claim_text, best)

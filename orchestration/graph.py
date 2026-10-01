@@ -947,7 +947,11 @@ async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
                 route = "corrector" if corr_attempts < state.get("max_retries", 2) else "reject"
             verification_status = "correction_requested"
         elif decision_val == "VERIFY_AGAIN":
-            route = "verifier" if retry_count < state.get("max_retries", 2) else "human_escalation"
+            # Decide from the POST-increment count so the node's recorded
+            # route/status matches the _judge_route edge (which runs on the merged,
+            # already-incremented state); previously the node used the pre-increment
+            # value and could advertise 'verifier' while the edge escalated (#34).
+            route = "verifier" if new_retry_count < state.get("max_retries", 2) else "human_escalation"
             verification_status = "reverification_requested"
         elif decision_val == "REJECT":
             route = "reject"

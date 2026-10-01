@@ -15,6 +15,14 @@ def _canonical_label(
     raw_label: Any, id2label: Optional[Dict[Any, str]] = None
 ) -> Optional[str]:
     label = str(raw_label or "").strip().lower()
+    # Tolerate common head decorations (e.g. "entailment_score", "contradiction_label")
+    # by stripping only KNOWN suffixes -- not loose substring matching, which HG-007
+    # removed (audit #42). The pinned model emits clean labels; this only hardens
+    # against a differently-decorated head without widening the match surface.
+    for _suffix in ("_score", "_label", "_prob", "_probability", "_logit"):
+        if label.endswith(_suffix):
+            label = label[: -len(_suffix)]
+            break
     if label in {"entailment", "entails", "supported", "supports", "support"}:
         return "entailment"
     if label in {"contradiction", "contradicted", "contradicts", "refuted", "refutes", "refutation"}:

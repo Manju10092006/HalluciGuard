@@ -219,6 +219,12 @@ class CrossEncoderReranker:
             return [], []
 
         candidates = passages[:max_candidates]
+        # Set execution diagnostics on every path (audit #37): previously this
+        # method left last_* untouched, so a failed/fallback gate looked like a
+        # real BGE run (or stale from a prior rerank()). diagnostics() now tells
+        # a real gate score apart from a fallback.
+        self._reset_run_diagnostics()
+        self.last_attempted = True
         if model_name and model_name != self.model_name:
             self.model_name = model_name
             self.model = None
@@ -227,6 +233,9 @@ class CrossEncoderReranker:
 
         self._load_model()
         if not self._is_available:
+            self.last_status = "unavailable"
+            self.last_degraded = True
+            self.last_failure_stage = "initialization"
             fallback_scores = [
                 max(0.0, min(1.0, float(getattr(p, "relevance_score", 0.0) or 0.0)))
                 for p in candidates
@@ -238,9 +247,15 @@ class CrossEncoderReranker:
             raw_scores = self.model.predict(pairs, batch_size=min(8, len(pairs)))
             scores_list = raw_scores.tolist() if hasattr(raw_scores, "tolist") else list(raw_scores)
             normalized = [self._normalize_gate_score(float(s)) for s in scores_list]
+            self.last_status = "executed"
+            self.last_inference_executed = True
+            self.last_scored_count = len(normalized)
             return normalized, candidates
         except Exception as exc:
-            logging.warning("Gate BGE scoring failed: %s", exc)
+            logging.warning("Gate BGE scoring failed: %s", type(exc).__name__)
+            self.last_status = "degraded"
+            self.last_degraded = True
+            self.last_failure_stage, self.last_error_type = "inference", type(exc).__name__
             fallback_scores = [
                 max(0.0, min(1.0, float(getattr(p, "relevance_score", 0.0) or 0.0)))
                 for p in candidates

@@ -221,6 +221,14 @@ class N8NRetrievalClient:
         elif isinstance(data, dict):
             resp_req_id = str(data.get("request_id") or request_id)
             workflow_ver = str(data.get("workflow_version") or "2.0.0")
+            # Retain any n8n-side verdict/confidence block as a PURE diagnostic
+            # (never used as a verdict); the documented legacy_n8n_output contract
+            # was declared but never populated (audit M12).
+            legacy_verdict = {
+                k: data[k]
+                for k in ("verdict", "verdicts", "confidence", "legacy_n8n_output", "legacy")
+                if k in data
+            } or None
             
             # V2 nested metadata pass-through
             counts_dict = data.get("counts") if isinstance(data.get("counts"), dict) else None
@@ -291,6 +299,19 @@ class N8NRetrievalClient:
             else latency_ms
         )
 
+        # Distinguish a genuine empty result (an evidence structure was present but
+        # held no items) from a likely MISCONFIGURATION (a 200 with no recognizable
+        # evidence field at all), which otherwise both returned success+0 passages
+        # with no signal (audit #32).
+        empty_note = None
+        if isinstance(data, dict) and not passages and not any(
+            k in data for k in ("evidence", "passages", "results", "data", "claims")
+        ):
+            empty_note = (
+                "n8n returned HTTP 200 with no recognizable evidence field "
+                "(possible workflow misconfiguration, not a genuine empty result)"
+            )
+
         trace = N8NTrace(
             called=True,
             workflow_version=workflow_ver,
@@ -305,7 +326,7 @@ class N8NRetrievalClient:
             primary_trace=primary_trace_dict,
             tavily_trace=tavily_trace_dict,
             stage_traces=stage_traces_list,
-            error=None,
+            error=empty_note,
             legacy_n8n_output=legacy_verdict,
         )
 
