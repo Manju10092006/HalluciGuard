@@ -205,14 +205,28 @@ def validate_corrector_configuration() -> ComponentCheckResult:
                 detail="Groq Corrector configuration is present; connectivity not tested." if key_ready else "GROQ_API_KEY is required by the configured Corrector.",
                 metadata={"provider": "groq", "key_configured": key_ready, "inference_tested": False},
             )
-        from agents.corrector_agent.corrector.config import CorrectorConfig
-        from agents.corrector_agent.corrector.model_client import resolve_model
-        status = resolve_model(config)
+        if config.provider == "local":
+            from agents.corrector_agent.corrector.model_client import resolve_model
+            status = resolve_model(config)
+            return ComponentCheckResult(
+                ok=bool(status.available),
+                component="corrector",
+                detail=status.detail or "Local Corrector model is available.",
+                metadata={"provider": "local", "model_status": status.model_dump()},
+            )
+        # Hosted providers (openrouter/gemini/hosted) generate through the shared
+        # multi-provider failover router (CharacterRegenerator -> Groq/Gemini/
+        # OpenRouter). Validate that chain exactly as the Base LLM does, with no
+        # network call; never load the local Qwen model for a hosted run.
+        from services.llm_providers import build_provider_specs, resolve_provider_order
+        order, specs = resolve_provider_order(), build_provider_specs()
+        configured = [name for name in order if specs[name].has_key]
         return ComponentCheckResult(
-            ok=bool(status.available),
+            ok=bool(configured) and callable(CorrectorAgent),
             component="corrector",
-            detail=status.detail or "Local Corrector model is available.",
-            metadata={"provider": "local", "model_status": status.model_dump()},
+            detail="Hosted Corrector router has a configured provider; connectivity not tested." if configured
+                   else "No provider credential configured for the hosted Corrector router.",
+            metadata={"provider": config.provider, "configured_providers": configured, "inference_tested": False},
         )
     except Exception as exc:
         return ComponentCheckResult(

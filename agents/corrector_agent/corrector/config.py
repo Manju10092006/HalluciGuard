@@ -14,13 +14,25 @@ import os
 import math
 from dataclasses import dataclass
 
-__all__ = ["CorrectorConfig", "DEFAULT_CORRECTOR_OPENROUTER_MODEL", "DEFAULT_CORRECTOR_GROQ_MODEL"]
+__all__ = [
+    "CorrectorConfig",
+    "DEFAULT_CORRECTOR_OPENROUTER_MODEL",
+    "DEFAULT_CORRECTOR_GROQ_MODEL",
+    "VALID_CORRECTOR_PROVIDERS",
+]
 
 # Cheap non-reasoning model for the OpenRouter-backed corrector path. Matches the
 # Base LLM's fallback model and the n8n "Analyze Claim" node, so the whole stack
 # stays on one credit-friendly model. Override with HG_CORRECTOR_OPENROUTER_MODEL.
 DEFAULT_CORRECTOR_OPENROUTER_MODEL: str = "qwen/qwen-2.5-7b-instruct"
 DEFAULT_CORRECTOR_GROQ_MODEL: str = "openai/gpt-oss-120b"
+
+# Providers the Corrector understands. "local" runs the on-disk Qwen LoRA; "groq"
+# uses the direct Groq transport; "openrouter"/"gemini"/"hosted" route through the
+# shared multi-provider failover router (CharacterRegenerator -> Groq/Gemini/
+# OpenRouter). render.yaml ships HG_CORRECTOR_PROVIDER=openrouter, so rejecting it
+# here crashed Corrector construction and startup validation in production.
+VALID_CORRECTOR_PROVIDERS = frozenset({"local", "groq", "openrouter", "gemini", "hosted"})
 
 
 def _env_str(name: str, default: str) -> str:
@@ -111,8 +123,11 @@ class CorrectorConfig:
     groq_reasoning_effort: str = "low"
 
     def __post_init__(self) -> None:
-        if self.provider not in ("local", "groq"):
-            raise ValueError("unsupported Corrector provider")
+        if self.provider not in VALID_CORRECTOR_PROVIDERS:
+            raise ValueError(
+                f"unsupported Corrector provider: {self.provider!r} "
+                f"(expected one of {sorted(VALID_CORRECTOR_PROVIDERS)})"
+            )
         if not math.isfinite(self.groq_timeout_seconds) or self.groq_timeout_seconds <= 0:
             raise ValueError("Corrector transport timeout must be finite and positive")
         if not isinstance(self.groq_max_retries, int) or not 0 <= self.groq_max_retries <= 10:
