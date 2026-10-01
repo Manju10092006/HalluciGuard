@@ -194,10 +194,13 @@ class CrossEncoderReranker:
 
     @staticmethod
     def _normalize_gate_score(raw_score: float) -> float:
-        """Map cross-encoder logit to [0, 1] for gate decisions (not calibrated probability)."""
-        if raw_score < 0.0:
-            raw_score = 1.0 / (1.0 + math.exp(-max(-12.0, min(12.0, raw_score))))
-        return max(0.0, min(1.0, float(raw_score)))
+        """Map a cross-encoder logit to [0, 1] MONOTONICALLY for gate decisions
+        (a ranking score, not a calibrated probability). The sigmoid is applied to
+        ALL logits so a higher logit always yields a higher gate score; applying it
+        only to negatives inverted the ranking around 0 (e.g. -0.3 -> 0.43 beat
+        +0.3 -> 0.30), audit M10."""
+        x = max(-12.0, min(12.0, float(raw_score)))
+        return 1.0 / (1.0 + math.exp(-x))
 
     def score_gate_candidates(
         self,

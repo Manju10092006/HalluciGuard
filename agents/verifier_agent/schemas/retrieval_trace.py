@@ -121,7 +121,11 @@ class GateRelevanceAuditTrace(BaseModel):
     gate_time_relevance_signal: float = 0.0
     final_bge_relevance_score: float = 0.0
     final_bge_score_available: bool = False
-    signals_agree: bool = True
+    # Defaults to False: "agreement" is only meaningful once a real BGE score was
+    # produced (final_bge_score_available=True) and the pipeline recomputed it.
+    # A True default falsely advertised agreement when the reranker never ran
+    # (audit #40); consumers must gate on final_bge_score_available.
+    signals_agree: bool = False
 
 
 class N8NTrace(BaseModel):

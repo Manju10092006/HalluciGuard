@@ -123,16 +123,22 @@ class HybridRetriever:
             except Exception as exc:
                 self.last_diagnostics["errors"].append({"component": "sparse", "error_type": type(exc).__name__})
             self.last_diagnostics["dense_attempted"] = True
+            dense_errored = False
             try:
                 self.dense.build_index(passages)
                 dense_results = self.dense.retrieve(query, candidate_k)
             except Exception as exc:
+                dense_errored = True
                 self.last_diagnostics["errors"].append({"component": "dense", "error_type": type(exc).__name__})
             dense_diag = self.dense.diagnostics() if hasattr(self.dense, "diagnostics") else {}
             self.last_diagnostics["dense_available"] = bool(dense_diag.get("model_available", dense_results))
             self.last_diagnostics["dense_executed"] = bool(dense_diag.get("inference_executed", dense_results))
             self.last_diagnostics["dense_failure_stage"] = dense_diag.get("failure_stage")
-            if dense_diag.get("error_type"):
+            # Record the dense failure ONCE: the re-raising path above already logged
+            # it, so only add the stage-enriched diagnostic entry for the non-raising
+            # path (e.g. a sticky init failure where retrieve() returns []), avoiding
+            # the double-count (audit #39).
+            if dense_diag.get("error_type") and not dense_errored:
                 self.last_diagnostics["errors"].append({"component": "dense", "stage": dense_diag.get("failure_stage"), "error_type": dense_diag["error_type"]})
             self.last_diagnostics["sparse_contributed"] = bool(sparse_results)
             self.last_diagnostics["dense_contributed"] = bool(dense_results)
