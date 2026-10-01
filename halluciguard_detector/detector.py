@@ -63,9 +63,10 @@ class Detector:
         The Judge makes the final decision.
 
     Secondary checks (a same-slot number/date clash, or a named entity swapped on
-    an otherwise identical relation) may only resolve a near-tie and never
-    overturn a decisive model call. They are bounded, never fabricate
-    probabilities, and never convert NOT_ENOUGH_INFO into a contradiction.
+    an otherwise identical relation) never change any neural probability or class;
+    they only append a diagnostic warning and set an explicit requires_verification
+    flag so the claim is routed to the Verifier. They never fabricate probabilities
+    and never convert NOT_ENOUGH_INFO into a contradiction.
     """
 
     def __init__(
@@ -202,7 +203,7 @@ class Detector:
         claim: str,
         evidence_text: str,
         mapping: dict[ClaimLabel, float],
-    ) -> tuple[dict[ClaimLabel, float], list[str]]:
+    ) -> tuple[dict[ClaimLabel, float], list[str], bool]:
         """Apply conservative secondary signals without inventing probabilities.
 
         - Named-entity conflict: fires on a swapped named entity. When the two
@@ -212,10 +213,13 @@ class Detector:
           contradiction.
         - Number/date/percent mismatch: a same-slot quantity or year clash is a
           potential conflict and requests verification the same way.
-        - These diagnostics never change any neural probability or class.
+        - These diagnostics never change any neural probability or class. The
+          verification request is returned as an explicit boolean (not inferred
+          from warning prose), so rewording a message can never silently drop it.
         """
         warnings: list[str] = []
         guard = mapping.copy()
+        requires_verification = False
 
         if has_entity_conflict(claim, evidence_text):
             if not shared_relation(claim, evidence_text):
@@ -228,19 +232,22 @@ class Detector:
                     "Named-entity conflict on a shared relation noted; requires verification. "
                     "Model probabilities are unchanged."
                 )
+                requires_verification = True
 
         numeric = numeric_consistency(claim, evidence_text)
         if numeric:
             # A same-unit quantity clash or a conflicting year is a concrete,
             # evidence-grounded conflict (e.g. "population is 10 million" vs
-            # "12 million"). Reinforce CONTRADICTED so a topic-similar but
-            # numerically-wrong claim is not left SUPPORTED by soft NLI alone.
+            # "12 million"). It does NOT change any neural probability or class;
+            # it only requests verification so a numerically-wrong but
+            # topic-similar claim is not silently accepted on soft NLI alone.
             warnings.append(
                 "Number/date mismatch flagged between claim and evidence: "
                     + "; ".join(numeric) + "; requires verification; model probabilities unchanged."
             )
+            requires_verification = True
 
-        return guard, warnings
+        return guard, warnings, requires_verification
 
     def _risk(self, probability: float) -> RiskLevel:
         if probability >= max(0.75, self.threshold):
@@ -308,6 +315,7 @@ class Detector:
                     ClaimLabel.NOT_ENOUGH_INFO: 1.0,
                 }
                 item_warnings = ["No relevant evidence found; claim marked NOT_ENOUGH_INFO."]
+                guard_requires = False
             else:
                 # DeBERTa input = claim + best reranked evidence only, so the
                 # pair stays within max_length; the fuller snippet list is kept
@@ -321,16 +329,14 @@ class Detector:
                 mapping = self._normalize_class_mapping(raw_mapping)
                 trace["tokenization"] = tokenization_trace
                 trace["tokenizer_truncation"] = tokenization_trace.get("truncated", "not_measured")
-                mapping, item_warnings = self._guard_signals(claim_text, best, mapping)
+                mapping, item_warnings, guard_requires = self._guard_signals(claim_text, best, mapping)
 
             label = max(mapping, key=mapping.get) if mapping else ClaimLabel.NOT_ENOUGH_INFO
             # Operational verification risk = P(CONTRADICTED) + P(NOT_ENOUGH_INFO).
             # It is the probability this claim still needs checking; it is NOT
             # the probability the claim is false (that is contradicted only).
             verification_risk = mapping[ClaimLabel.CONTRADICTED] + mapping[ClaimLabel.NOT_ENOUGH_INFO]
-            requires_verification = label != ClaimLabel.SUPPORTED or any(
-                "requires verification" in warning for warning in item_warnings
-            )
+            requires_verification = label != ClaimLabel.SUPPORTED or guard_requires
             results.append(
                 SentenceResult(
                     sentence_id=f"C{index:03d}",
