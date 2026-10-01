@@ -107,6 +107,7 @@ class ClaimReport(BaseModel):
     retrieved_documents: int = 0
     reranked_documents: int = 0
     verified_evidence: int = 0
+    retrieval_execution: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PipelineStageStatus(BaseModel):

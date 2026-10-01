@@ -106,12 +106,21 @@ def get_config_from_env() -> dict:
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
+    logits, labels = np.asarray(logits), np.asarray(labels)
+    if (logits.ndim != 2 or logits.shape[1] != 2 or labels.ndim != 1
+            or len(logits) != len(labels) or len(labels) == 0
+            or not np.isfinite(logits).all()
+            or labels.dtype.kind not in "iu" or not np.isin(labels, [0, 1]).all()):
+        raise ValueError("invalid HaluEval evaluation logits or labels")
     predictions = np.argmax(logits, axis=-1)
     return {
         "accuracy":  accuracy_score(labels, predictions),
         "precision": precision_score(labels, predictions, zero_division=0),
         "recall":    recall_score(labels, predictions, zero_division=0),
         "f1":        f1_score(labels, predictions, zero_division=0),
+        "class_counts": {"NO_HALLUCINATION": int((labels == 0).sum()),
+                         "HALLUCINATION": int((labels == 1).sum())},
+        "confusion_matrix": confusion_matrix(labels, predictions, labels=[0, 1]).tolist(),
     }
 
 
@@ -159,6 +168,8 @@ def main():
         print("ERROR: Output directory matches legacy model path!")
         print("       Use --output-dir artifacts/halueval-detector-final")
         sys.exit(1)
+    if os.path.exists(output_dir) and os.listdir(output_dir):
+        raise FileExistsError("HaluEval output directory is not empty; existing model artifacts must be preserved")
 
     device   = "cuda" if torch.cuda.is_available() else "cpu"
     use_fp16 = torch.cuda.is_available()

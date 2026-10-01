@@ -7,11 +7,11 @@ The /analyze endpoint adds the production orchestration path:
              ↓
         Detector Agent
              ↓
-      HIGH / Verify only
+      Every candidate response
              ↓
         Verifier Agent
 
-LOW and MEDIUM results never invoke the Verifier.
+Detector scores are triage; the Verifier remains the factual authority.
 """
 
 import uuid
@@ -19,9 +19,9 @@ import uuid
 from fastapi import FastAPI, HTTPException, status
 
 from .detector import DetectorAgent
-from .models import DetectionInput, DetectionResult, NextAction
+from .models import DetectionInput, DetectionResult, NextAction, RiskLevel
 from .pipeline_models import AnalysisInput, AnalysisResult
-from .verifier_client import VerifierClient, VerifierUnavailableError
+from .verifier_client import VerifierClient
 
 app = FastAPI(
     title="HalluciGuard Detector Agent API",
@@ -64,12 +64,12 @@ def detect_hallucination(payload: DetectionInput) -> DetectionResult:
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail="Detector model artifact is unavailable",
         ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during hallucination detection: {exc}",
+            detail=f"Detector execution failed: {type(exc).__name__}",
         ) from exc
 
 
@@ -77,75 +77,62 @@ def detect_hallucination(payload: DetectionInput) -> DetectionResult:
     "/analyze",
     response_model=AnalysisResult,
     status_code=status.HTTP_200_OK,
-    summary="Detect and conditionally verify",
+    summary="Detect and verify",
     description=(
-        "Runs the HaluEval Detector first. Only HIGH-risk responses are "
-        "forwarded to the Verifier Agent. LOW/MEDIUM responses stop at the Detector."
+        "Runs the HaluEval Detector first, then forwards the draft to the Verifier."
     ),
 )
 async def analyze_response(payload: AnalysisInput) -> AnalysisResult:
-    """Run the complete Detector → conditional Verifier flow.
+    """Run the complete Detector → Verifier flow.
 
     Important invariants:
     - The Detector always runs first.
-    - LOW/MEDIUM never call the Verifier.
-    - HIGH/Verify calls the Verifier exactly once for the candidate response.
-    - If a HIGH-risk handoff cannot reach the Verifier, the request fails closed
+    - Every risk tier calls the Verifier exactly once for the candidate response.
+    - If a handoff cannot reach the Verifier, the request fails closed
       with HTTP 503 rather than silently accepting an unverified response.
-    - The existing /detect endpoint and DetectionResult schema are untouched.
+    - /detect remains a Detector-only endpoint.
     """
     query_id = payload.query_id or str(uuid.uuid4())
 
     try:
-        detection = agent.detect(
+        detection = DetectionResult.model_validate(agent.detect(
             user_query=payload.user_query,
             llm_response=payload.llm_response,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
+        ))
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Detector inference failed: {exc}",
-        ) from exc
-
-    # The Detector is the gate. Never bypass this decision.
-    if detection.next_action != NextAction.VERIFY:
-        return AnalysisResult(
-            query_id=query_id,
-            detection=detection,
-            verifier_invoked=False,
-            verifier_result=None,
-            final_status="ACCEPTED_BY_DETECTOR",
-            message=(
-                f"Detector classified the response as {detection.risk_level.value}; "
-                "Verifier was not invoked."
-            ),
+        detection = DetectionResult(
+            confidence_score=None, hallucination_probability=None,
+            risk_level=RiskLevel.HIGH, next_action=NextAction.VERIFY,
+            status="failed", detector_degraded=True, probability_available=False,
+            diagnostics={"failure_reason": "detector_error", "error_type": type(exc).__name__},
         )
 
-    # HIGH risk: hand the original query/response claim to the Verifier.
+    # Always hand the original query/response claim to the Verifier.
     try:
         verifier_result = await verifier_client.verify(
             query_id=query_id,
             domain=payload.domain,
             claim_text=payload.llm_response,
         )
-    except VerifierUnavailableError as exc:
-        # Never turn a failed HIGH-risk verification into ACCEPT.
+        if not isinstance(verifier_result, dict):
+            raise ValueError("malformed Verifier response")
+    except Exception as exc:
+        # Preserve uncertainty; never turn a failed verification into ACCEPT.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
-                "message": "High-risk response could not be verified.",
-                "reason": str(exc),
+                "message": "Response could not be verified.",
+                "error_type": type(exc).__name__,
                 "query_id": query_id,
                 "detector": detection.model_dump(mode="json"),
             },
         ) from exc
 
     reports = verifier_result.get("claim_evidence") or []
+    if not isinstance(reports, list) or any(not isinstance(report, dict) for report in reports):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"message": "Verifier returned a malformed result.",
+                                    "query_id": query_id})
     first_report = reports[0] if reports else {}
     verdict = str(first_report.get("verdict", "insufficient_evidence"))
     normalized_verdict = verdict.rsplit(".", 1)[-1].lower()
@@ -153,7 +140,7 @@ async def analyze_response(payload: AnalysisInput) -> AnalysisResult:
     if normalized_verdict == "likely_hallucinated":
         final_status = "LIKELY_HALLUCINATED"
         message = "Verifier found evidence indicating the response is likely hallucinated."
-    elif normalized_verdict == "verified":
+    elif normalized_verdict == "verified" and first_report.get("evidence"):
         final_status = "VERIFIED"
         message = "Verifier found supporting evidence for the claim."
     else:

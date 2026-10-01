@@ -235,11 +235,14 @@ def _normalize_general(
 
         # Label from official hallucination field
         if isinstance(hallucination, str):
-            label = HALLUCINATION if hallucination.strip().lower() == "yes" else NO_HALLUCINATION
-        elif isinstance(hallucination, (int, float)):
-            label = HALLUCINATION if int(hallucination) == 1 else NO_HALLUCINATION
+            normalized_label = hallucination.strip().lower()
+            if normalized_label not in {"yes", "no"}:
+                raise ValueError(f"general row {row_idx}: unknown hallucination label")
+            label = HALLUCINATION if normalized_label == "yes" else NO_HALLUCINATION
+        elif type(hallucination) is int and hallucination in {0, 1}:
+            label = HALLUCINATION if hallucination == 1 else NO_HALLUCINATION
         else:
-            continue
+            raise ValueError(f"general row {row_idx}: malformed hallucination label")
 
         text = format_detector_input(user_query, chatgpt_response)  # no context — ungrounded
         if not text.strip():
@@ -320,7 +323,7 @@ def load_halueval(config: Optional[HaluEvalConfig] = None) -> DatasetDict:
 
     # --- Sample-level group splitting ---
     # Collect unique source_ids, shuffle, then split
-    source_ids = list({e["source_id"] for e in all_examples})
+    source_ids = sorted({e["source_id"] for e in all_examples})
     rng = random.Random(config.seed)
     rng.shuffle(source_ids)
 
@@ -328,6 +331,8 @@ def load_halueval(config: Optional[HaluEvalConfig] = None) -> DatasetDict:
     n_val   = max(1, int(n_total * config.val_ratio))
     n_test  = max(1, int(n_total * config.test_ratio))
     n_train = n_total - n_val - n_test
+    if n_train < 1 or n_val < 1 or n_test < 1:
+        raise ValueError("HaluEval requires at least one source group in each split")
 
     train_ids = set(source_ids[:n_train])
     val_ids   = set(source_ids[n_train:n_train + n_val])

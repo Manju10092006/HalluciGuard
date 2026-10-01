@@ -184,6 +184,7 @@ class VerificationPipeline:
         adapter_failures: List[str] = []
 
         for claim in payload.suspicious_claims:
+            claim_execution: list[dict[str, Any]] = []
             try:
                 cached_data = await self.cache.get(validated_domain, claim.text)
                 if cached_data:
@@ -194,6 +195,11 @@ class VerificationPipeline:
                         if isinstance(cached_data, dict)
                         else cached_data
                     )
+                    report = report.model_copy(update={"retrieval_execution": [
+                        {"retrieval": {"route": "cache_hit", "degraded": False,
+                                        "executed": False},
+                         "reranker": {"status": "skipped", "inference_executed": False}}
+                    ]})
                     claim_reports.append(report)
                     any_cache_hit = True
                     continue
@@ -224,14 +230,8 @@ class VerificationPipeline:
                         try:
                             raw_passages = await adapter.search(expanded_query)
                         except Exception as e:
-                            self.logger.error(
-                                "Adapter retrieval failed for query '%s': %s",
-                                expanded_query,
-                                e,
-                            )
-                            adapter_failures.append(
-                                f"{validated_domain}:{str(e)[:100]}"
-                            )
+                            self.logger.error("Adapter retrieval failed (%s)", type(e).__name__)
+                            adapter_failures.append(f"{validated_domain}:{type(e).__name__}")
                             raw_passages = []
 
                         retrieval_duration = int((time.time() - retrieval_start) * 1000)
@@ -258,6 +258,20 @@ class VerificationPipeline:
                             model_name=route.reranker_model,
                         )
                         claim_reranked += len(reranked_passages)
+                    retrieval_diag = (self.hybrid_retriever.diagnostics()
+                                      if hasattr(self.hybrid_retriever, "diagnostics")
+                                      else {"route": "unknown", "degraded": True})
+                    reranker_diag = (self.reranker.diagnostics()
+                                     if hasattr(self.reranker, "diagnostics")
+                                     else {"status": "unknown", "degraded": True})
+                    execution = {
+                        "claim_text": sub_claim,
+                        "retrieval": retrieval_diag,
+                        "reranker": reranker_diag,
+                        "nli_input_source_ids": [p.source_id for p in reranked_passages],
+                        "nli_input_count": len(reranked_passages),
+                    }
+                    claim_execution.append(execution)
 
                     with tracker.track(PipelineStage.NLI):
                         nli_start = time.time()
@@ -281,6 +295,8 @@ class VerificationPipeline:
                             reranked_passages, nli_results
                         )
                     )
+                    execution["decision_source_ids"] = [p.source_id for p in decision_passages]
+                    execution["decision_count"] = len(decision_passages)
 
                     with tracker.track(PipelineStage.SCORING):
                         scores_dict = self.evidence_scorer.score_evidence(
@@ -375,6 +391,7 @@ class VerificationPipeline:
                         retrieved_documents=claim_retrieved,
                         reranked_documents=claim_reranked,
                         verified_evidence=len(claim_evidence_items),
+                        retrieval_execution=claim_execution,
                     )
 
                 if claim_evidence_items:
@@ -384,12 +401,8 @@ class VerificationPipeline:
                 claim_reports.append(report)
 
             except Exception as e:
-                self.logger.error(
-                    "Pipeline error processing claim %s: %s",
-                    claim.claim_id,
-                    e,
-                    exc_info=True,
-                )
+                self.logger.error("Pipeline error processing claim %s (%s)",
+                                  claim.claim_id, type(e).__name__)
                 error_report = ClaimReport(
                     claim_id=claim.claim_id,
                     claim_text=claim.text,
@@ -399,7 +412,8 @@ class VerificationPipeline:
                     trust_score=0.0,
                     confidence_score=0.0,
                     verdict=VerdictLabel.INSUFFICIENT_EVIDENCE,
-                    explanation=f"Pipeline error: {type(e).__name__} — {str(e)[:200]}. This claim could not be verified.",
+                    explanation=f"Pipeline error: {type(e).__name__}. This claim could not be verified.",
+                    retrieval_execution=claim_execution,
                 )
                 claim_reports.append(error_report)
 

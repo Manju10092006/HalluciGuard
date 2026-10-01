@@ -29,13 +29,13 @@ def _result(action: NextAction, risk: RiskLevel) -> DetectionResult:
     )
 
 
-def test_low_risk_does_not_invoke_verifier(monkeypatch):
+def test_low_risk_still_invokes_verifier(monkeypatch):
     calls = []
     detector_app_module.agent = FakeDetector(_result(NextAction.ACCEPT, RiskLevel.LOW))
 
     async def fake_verify(**kwargs):
         calls.append(kwargs)
-        raise AssertionError("Verifier must not be called for LOW risk")
+        return {"claim_evidence": [{"verdict": "insufficient_evidence", "evidence": []}]}
 
     monkeypatch.setattr(detector_app_module.verifier_client, "verify", fake_verify)
 
@@ -50,18 +50,18 @@ def test_low_risk_does_not_invoke_verifier(monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["verifier_invoked"] is False
-    assert body["final_status"] == "ACCEPTED_BY_DETECTOR"
-    assert calls == []
+    assert body["verifier_invoked"] is True
+    assert body["final_status"] == "INSUFFICIENT_EVIDENCE"
+    assert len(calls) == 1
 
 
-def test_medium_risk_does_not_invoke_verifier(monkeypatch):
+def test_medium_risk_still_invokes_verifier(monkeypatch):
     calls = []
     detector_app_module.agent = FakeDetector(_result(NextAction.ACCEPT, RiskLevel.MEDIUM))
 
     async def fake_verify(**kwargs):
         calls.append(kwargs)
-        raise AssertionError("Verifier must not be called for MEDIUM risk")
+        return {"claim_evidence": []}
 
     monkeypatch.setattr(detector_app_module.verifier_client, "verify", fake_verify)
 
@@ -75,8 +75,8 @@ def test_medium_risk_does_not_invoke_verifier(monkeypatch):
         )
 
     assert response.status_code == 200
-    assert response.json()["verifier_invoked"] is False
-    assert calls == []
+    assert response.json()["verifier_invoked"] is True
+    assert len(calls) == 1
 
 
 def test_high_risk_invokes_verifier_exactly_once(monkeypatch):
@@ -139,6 +139,54 @@ def test_high_risk_fails_closed_when_verifier_unavailable(monkeypatch):
 
     assert response.status_code == 503
     assert "could not be verified" in response.json()["detail"]["message"]
+
+
+def test_detector_exception_still_invokes_verifier_and_sanitizes_error(monkeypatch):
+    class Broken:
+        def detect(self, **kwargs):
+            raise RuntimeError("dummy-secret")
+    detector_app_module.agent = Broken()
+    calls = []
+    async def fake_verify(**kwargs):
+        calls.append(kwargs)
+        return {"claim_evidence": []}
+    monkeypatch.setattr(detector_app_module.verifier_client, "verify", fake_verify)
+    with TestClient(detector_app_module.app) as client:
+        response = client.post("/analyze", json={"user_query": "Who?", "llm_response": "Draft."})
+    assert response.status_code == 200
+    assert len(calls) == 1
+    assert response.json()["detection"]["status"] == "failed"
+    assert "dummy-secret" not in response.text
+
+
+def test_malformed_detector_output_still_invokes_verifier(monkeypatch):
+    class Malformed:
+        def detect(self, **kwargs):
+            return {"risk_level": "LOW", "next_action": "Accept",
+                    "hallucination_probability": float("nan")}
+    detector_app_module.agent = Malformed()
+    calls = []
+    async def fake_verify(**kwargs):
+        calls.append(kwargs)
+        return {"claim_evidence": []}
+    monkeypatch.setattr(detector_app_module.verifier_client, "verify", fake_verify)
+    with TestClient(detector_app_module.app) as client:
+        response = client.post("/analyze", json={"user_query": "Who?", "llm_response": "Draft."})
+    assert response.status_code == 200
+    assert len(calls) == 1
+    assert response.json()["detection"]["probability_available"] is False
+
+
+def test_verifier_failure_cannot_return_accepted_or_verified(monkeypatch):
+    detector_app_module.agent = FakeDetector(_result(NextAction.ACCEPT, RiskLevel.LOW))
+    async def fake_verify(**kwargs):
+        raise VerifierUnavailableError("dummy-secret")
+    monkeypatch.setattr(detector_app_module.verifier_client, "verify", fake_verify)
+    with TestClient(detector_app_module.app) as client:
+        response = client.post("/analyze", json={"user_query": "Who?", "llm_response": "Draft."})
+    assert response.status_code == 503
+    assert response.json()["detail"]["error_type"] == "VerifierUnavailableError"
+    assert "dummy-secret" not in response.text
 
 
 def test_original_detect_endpoint_remains_detector_only(monkeypatch):

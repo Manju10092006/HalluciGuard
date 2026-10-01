@@ -23,7 +23,11 @@ def base_state():
 
 
 @pytest.mark.asyncio
-async def test_safe_response_reaches_memory_without_verifier_or_judge():
+async def test_low_risk_response_still_reaches_verifier():
+    async def verifier(s):
+        return {"verifier": {"claim_evidence": []}, "verification_status": "unverified_insufficient_evidence",
+                "trace": add_trace(s, "verifier", "completed")}
+
     async def memory(state):
         return {
             "memory": {"count": 0},
@@ -37,15 +41,16 @@ async def test_safe_response_reaches_memory_without_verifier_or_judge():
                 "detector": {"next_action": "ACCEPT"},
                 "trace": add_trace(s, "detector", "completed"),
             },
+            "verifier": verifier,
             "memory": memory,
         }
     )
     result = await graph.ainvoke(base_state())
     nodes = [e["node"] for e in result["trace"]]
     assert "detector" in nodes
-    assert "accept" in nodes
+    assert "accept" not in nodes
     assert "memory" in nodes
-    assert "verifier" not in nodes
+    assert "verifier" in nodes
     assert "judge" not in nodes
     assert "corrector" not in nodes
 

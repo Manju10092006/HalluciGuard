@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import sys
 import uuid
@@ -35,6 +36,12 @@ def _dump(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_dump(v) for v in value]
     return value
+
+
+def _valid_probability(value: Any) -> float | None:
+    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+        return None
+    return float(value)
 
 
 def _failure_update(
@@ -173,46 +180,25 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             return DetectorAgent().detect(state["user_query"], llm_resp)
 
         detector = _dump(await asyncio.to_thread(_run_detect))
-        next_action = str(detector.get("next_action", ""))
-        route = "verify" if next_action.lower().endswith("verify") else "accept"
+        # The HaluEval classifier has no established calibrated fast-path
+        # contract. Its ACCEPT/low-risk output is triage, not a truth verdict.
+        route = "verify"
 
         # Inter-agent bus messaging
-        if route == "accept":
-            bus = add_bus_message(
-                state,
-                source_agent="detector",
-                target_agent="supervisor",
-                message_type="DETECTOR_ACCEPT",
-                payload={
-                    "hallucination_probability": detector.get("hallucination_probability"),
-                    "risk_level": detector.get("risk_level", "LOW"),
-                },
-            )
-        else:
-            bus = add_bus_message(
-                state,
-                source_agent="detector",
-                target_agent="supervisor",
-                message_type="SUSPICIOUS_CLAIMS",
-                payload={
-                    "suspicious_claims": [llm_resp],
-                    "hallucination_probability": detector.get("hallucination_probability"),
-                    "risk_level": detector.get("risk_level", "HIGH"),
-                },
-            )
+        bus = add_bus_message(
+            state, source_agent="detector", target_agent="supervisor",
+            message_type="SUSPICIOUS_CLAIMS",
+            payload={"suspicious_claims": [llm_resp],
+                     "hallucination_probability": _valid_probability(detector.get("hallucination_probability")),
+                     "risk_level": detector.get("risk_level", "HIGH")},
+        )
 
         return {
             "detector": detector,
             "route": route,
-            "hallucination_probability": float(
-                detector.get("hallucination_probability", 0.0)
-            ),
-            "confidence": float(detector.get("confidence_score", 0.0)),
-            "verification_status": (
-                "detector_safe_fast_path"
-                if route == "accept"
-                else "verification_required"
-            ),
+            "hallucination_probability": _valid_probability(detector.get("hallucination_probability")),
+            "confidence": _valid_probability(detector.get("confidence_score")),
+            "verification_status": "verification_required",
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
             "trace": add_trace(
@@ -225,13 +211,15 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             ),
         }
     except Exception as exc:
-        return _failure_update(state, "detector", exc)
+        update = _failure_update(state, "detector", RuntimeError(
+            f"Detector execution failed: {type(exc).__name__}"))
+        if str(state.get("llm_response") or "").strip():
+            update.update(route="verify", verification_status="verification_required")
+        return update
 
 
 def _detector_route(state: HalluciGuardState) -> str:
-    if state.get("route") == "error":
-        return "human_escalation"
-    return "verifier" if state.get("route") == "verify" else "accept"
+    return "verifier" if str(state.get("llm_response") or "").strip() else "human_escalation"
 
 
 def _verifier_imports():
@@ -262,29 +250,8 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
         try:
             verifier_res = await asyncio.wait_for(VerificationPipeline().verify(payload), timeout=8.0)
             verifier = _dump(verifier_res)
-        except (asyncio.TimeoutError, Exception) as sub_err:
-            verifier = {
-                "claim_evidence": [
-                    {
-                        "claim_id": "c1",
-                        "claim_text": state["llm_response"],
-                        "verdict": "verified",
-                        "confidence_score": 0.91,
-                        "evidence": [
-                            {
-                                "source": "Wikipedia Verified Reference",
-                                "url": "https://en.wikipedia.org",
-                                "snippet": f"Ground truth alignment corroborated for: {state.get('user_query', '')}",
-                                "entailment_label": "entailment",
-                                "entailment_score": 0.94,
-                                "credibility_score": 0.92,
-                            }
-                        ],
-                    }
-                ],
-                "overall_verdict": "verified",
-                "confidence_score": 0.91,
-            }
+        except Exception as sub_err:
+            raise RuntimeError(f"Verifier execution failed: {type(sub_err).__name__}") from sub_err
         judge_pairs: list[dict[str, Any]] = []
         evidence_all: list[dict[str, Any]] = []
         nli_results: list[dict[str, Any]] = []
@@ -295,7 +262,7 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
 
         for report in verifier.get("claim_evidence", []):
             verdict = report.get("verdict", "")
-            if verdict == "verified":
+            if verdict == "verified" and report.get("evidence"):
                 has_verified = True
             elif verdict == "likely_hallucinated":
                 has_contradiction = True
@@ -350,7 +317,8 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             "retrieved_evidence": evidence_all,
             "ranked_evidence": evidence_all,
             "nli_results": nli_results,
-            "verification_status": "verified" if not has_contradiction else "contradicted",
+            "verification_status": "contradicted" if has_contradiction else (
+                "verified" if has_verified else "unverified_insufficient_evidence"),
             "inter_agent_bus": bus,
             "updated_at": utc_now(),
             "trace": add_trace(
@@ -364,7 +332,9 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             ),
         }
     except Exception as exc:
-        return _failure_update(state, "verifier", exc, retryable=True)
+        original_type = type(exc.__cause__ or exc).__name__
+        return _failure_update(state, "verifier", RuntimeError(
+            f"Verifier execution failed: {original_type}"), retryable=True)
 
 
 def _verifier_route(state: HalluciGuardState) -> str:

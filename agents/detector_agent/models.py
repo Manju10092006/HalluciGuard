@@ -7,7 +7,7 @@ is preserved exactly for backward compatibility with Verifier/Judge/Corrector ag
 """
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, Any
 from pydantic import BaseModel, Field
 
 
@@ -46,14 +46,14 @@ class DetectionResult(BaseModel):
     This schema is the external contract between the Detector and downstream
     agents (Verifier, Judge, Corrector). It must be preserved exactly.
     """
-    confidence_score: float = Field(
+    confidence_score: Optional[float] = Field(
         ...,
         ge=0.0,
         le=1.0,
         description="Estimated confidence in the response reliability (0.0 to 1.0).",
         examples=[0.95]
     )
-    hallucination_probability: float = Field(
+    hallucination_probability: Optional[float] = Field(
         ...,
         ge=0.0,
         le=1.0,
@@ -74,6 +74,14 @@ class DetectionResult(BaseModel):
         default="halueval-distilbert",
         description="Identifier of the model that produced this result."
     )
+    status: str = "completed"
+    model_loaded: bool = False
+    inference_executed: bool = False
+    probability_available: bool = False
+    calibrated: bool = False
+    grounded: bool = False
+    detector_degraded: bool = False
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         json_schema_extra = {

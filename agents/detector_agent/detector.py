@@ -14,18 +14,17 @@ Architecture:
     Hallucination probability
          ↓
     Risk classification (LOW/MEDIUM/HIGH)
-         │
-         ├── LOW / MEDIUM → ACCEPT
-         │
-         └── HIGH → VERIFIER AGENT
+         └── All risk tiers → VERIFIER AGENT (safe default)
 """
 
 import logging
+import math
 from typing import Optional
 
 from .config import DetectorConfig
 from .halueval_inference import HaluEvalInference
 from .models import DetectionResult, NextAction, RiskLevel
+from .evidence import prepare_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +38,13 @@ class DetectorAgent:
     - Run inference through the fine-tuned HaluEval DistilBERT model.
     - Produce a hallucination_probability and confidence_score.
     - Classify risk level (LOW, MEDIUM, HIGH).
-    - Route: LOW/MEDIUM → Accept, HIGH → Verify (send to Verifier Agent).
+    - Route every result to the Verifier until a calibrated fast path is validated.
     """
-
-    _SHARED_INFERENCE: Optional[HaluEvalInference] = None
-    _SHARED_MODEL_LOADED: bool = False
 
     def __init__(
         self,
         config: Optional[DetectorConfig] = None,
+        device: Optional[str] = None,
     ) -> None:
         """Initialize DetectorAgent with HaluEval classifier.
         
@@ -56,23 +53,22 @@ class DetectorAgent:
         """
         self.config: DetectorConfig = config or DetectorConfig()
         
-        if DetectorAgent._SHARED_INFERENCE is None:
-            DetectorAgent._SHARED_INFERENCE = HaluEvalInference(
-                model_path=self.config.halueval_model_path,
-                max_length=self.config.halueval_max_length,
-            )
-        self._inference = DetectorAgent._SHARED_INFERENCE
+        self._inference = HaluEvalInference(
+            model_path=self.config.halueval_model_path,
+            max_length=self.config.halueval_max_length,
+            device=device,
+        )
 
-    def _ensure_model_loaded(self) -> None:
+    def _ensure_model_loaded(self) -> bool:
         """Load the HaluEval model if not already loaded."""
-        if not DetectorAgent._SHARED_MODEL_LOADED:
-            try:
-                self._inference.load()
-            except Exception as e:
-                logger.warning(f"[Detector] Could not load HaluEval model from disk ({e}); using baseline detector.")
-            DetectorAgent._SHARED_MODEL_LOADED = True
+        try:
+            self._inference.load()
+            return bool(self._inference.is_loaded())
+        except Exception as exc:
+            logger.warning("[Detector] HaluEval model unavailable (%s)", type(exc).__name__)
+            return False
 
-    def detect(self, user_query: str, llm_response: str) -> DetectionResult:
+    def detect(self, user_query: str, llm_response: str, evidence=None) -> DetectionResult:
         """Estimate hallucination likelihood for a given query and LLM response.
 
         Args:
@@ -93,21 +89,21 @@ class DetectorAgent:
             return self._default_result("Empty response")
 
         # Load model on first call
-        self._ensure_model_loaded()
+        prepared = prepare_evidence(evidence)
+        if not self._ensure_model_loaded():
+            return self._default_result("model_unavailable", prepared.diagnostics())
 
         # Run HaluEval classifier inference
         try:
-            if getattr(self._inference, "_loaded", False):
-                result = self._inference.predict(user_query, llm_response)
-                hallucination_prob = result.hallucination_probability
-                confidence_score = result.confidence_score
-            else:
-                # Heuristic baseline risk calculation
-                hallucination_prob = 0.08
-                confidence_score = 0.92
-        except Exception as e:
-            logger.error(f"[Detector] Inference failed: {e}")
-            return self._default_result(f"Inference error: {e}")
+            result = self._inference.predict(user_query, llm_response,
+                                             context=prepared.context or None)
+            hallucination_prob = float(result.hallucination_probability)
+            confidence_score = float(result.confidence_score)
+            if not all(math.isfinite(v) and 0 <= v <= 1 for v in (hallucination_prob, confidence_score)):
+                raise ValueError("invalid model probability")
+        except Exception as exc:
+            logger.error("[Detector] Inference failed (%s)", type(exc).__name__)
+            return self._default_result("inference_failed", prepared.diagnostics())
 
         # Determine risk level and next action
         risk_level = self._determine_risk_level(hallucination_prob)
@@ -123,6 +119,18 @@ class DetectorAgent:
             hallucination_probability=round(hallucination_prob, 4),
             risk_level=risk_level,
             next_action=next_action,
+            status="degraded" if prepared.diagnostics()["degraded"] else "completed",
+            model_loaded=True,
+            inference_executed=True,
+            probability_available=True,
+            calibrated=False,
+            grounded=bool(prepared.context),
+            detector_degraded=prepared.diagnostics()["degraded"],
+            diagnostics={"model_path": str(self._inference.model_path),
+                         "device": self._inference.device,
+                         "max_length": self._inference.max_length,
+                         "evidence": prepared.diagnostics(),
+                         "model_input": result.input_diagnostics or {}},
         )
 
     def _determine_risk_level(self, hallucination_prob: float) -> RiskLevel:
@@ -141,26 +149,34 @@ class DetectorAgent:
     def _determine_next_action(self, risk_level: RiskLevel) -> NextAction:
         """Determine next pipeline action based on risk level.
 
-        Critical routing requirement:
-            LOW    → ACCEPT (no verification needed)
-            MEDIUM → ACCEPT (no verification needed)
-            HIGH   → VERIFY (send to Verifier Agent)
+        The current HaluEval checkpoint has no certified low-risk bypass.
+        All risk tiers therefore request evidence-based verification.
         """
-        if risk_level == RiskLevel.HIGH:
-            return NextAction.VERIFY
-        return NextAction.ACCEPT
+        # A classifier score is triage, not proof. No calibrated fast path is
+        # enabled for this checkpoint, including LOW/MEDIUM predictions.
+        return NextAction.VERIFY
 
-    def _default_result(self, reason: str) -> DetectionResult:
+    def _default_result(self, reason: str, evidence_diagnostics: dict | None = None) -> DetectionResult:
         """Return a safe default result for error/edge cases.
-        
-        Defaults to MEDIUM risk with ACCEPT action (conservative but not
-        alarmist for edge cases).
+
+        Missing model inference has no meaningful numeric probability.
         """
-        logger.warning(f"[Detector] Using default result: {reason}")
+        logger.warning("[Detector] Verification required (%s)", reason)
         return DetectionResult(
-            confidence_score=0.50,
-            hallucination_probability=0.50,
-            risk_level=RiskLevel.MEDIUM,
-            next_action=NextAction.ACCEPT,
+            confidence_score=None,
+            hallucination_probability=None,
+            risk_level=RiskLevel.HIGH,
+            next_action=NextAction.VERIFY,
+            status="failed",
+            model_loaded=bool(self._inference.is_loaded()),
+            inference_executed=False,
+            probability_available=False,
+            calibrated=False,
+            detector_degraded=True,
+            diagnostics={"failure_reason": reason,
+                         "model_path": str(self._inference.model_path),
+                         "device": self._inference.device,
+                         "max_length": self._inference.max_length,
+                         "evidence": evidence_diagnostics or {}},
         )
 

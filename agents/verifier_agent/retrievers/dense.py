@@ -16,19 +16,48 @@ class DenseRetriever:
         self.passages: List[Passage] = []
         self._is_available = True
         self._index_built = False
+        self._unavailable_reason = None
+        self._unavailable_error_type = None
+        self._reset_diagnostics()
+
+    def _reset_diagnostics(self) -> None:
+        self.initialization_attempted = False
+        self.indexing_attempted = False
+        self.indexing_executed = False
+        self.inference_attempted = False
+        self.inference_executed = False
+        self.failure_stage = self._unavailable_reason
+        self.error_type = self._unavailable_error_type
+
+    def diagnostics(self) -> dict:
+        return {"model_available": self.model is not None and self._is_available,
+                "initialization_attempted": self.initialization_attempted,
+                "indexing_attempted": self.indexing_attempted,
+                "indexing_executed": self.indexing_executed,
+                "inference_attempted": self.inference_attempted,
+                "inference_executed": self.inference_executed,
+                "failure_stage": self.failure_stage,
+                "error_type": self.error_type}
         
     def _load_model(self) -> None:
         if self.model is not None or not self._is_available:
             return
+        self.initialization_attempted = True
             
         try:
             self.model = get_model_manager().load_embedding_model(self.model_name)
         except ImportError:
             logging.warning("sentence_transformers not installed. DenseRetriever falling back.")
             self._is_available = False
+            self.failure_stage, self.error_type = "initialization", "ImportError"
+            self._unavailable_reason = self.failure_stage
+            self._unavailable_error_type = self.error_type
         except Exception as e:
-            logging.warning(f"Error loading dense model {self.model_name}: {e}. Falling back.")
+            logging.warning("Error loading dense model %s (%s). Falling back.", self.model_name, type(e).__name__)
             self._is_available = False
+            self.failure_stage, self.error_type = "initialization", type(e).__name__
+            self._unavailable_reason = self.failure_stage
+            self._unavailable_error_type = self.error_type
 
     def build_index(self, passages: List[Passage]) -> None:
         """
@@ -37,12 +66,16 @@ class DenseRetriever:
         Args:
             passages: List of Passage objects to index.
         """
+        self._reset_diagnostics()
+        self.index = None
+        self._index_built = False
         self._load_model()
         self.passages = passages
         
         if not self._is_available or not self.passages:
             return
             
+        self.indexing_attempted = True
         try:
             import faiss
             
@@ -58,11 +91,19 @@ class DenseRetriever:
             self.index = faiss.IndexFlatIP(dim)
             self.index.add(embeddings)
             self._index_built = True
+            self.indexing_executed = True
             logging.info("Built FAISS index with %d passages, dim=%d", len(passages), dim)
             
         except ImportError:
             logging.warning("FAISS not available. Dense retrieval disabled for this request.")
             self._is_available = False
+            self.failure_stage, self.error_type = "indexing", "ImportError"
+            self._unavailable_reason = self.failure_stage
+            self._unavailable_error_type = self.error_type
+        except Exception as exc:
+            self.failure_stage, self.error_type = "indexing", type(exc).__name__
+            self.index = None
+            raise
 
     def retrieve(self, query: str, k: int) -> List[Tuple[Passage, float]]:
         """
@@ -81,9 +122,14 @@ class DenseRetriever:
                 logging.debug("Dense retrieval skipped: no index available")
             return []
             
-        query_embedding = self.model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
-        
-        scores, indices = self.index.search(query_embedding, min(k, len(self.passages)))
+        self.inference_attempted = True
+        try:
+            query_embedding = self.model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
+            scores, indices = self.index.search(query_embedding, min(k, len(self.passages)))
+        except Exception as exc:
+            self.failure_stage, self.error_type = "inference", type(exc).__name__
+            raise
+        self.inference_executed = True
         
         results = []
         for i, idx in enumerate(indices[0]):

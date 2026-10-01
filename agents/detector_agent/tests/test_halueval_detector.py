@@ -4,7 +4,7 @@ HalluciGuard Detector Agent — Comprehensive Test Suite.
 Tests the HaluEval-trained detector end-to-end:
 - Model loading and inference
 - LOW/MEDIUM/HIGH risk classification
-- Routing logic (LOW/MEDIUM→Accept, HIGH→Verify)
+- Routing logic (all risk tiers → Verify until fast-path certification)
 - Edge cases (empty input, long input, unicode, special chars)
 - Verifier handoff behavior
 - FastAPI endpoint integration
@@ -25,6 +25,11 @@ if project_root not in sys.path:
 from agents.detector_agent.config import DetectorConfig
 from agents.detector_agent.detector import DetectorAgent
 from agents.detector_agent.models import DetectionResult, NextAction, RiskLevel
+
+pytestmark = pytest.mark.skipif(
+    not (Path(project_root) / "artifacts" / "halueval-detector-final").exists(),
+    reason="real HaluEval checkpoint is not present in this worktree",
+)
 
 
 # ============================================================
@@ -48,7 +53,7 @@ class TestModelLoading:
     def test_model_loads_from_artifacts(self, detector):
         """The model should load from the configured artifacts path."""
         detector._ensure_model_loaded()
-        assert detector._model_loaded is True
+        assert detector._ensure_model_loaded() is True
         assert detector._inference.is_loaded() is True
 
     def test_model_path_exists(self, detector):
@@ -65,7 +70,7 @@ class TestModelLoading:
 # ============================================================
 
 class TestLowRisk:
-    """Test that clearly correct responses get LOW risk / Accept."""
+    """Test low-risk model output without granting a verification bypass."""
 
     def test_paris_capital(self, detector):
         """'Capital of France is Paris' should be LOW risk."""
@@ -82,7 +87,7 @@ class TestLowRisk:
             f"Expected hallucination_probability < 0.70 for a correct answer, "
             f"got {result.hallucination_probability}"
         )
-        assert result.next_action == NextAction.ACCEPT
+        assert result.next_action == NextAction.VERIFY
 
     def test_http_protocol(self, detector):
         """'HTTP stands for Hypertext Transfer Protocol' should be LOW risk."""
@@ -93,7 +98,7 @@ class TestLowRisk:
         print(f"[LOW TEST] HTTP: prob={result.hallucination_probability:.4f} "
               f"risk={result.risk_level.value} action={result.next_action.value}")
         
-        assert result.next_action == NextAction.ACCEPT
+        assert result.next_action == NextAction.VERIFY
 
 
 # ============================================================
@@ -135,24 +140,17 @@ class TestHighRisk:
 # ============================================================
 
 class TestRoutingLogic:
-    """Verify the critical routing: LOW/MEDIUM→Accept, HIGH→Verify."""
+    """Verify every risk tier requests evidence-based verification."""
 
-    def test_low_risk_accepts(self, detector):
-        """LOW risk should always Accept."""
-        result = DetectionResult(
-            confidence_score=0.85,
-            hallucination_probability=0.15,
-            risk_level=RiskLevel.LOW,
-            next_action=NextAction.ACCEPT
-        )
-        assert result.next_action == NextAction.ACCEPT
+    def test_low_risk_verifies(self, detector):
+        assert detector._determine_next_action(RiskLevel.LOW) == NextAction.VERIFY
 
-    def test_medium_risk_accepts(self, detector):
-        """MEDIUM risk should Accept (NOT Verify)."""
+    def test_medium_risk_verifies(self, detector):
+        """MEDIUM risk should Verify."""
         # Test through the actual _determine_next_action method
         action = detector._determine_next_action(RiskLevel.MEDIUM)
-        assert action == NextAction.ACCEPT, (
-            f"MEDIUM risk should Accept, not {action.value}"
+        assert action == NextAction.VERIFY, (
+            f"MEDIUM risk should Verify, not {action.value}"
         )
 
     def test_high_risk_verifies(self, detector):
@@ -185,8 +183,8 @@ class TestEdgeCases:
         """Empty query should return a safe default, not crash."""
         result = detector.detect(user_query="", llm_response="Some response")
         assert isinstance(result, DetectionResult)
-        assert result.risk_level == RiskLevel.MEDIUM
-        assert result.next_action == NextAction.ACCEPT
+        assert result.risk_level == RiskLevel.HIGH
+        assert result.next_action == NextAction.VERIFY
 
     def test_empty_response(self, detector):
         """Empty response should return a safe default, not crash."""
@@ -232,7 +230,7 @@ class TestEdgeCases:
 # ============================================================
 
 class TestVerifierHandoff:
-    """Test that HIGH risk invokes Verifier and LOW/MEDIUM does not."""
+    """Test all risk tiers request Verifier handoff."""
 
     def test_high_risk_should_invoke_verifier(self, detector):
         """When risk is HIGH, the pipeline should route to Verifier."""
@@ -248,22 +246,22 @@ class TestVerifierHandoff:
             print(f"[HANDOFF] Model classified as {result.risk_level.value}, "
                   f"not HIGH — reporting actual result")
 
-    def test_low_risk_should_not_invoke_verifier(self, detector):
-        """When risk is LOW, the pipeline should NOT route to Verifier."""
+    def test_low_risk_should_invoke_verifier(self, detector):
+        """A low score cannot replace evidence verification."""
         result = detector.detect(
             user_query="What is the capital of France?",
             llm_response="The capital of France is Paris."
         )
-        assert result.next_action == NextAction.ACCEPT
-        print(f"[HANDOFF] LOW/MEDIUM correctly routes to ACCEPT (no Verifier)")
+        assert result.next_action == NextAction.VERIFY
+        print("[HANDOFF] LOW/MEDIUM routes to Verifier")
 
-    def test_medium_risk_should_not_invoke_verifier(self, detector):
-        """When risk is MEDIUM, the pipeline should NOT route to Verifier."""
+    def test_medium_risk_should_invoke_verifier(self, detector):
+        """MEDIUM risk still requires Verifier."""
         action = detector._determine_next_action(RiskLevel.MEDIUM)
-        assert action == NextAction.ACCEPT, (
-            f"MEDIUM risk should NOT invoke Verifier. Got: {action.value}"
+        assert action == NextAction.VERIFY, (
+            f"MEDIUM risk should invoke Verifier. Got: {action.value}"
         )
-        print(f"[HANDOFF] MEDIUM correctly routes to ACCEPT (no Verifier)")
+        print("[HANDOFF] MEDIUM routes to Verifier")
 
 
 # ============================================================

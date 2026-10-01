@@ -34,16 +34,17 @@ def test_generate_route_failure():
     assert _generate_route({"route": "error", "llm_response": ""}) == "human_escalation"
 
 
-def test_detector_low_medium_bypass_verifier():
-    assert _detector_route({"route": "accept"}) == "accept"
+def test_detector_low_medium_cannot_bypass_verifier():
+    assert _detector_route({"route": "accept", "llm_response": "draft"}) == "verifier"
 
 
 def test_detector_high_routes_to_verifier():
-    assert _detector_route({"route": "verify"}) == "verifier"
+    assert _detector_route({"route": "verify", "llm_response": "draft"}) == "verifier"
 
 
-def test_detector_failure_routes_to_human_escalation():
-    assert _detector_route({"route": "error"}) == "human_escalation"
+def test_detector_failure_with_draft_routes_to_verifier():
+    assert _detector_route({"route": "error", "llm_response": "draft"}) == "verifier"
+    assert _detector_route({"route": "error", "llm_response": ""}) == "human_escalation"
 
 
 def test_verifier_route_success():

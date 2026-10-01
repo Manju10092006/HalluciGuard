@@ -7,9 +7,10 @@ a simple predict() interface for the DetectorAgent.
 
 import os
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -91,6 +92,7 @@ class InferenceResult:
     confidence_score: float
     predicted_label: int  # 0 = NO_HALLUCINATION, 1 = HALLUCINATION
     predicted_label_name: str
+    input_diagnostics: dict[str, Any] | None = None
 
 
 class HaluEvalInference:
@@ -114,6 +116,7 @@ class HaluEvalInference:
         self._tokenizer: Optional[AutoTokenizer] = None
         self._model: Optional[AutoModelForSequenceClassification] = None
         self._loaded = False
+        self._load_lock = threading.Lock()
 
     def _resolve_model_path(self) -> str:
         """Try to find the model artifacts directory."""
@@ -147,22 +150,24 @@ class HaluEvalInference:
         """Load model and tokenizer from disk."""
         if self._loaded:
             return
-
-        self.model_path = validate_halueval_model_reference(self.model_path)
-
-        logger.info(f"Loading HaluEval model from: {self.model_path}")
-        print(f"[HaluEval] Loading model from: {self.model_path}")
-        print(f"[HaluEval] Device: {self.device}")
-
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        self._model = AutoModelForSequenceClassification.from_pretrained(
-            self.model_path
-        )
-        self._model.to(self.device)
-        self._model.eval()
-        self._loaded = True
-
-        print(f"[HaluEval] Model loaded successfully.")
+        with self._load_lock:
+            if self._loaded:
+                return
+            try:
+                model_path = validate_halueval_model_reference(self.model_path)
+                tokenizer = AutoTokenizer.from_pretrained(model_path)
+                model = AutoModelForSequenceClassification.from_pretrained(model_path)
+                model.to(self.device)
+                model.eval()
+            except Exception:
+                self._tokenizer = None
+                self._model = None
+                self._loaded = False
+                raise
+            self.model_path = model_path
+            self._tokenizer = tokenizer
+            self._model = model
+            self._loaded = True
 
     def predict(
         self,
@@ -189,6 +194,22 @@ class HaluEvalInference:
         # Use the canonical formatter — same as training
         text = format_detector_input(user_query, llm_response, context)
 
+        diagnostics: dict[str, Any] = {
+            "max_length": self.max_length,
+            "formatted_characters": len(text),
+            "context_characters": len(context or ""),
+            "tokenizer_observability": "unknown",
+            "tokenizer_truncated": None,
+        }
+        try:
+            full = self._tokenizer(text, truncation=False, padding=False)
+            full_ids = full["input_ids"]
+            if hasattr(full_ids, "tolist"):
+                full_ids = full_ids.tolist()
+            diagnostics["untruncated_tokens"] = len(full_ids)
+        except Exception:
+            pass
+
         inputs = self._tokenizer(
             text,
             return_tensors="pt",
@@ -196,6 +217,15 @@ class HaluEvalInference:
             max_length=self.max_length,
             padding=True,
         )
+
+        try:
+            consumed = int(inputs["attention_mask"].sum().item()) if "attention_mask" in inputs else len(inputs["input_ids"][0])
+            diagnostics["model_input_tokens"] = consumed
+            if "untruncated_tokens" in diagnostics:
+                diagnostics["tokenizer_observability"] = "measured"
+                diagnostics["tokenizer_truncated"] = diagnostics["untruncated_tokens"] > consumed
+        except Exception:
+            pass
 
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
@@ -213,6 +243,7 @@ class HaluEvalInference:
             confidence_score=round(1.0 - halluc_prob, 6),
             predicted_label=predicted_label,
             predicted_label_name=label_name,
+            input_diagnostics=diagnostics,
         )
 
     def is_loaded(self) -> bool:
