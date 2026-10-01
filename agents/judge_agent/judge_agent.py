@@ -293,18 +293,31 @@ class JudgeAgent:
         claim_reports = normalized_verifier.claim_reports
 
         def _has_decision_grade_evidence(report, expected_label: str) -> bool:
-            """A decisive verdict needs >=1 evidence item whose OWN entailment label
-            matches it with a non-empty snippet (HG-012). Applied PER CLAIM below: a
-            decisive claim lacking it is demoted to unverified, NEVER aborting the
-            whole response -- so a genuine CONTRADICTED claim is still routed to
-            correction even if an unrelated VERIFIED claim is only weakly grounded
-            (M5/#11: the old whole-evaluation ABSTAIN suppressed both ACCEPT and
-            CORRECT on the first weak claim)."""
-            return any(
+            """A decisive verdict must rest on REAL evidence, not a bare label
+            (HG-012). It is decision-grade when EITHER (a) >=1 non-empty evidence
+            snippet carries the matching NLI label, OR (b) the Verifier grounded the
+            verdict's DIRECTION (support-vs-contradiction dominance from its
+            calibrated relation/NLI fusion) over >=1 non-empty evidence snippet.
+            Case (b) is essential: the fusion grounds claims via a structured
+            relation MATCH/MISMATCH even when the raw cross-encoder NLI label is
+            'neutral' (e.g. "Hanoi is the capital of Vietnam" — VERIFIED with 0.99
+            neutral NLI). Requiring the literal label alone wrongly escalated such a
+            correctly-verified true claim to human review. A verdict with NO
+            evidence snippet is still never decision-grade. Applied PER CLAIM below
+            (M5/#11); the whole-response abort was already removed."""
+            if any(
                 str(getattr(e, "entailment_label", "")).lower().rsplit(".", 1)[-1] == expected_label
                 and bool(str(getattr(e, "snippet", "")).strip())
                 for e in report.evidence
-            )
+            ):
+                return True
+            if not any(bool(str(getattr(e, "snippet", "")).strip()) for e in report.evidence):
+                return False  # bare verdict, no real evidence -> not decisive
+            support = float(getattr(report, "support_score", 0.0) or 0.0)
+            contra = float(getattr(report, "contradiction_score", 0.0) or 0.0)
+            if expected_label == "entailment":
+                return support > contra and support > 0.0
+            return contra > support and contra > 0.0
 
         claims_to_correct: List[ClaimReport] = []
         claims_to_preserve: List[ClaimReport] = []
