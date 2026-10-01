@@ -74,12 +74,20 @@ class ClaimMerger:
         avg_trust = total_trust / count if count > 0 else 0.0
         merged_confidence = _dominant(confidence_scores)
 
-        if avg_support >= 0.30 and avg_contradict >= 0.30:
-            overall_verdict = 'conflicted'
-        elif avg_support >= 0.30 and avg_support > avg_contradict + 0.10:
+        # Verdict precedence is DOMINANCE-GATED. CONFLICTED is a last resort that
+        # fires only when BOTH axes are substantial AND neither dominates by the
+        # margin — never the first branch. Previously CONFLICTED was tested first
+        # with no margin, so a strongly-supported claim with one weak spurious
+        # contradiction (e.g. support 0.90 / contradict 0.31) was forced to
+        # CONFLICTED. The dominant side must win once it clears the +MARGIN gap.
+        MARGIN = 0.10
+        if avg_support >= 0.30 and avg_support > avg_contradict + MARGIN:
             overall_verdict = 'verified'
-        elif avg_contradict >= 0.30 and avg_contradict > avg_support + 0.10:
+        elif avg_contradict >= 0.30 and avg_contradict > avg_support + MARGIN:
             overall_verdict = 'contradicted'
+        elif avg_support >= 0.30 and avg_contradict >= 0.30:
+            # Both substantial, neither dominates by the margin -> genuine conflict.
+            overall_verdict = 'conflicted'
         elif avg_support > avg_contradict and avg_support >= 0.20:
             overall_verdict = 'verified'
         elif avg_contradict > avg_support and avg_contradict >= 0.20:
