@@ -104,7 +104,7 @@ class RelationVerifier:
                 continue
             # Reported/qualified assertions are not direct factual triples.
             # Defer their polarity and scope to NLI instead of stripping qualifiers.
-            if re.search(r"\b(?:alleged|allegedly|claimed|claims|reportedly|rumor|falsely|myth|according to)\b", sent_clean, re.IGNORECASE):
+            if re.search(r"\b(?:alleged|allegedly|claimed|claims|reportedly|rumor|falsely|myth)\b", sent_clean, re.IGNORECASE):
                 continue
 
             # Record where this sentence's triples begin, and detect negation once
@@ -656,6 +656,36 @@ class RelationVerifier:
         claim_text: str,
         evidence_passages: List[Any],
     ) -> RelationCheckResult:
+        """Structured relation check with a MATCH-only temporal demotion.
+
+        A MISMATCH now STANDS regardless of any date in the claim (a wrong
+        founder/location/creator is wrong whatever the year), fixing the
+        over-broad temporal gate that previously disabled ALL relation checking
+        for any claim containing a 4-digit number (audit H3/M2/M3). A MATCH is
+        demoted to NO_TRIPLE_EXTRACTED when the claim carries a temporal qualifier
+        whose truth the timeless triple cannot confirm (a claimed year or a
+        relative-time word), deferring that case to the polarity/time-aware NLI.
+        """
+        result = self._verify_relation_impl(claim_text, evidence_passages)
+        if result.status == "MATCH" and re.search(
+            r"\b(?:currently|today|now|formerly|previously|until|since)\b"
+            r"|\b(?:1[0-9]{3}|20[0-9]{2})\b",
+            claim_text,
+            re.IGNORECASE,
+        ):
+            return RelationCheckResult(
+                claim_triple=result.claim_triple,
+                evidence_triples=result.evidence_triples,
+                status="NO_TRIPLE_EXTRACTED",
+                mismatch_detail="Temporal qualifiers on a MATCH require NLI; a timeless triple cannot confirm the date",
+            )
+        return result
+
+    def _verify_relation_impl(
+        self,
+        claim_text: str,
+        evidence_passages: List[Any],
+    ) -> RelationCheckResult:
         """
         Extract triples from the claim and all evidence passages,
         and perform relational consistency checks.
@@ -681,11 +711,10 @@ class RelationVerifier:
                 claim_triple=c_triple, status="NO_TRIPLE_EXTRACTED",
                 mismatch_detail="Compound relation requires claim decomposition and NLI",
             )
-        if re.search(r"\b(?:currently|today|now|formerly|previously|until|since)\b|\b\d{4}\b", claim_text, re.IGNORECASE):
-            return RelationCheckResult(
-                claim_triple=c_triple, status="NO_TRIPLE_EXTRACTED",
-                mismatch_detail="Temporal qualifiers require NLI rather than timeless relation comparison",
-            )
+        # NOTE: temporal handling moved to the verify_relation wrapper, which
+        # demotes only a MATCH (not a MISMATCH) when a claimed year/relative-time
+        # qualifier is present. A wrong object must still contradict regardless of
+        # any date in the claim (audit H3/M2/M3).
 
         # Polarity gate (fail-safe). The extractor is polarity-blind: it collapses
         # "X was NOT created by Y" into the positive triple (X, created_by, Y). If a
