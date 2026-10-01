@@ -176,7 +176,7 @@ def add_error(
         {
             "node": node,
             "type": etype,
-            "message": str(exc),
+            "message": f"{node} failed ({type(exc).__name__})",
             "timestamp": utc_now(),
             "retryable": retryable,
             "error_type": etype,

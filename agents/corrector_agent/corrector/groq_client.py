@@ -22,6 +22,17 @@ class GroqGenerator:
 
     kind = "groq_api"
 
+    @classmethod
+    def from_config(cls, config, *, api_key: str):
+        """Transport retries live here, separate from candidate repair retries."""
+        return cls(
+            api_key=api_key, model=config.groq_model,
+            timeout_seconds=config.groq_timeout_seconds,
+            max_retries=config.groq_max_retries,
+            reasoning_effort=config.groq_reasoning_effort,
+            max_tokens=config.max_new_tokens,
+        )
+
     def __init__(
         self,
         *,
@@ -30,12 +41,14 @@ class GroqGenerator:
         timeout_seconds: float = 45.0,
         max_retries: int = 2,
         reasoning_effort: str = "low",
+        max_tokens: int = 256,
     ) -> None:
         self.api_key = api_key or os.environ.get("GROQ_API_KEY", "")
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(0, int(max_retries))
         self.reasoning_effort = reasoning_effort
+        self.max_tokens = max(1, int(max_tokens))
 
     def generate(self, system_text: str, prompt_text: str) -> str:
         if not self.api_key:
@@ -48,7 +61,9 @@ class GroqGenerator:
                 {"role": "user", "content": prompt_text},
             ],
             "temperature": 0,
-            "max_completion_tokens": 256,
+            # Honor the configured budget (HG_CORRECTOR_MAX_NEW_TOKENS) instead of a
+            # hardcoded 256, so the hosted path matches the local path (audit #31).
+            "max_completion_tokens": self.max_tokens,
             "reasoning_effort": self.reasoning_effort,
             "response_format": {"type": "json_object"},
         }
@@ -83,8 +98,7 @@ class GroqGenerator:
                     raise RuntimeError("Groq returned empty message content")
                 return content
             except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")[:500]
-                last_error = RuntimeError(f"Groq HTTP {exc.code}: {detail}")
+                last_error = RuntimeError(f"Groq HTTP {exc.code}")
                 if exc.code == 429 and attempt < self.max_retries:
                     retry_after = exc.headers.get("retry-after")
                     try:
@@ -95,7 +109,7 @@ class GroqGenerator:
                     continue
                 raise last_error from exc
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-                last_error = RuntimeError(f"Groq transport/JSON error: {exc}")
+                last_error = RuntimeError(f"Groq transport/JSON error: {type(exc).__name__}")
                 if attempt < self.max_retries:
                     time.sleep(min(2.0 ** attempt, 8.0))
                     continue

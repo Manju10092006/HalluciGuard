@@ -1,4 +1,5 @@
 import inspect
+import math
 from pathlib import Path
 
 import torch
@@ -62,9 +63,10 @@ class Detector:
         The Judge makes the final decision.
 
     Secondary checks (a same-slot number/date clash, or a named entity swapped on
-    an otherwise identical relation) may only resolve a near-tie and never
-    overturn a decisive model call. They are bounded, never fabricate
-    probabilities, and never convert NOT_ENOUGH_INFO into a contradiction.
+    an otherwise identical relation) never change any neural probability or class;
+    they only append a diagnostic warning and set an explicit requires_verification
+    flag so the claim is routed to the Verifier. They never fabricate probabilities
+    and never convert NOT_ENOUGH_INFO into a contradiction.
     """
 
     def __init__(
@@ -76,10 +78,14 @@ class Detector:
         model_path = Path(model_path)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
+        config = getattr(self.model, "config", None)
+        if config is not None and getattr(config, "id2label", None) != {i: label.value for i, label in enumerate(LABELS)}:
+            raise ValueError("incompatible_detector_label_mapping")
         selected = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(selected)
         self.model.to(self.device).eval()
         calibration = load_calibration(model_path / "calibration.json")
+        self.calibration_available = bool(calibration)
         self.temperature = float(calibration.get("temperature", 1.0))
         # Two thresholds for two different questions. The near-tie guard below
         # resolves SUPPORTED-vs-CONTRADICTED disagreement, so it must be driven
@@ -147,6 +153,7 @@ class Detector:
         self,
         claim: str,
         evidence_text: str,
+        trace: dict | None = None,
     ) -> dict[ClaimLabel, float]:
         """Classify a single (evidence, claim) pair with the trained model."""
         encoded = encode_nli_pair(
@@ -154,43 +161,14 @@ class Detector:
             claim,
             evidence_text,
             max_length=self.max_length,
+            trace=trace,
         ).to(self.device)
         logits = self.model(**encoded).logits
+        if logits.shape != (1, len(LABELS)) or not torch.isfinite(logits).all():
+            raise ValueError("invalid_detector_logits")
         probs: list[float] = apply_temperature(logits, self.temperature)[0].cpu().tolist()
         return {label: float(probs[i]) for i, label in enumerate(LABELS)}
 
-    def _shift_to_contradiction(self, guard: dict[ClaimLabel, float]) -> bool:
-        """Move bounded probability mass from SUPPORTED to CONTRADICTED.
-
-        The primary decision always comes from evidence + NLI. A confirmed
-        deterministic conflict (same-slot quantity clash, or a named entity
-        swapped on an otherwise identical relation) is allowed to *resolve a
-        near-tie*: when the model is torn between SUPPORTED and CONTRADICTED and
-        not already decisive, it may reorder the decision. A decisive model call
-        is only nudged and never overturned.
-
-        When the model already prefers NOT_ENOUGH_INFO it is left completely
-        alone: the model is saying "the evidence does not settle this", and a
-        secondary check must not manufacture contradiction mass out of that
-        uncertainty. ``NOT_ENOUGH_INFO`` is never modified, so the three
-        probabilities still sum to 1 and nothing is fabricated.
-        """
-        supported = guard[ClaimLabel.SUPPORTED]
-        contradicted = guard[ClaimLabel.CONTRADICTED]
-        unknown = guard[ClaimLabel.NOT_ENOUGH_INFO]
-        if unknown > max(supported, contradicted):
-            return False
-        margin = supported - contradicted
-        if margin <= 0.0:
-            return False
-        # The near-tie band is measured on P(CONTRADICTED), so it uses the
-        # contradiction threshold. A wider SUPPORTED-vs-CONTRADICTED gap is
-        # treated as a decisive call that a secondary check may only nudge.
-        fraction = 0.75 if margin < self.contradiction_threshold else 0.25
-        delta = fraction * margin
-        guard[ClaimLabel.SUPPORTED] = supported - delta
-        guard[ClaimLabel.CONTRADICTED] = contradicted + delta
-        return True
 
     @staticmethod
     def _normalize_class_mapping(mapping: dict[ClaimLabel, float]) -> dict[ClaimLabel, float]:
@@ -204,21 +182,20 @@ class Detector:
         inventing any probability.
         """
         values: dict[ClaimLabel, float] = {}
+        if not mapping or any(label not in mapping for label in LABELS):
+            raise ValueError("incomplete_detector_probabilities")
         for label in LABELS:
             raw = mapping.get(label) if mapping else None
             try:
                 value = float(raw) if raw is not None else 0.0
-            except (TypeError, ValueError):
-                value = 0.0
-            values[label] = min(1.0, max(0.0, value))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("invalid_detector_probabilities") from exc
+            if not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError("invalid_detector_probabilities")
+            values[label] = value
         total = sum(values.values())
-        if total <= 0.0:
-            # Nothing usable was reported: stay conservative and unverified.
-            return {
-                ClaimLabel.SUPPORTED: 0.0,
-                ClaimLabel.CONTRADICTED: 0.0,
-                ClaimLabel.NOT_ENOUGH_INFO: 1.0,
-            }
+        if not math.isclose(total, 1.0, abs_tol=1e-5):
+            raise ValueError("invalid_detector_probability_sum")
         return {label: value / total for label, value in values.items()}
 
     def _guard_signals(
@@ -226,21 +203,23 @@ class Detector:
         claim: str,
         evidence_text: str,
         mapping: dict[ClaimLabel, float],
-    ) -> tuple[dict[ClaimLabel, float], list[str]]:
+    ) -> tuple[dict[ClaimLabel, float], list[str], bool]:
         """Apply conservative secondary signals without inventing probabilities.
 
         - Named-entity conflict: fires on a swapped named entity. When the two
           texts also share the same relation (e.g. "Apple acquired A" vs
-          "Apple acquired B") the contradiction signal is reinforced; a mere
+          "Apple acquired B") verification is requested; a mere
           mismatch with a different relation is only noted, never treated as a
           contradiction.
         - Number/date/percent mismatch: a same-slot quantity or year clash is a
-          concrete conflict and reinforces contradiction the same way.
-        - Both are bounded and may only resolve near-ties; they never overwrite
-          the model with absolute values and never touch NOT_ENOUGH_INFO.
+          potential conflict and requests verification the same way.
+        - These diagnostics never change any neural probability or class. The
+          verification request is returned as an explicit boolean (not inferred
+          from warning prose), so rewording a message can never silently drop it.
         """
         warnings: list[str] = []
         guard = mapping.copy()
+        requires_verification = False
 
         if has_entity_conflict(claim, evidence_text):
             if not shared_relation(claim, evidence_text):
@@ -248,30 +227,27 @@ class Detector:
                     "Named-entity mismatch noted; relation differs, so it is not treated "
                     "as an automatic contradiction."
                 )
-            elif self._shift_to_contradiction(guard):
-                warnings.append(
-                    "Named-entity conflict on a shared relation raised contradiction "
-                    "confidence for one claim."
-                )
             else:
                 warnings.append(
-                    "Named-entity conflict on a shared relation noted; the model already "
-                    "weighs this as unsupported by, or undecided from, the evidence."
+                    "Named-entity conflict on a shared relation noted; requires verification. "
+                    "Model probabilities are unchanged."
                 )
+                requires_verification = True
 
         numeric = numeric_consistency(claim, evidence_text)
         if numeric:
             # A same-unit quantity clash or a conflicting year is a concrete,
             # evidence-grounded conflict (e.g. "population is 10 million" vs
-            # "12 million"). Reinforce CONTRADICTED so a topic-similar but
-            # numerically-wrong claim is not left SUPPORTED by soft NLI alone.
-            self._shift_to_contradiction(guard)
+            # "12 million"). It does NOT change any neural probability or class;
+            # it only requests verification so a numerically-wrong but
+            # topic-similar claim is not silently accepted on soft NLI alone.
             warnings.append(
                 "Number/date mismatch flagged between claim and evidence: "
-                + "; ".join(numeric)
+                    + "; ".join(numeric) + "; requires verification; model probabilities unchanged."
             )
+            requires_verification = True
 
-        return guard, warnings
+        return guard, warnings, requires_verification
 
     def _risk(self, probability: float) -> RiskLevel:
         if probability >= max(0.75, self.threshold):
@@ -307,6 +283,8 @@ class Detector:
                         hallucination_probability=0.0,
                         risk=RiskLevel.LOW,
                         evidence_snippets=[],
+                        model_input_evidence=None,
+                        evidence_selection_trace={},
                         supported_probability=0.0,
                         contradicted_probability=0.0,
                         unknown_probability=0.0,
@@ -325,6 +303,9 @@ class Detector:
                 # selection as untraceable rather than pretending it was clean.
                 snippets = self.evidence.select(claim_text, evidence)
                 trace = {"route": "untraced", "degraded": True}
+            trace["selected_count"] = len(snippets)
+            trace["model_input_evidence"] = snippets[0] if snippets else None
+            trace.setdefault("tokenizer_truncation", "not_measured")
             evidence_degraded = bool(trace.get("degraded"))
             evidence_route = str(trace.get("route", "unknown"))
             if not snippets:
@@ -334,20 +315,33 @@ class Detector:
                     ClaimLabel.NOT_ENOUGH_INFO: 1.0,
                 }
                 item_warnings = ["No relevant evidence found; claim marked NOT_ENOUGH_INFO."]
+                guard_requires = False
             else:
                 # DeBERTa input = claim + best reranked evidence only, so the
                 # pair stays within max_length; the fuller snippet list is kept
                 # on the result for inspection.
                 best = snippets[0]
-                mapping = self._normalize_class_mapping(self._classify(claim_text, best))
-                mapping, item_warnings = self._guard_signals(claim_text, best, mapping)
+                # The tokenization diagnostic re-tokenizes the full (untruncated)
+                # pair a SECOND time per claim; keep it off the hot path unless
+                # explicitly enabled for debugging (audit #26).
+                import os
+                _trace_tokens = os.environ.get("HG_DETECTOR_TRACE_TOKENS", "").strip().lower() in ("1", "true", "yes", "on")
+                tokenization_trace: dict = {}
+                if _trace_tokens and _supports_trace(self._classify):
+                    raw_mapping = self._classify(claim_text, best, trace=tokenization_trace)
+                else:
+                    raw_mapping = self._classify(claim_text, best)
+                mapping = self._normalize_class_mapping(raw_mapping)
+                trace["tokenization"] = tokenization_trace
+                trace["tokenizer_truncation"] = tokenization_trace.get("truncated", "not_measured")
+                mapping, item_warnings, guard_requires = self._guard_signals(claim_text, best, mapping)
 
             label = max(mapping, key=mapping.get) if mapping else ClaimLabel.NOT_ENOUGH_INFO
             # Operational verification risk = P(CONTRADICTED) + P(NOT_ENOUGH_INFO).
             # It is the probability this claim still needs checking; it is NOT
             # the probability the claim is false (that is contradicted only).
             verification_risk = mapping[ClaimLabel.CONTRADICTED] + mapping[ClaimLabel.NOT_ENOUGH_INFO]
-            requires_verification = label != ClaimLabel.SUPPORTED
+            requires_verification = label != ClaimLabel.SUPPORTED or guard_requires
             results.append(
                 SentenceResult(
                     sentence_id=f"C{index:03d}",
@@ -360,6 +354,8 @@ class Detector:
                     hallucination_probability=verification_risk,
                     risk=self._risk(verification_risk),
                     evidence_snippets=snippets,
+                    model_input_evidence=snippets[0] if snippets else None,
+                    evidence_selection_trace=trace,
                     supported_probability=mapping.get(ClaimLabel.SUPPORTED, 0.0),
                     contradicted_probability=mapping.get(ClaimLabel.CONTRADICTED, 0.0),
                     unknown_probability=mapping.get(ClaimLabel.NOT_ENOUGH_INFO, 0.0),

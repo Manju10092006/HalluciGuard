@@ -516,9 +516,9 @@ class ClaimAnalyzer:
                 return ClaimAnalysis(domain=domain or fb.domain, candidates=[], source="llm")
             return ClaimAnalysis(domain=domain, candidates=candidates, source="llm")
         except Exception as exc:  # never block the pipeline on the analyzer
-            logger.warning("Claim Analyzer LLM error (%s); using fallback.", exc)
+            logger.warning("Claim Analyzer LLM error (%s); using fallback.", type(exc).__name__)
             fb = fallback_analyze(draft, user_query, domain_hint)
-            fb.llm_error = str(exc)
+            fb.llm_error = type(exc).__name__
             return fb
 
     def analyze_sync(

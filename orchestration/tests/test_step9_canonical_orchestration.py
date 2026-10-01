@@ -141,8 +141,8 @@ async def test_verifier_receives_llm_response_not_user_query(monkeypatch):
 # ===========================================================================
 
 @pytest.mark.asyncio
-async def test_detector_low_risk_routes_to_accept(monkeypatch):
-    """Explicitly enabled low-risk fast path may bypass verification."""
+async def test_ungrounded_low_risk_cannot_use_opt_in_fast_path(monkeypatch):
+    """Even opt-in flags cannot turn evidence-free triage into acceptance."""
     class StubDetector:
         def detect(self, query, response):
             return {
@@ -163,10 +163,10 @@ async def test_detector_low_risk_routes_to_accept(monkeypatch):
     state = make_base_state()
     res = await _detector_node(state)
 
-    assert res["route"] == "accept"
-    assert res["verification_status"] == "detector_safe_fast_path"
-    assert res["detector_result"]["risk_level"] == "LOW"
-    assert _detector_route(res) == "accept"
+    assert res["route"] == "verify"
+    assert res["verification_status"] == "verification_required"
+    assert res["detector_result"]["risk_level"] == "HIGH"
+    assert _detector_route({**state, **res}) == "verifier"
 
 
 @pytest.mark.asyncio
@@ -377,7 +377,10 @@ async def test_reverifier_node_produces_canonical_reverification_result(monkeypa
 
     assert "reverification_result" in res
     rev_res = res["reverification_result"]
-    assert rev_res["passed"] is True
+    # The compound correction decomposes into multiple claims; the mock only
+    # returned rev-1. A partial report must not release the whole correction.
+    assert rev_res["passed"] is False
+    assert rev_res["failure_category"] == "INCOMPLETE_VERIFICATION"
     assert rev_res["remaining_contradictions"] == 0
     assert res["route"] == "judge"
     assert res["reverification_attempt_count"] == 1

@@ -11,15 +11,28 @@ filesystem, or produces any side effect at import time.
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass
 
-__all__ = ["CorrectorConfig", "DEFAULT_CORRECTOR_OPENROUTER_MODEL", "DEFAULT_CORRECTOR_GROQ_MODEL"]
+__all__ = [
+    "CorrectorConfig",
+    "DEFAULT_CORRECTOR_OPENROUTER_MODEL",
+    "DEFAULT_CORRECTOR_GROQ_MODEL",
+    "VALID_CORRECTOR_PROVIDERS",
+]
 
 # Cheap non-reasoning model for the OpenRouter-backed corrector path. Matches the
 # Base LLM's fallback model and the n8n "Analyze Claim" node, so the whole stack
 # stays on one credit-friendly model. Override with HG_CORRECTOR_OPENROUTER_MODEL.
 DEFAULT_CORRECTOR_OPENROUTER_MODEL: str = "qwen/qwen-2.5-7b-instruct"
 DEFAULT_CORRECTOR_GROQ_MODEL: str = "openai/gpt-oss-120b"
+
+# Providers the Corrector understands. "local" runs the on-disk Qwen LoRA; "groq"
+# uses the direct Groq transport; "openrouter"/"gemini"/"hosted" route through the
+# shared multi-provider failover router (CharacterRegenerator -> Groq/Gemini/
+# OpenRouter). render.yaml ships HG_CORRECTOR_PROVIDER=openrouter, so rejecting it
+# here crashed Corrector construction and startup validation in production.
+VALID_CORRECTOR_PROVIDERS = frozenset({"local", "groq", "openrouter", "gemini", "hosted"})
 
 
 def _env_str(name: str, default: str) -> str:
@@ -102,6 +115,23 @@ class CorrectorConfig:
     # returns an explicit degraded state (see adapter.build_model_unavailable_result).
     allow_base_model_fallback: bool = False
     deterministic: bool = True
+    # Local remains the backwards-compatible default. Hosted generation is opt-in.
+    provider: str = "local"
+    groq_model: str = DEFAULT_CORRECTOR_GROQ_MODEL
+    groq_timeout_seconds: float = 45.0
+    groq_max_retries: int = 2
+    groq_reasoning_effort: str = "low"
+
+    def __post_init__(self) -> None:
+        if self.provider not in VALID_CORRECTOR_PROVIDERS:
+            raise ValueError(
+                f"unsupported Corrector provider: {self.provider!r} "
+                f"(expected one of {sorted(VALID_CORRECTOR_PROVIDERS)})"
+            )
+        if not math.isfinite(self.groq_timeout_seconds) or self.groq_timeout_seconds <= 0:
+            raise ValueError("Corrector transport timeout must be finite and positive")
+        if not isinstance(self.groq_max_retries, int) or not 0 <= self.groq_max_retries <= 10:
+            raise ValueError("Corrector transport retries must be between 0 and 10")
 
     # OpenRouter model for the LLM-backed corrector path (env-tunable for credit control).
     openrouter_model: str = DEFAULT_CORRECTOR_OPENROUTER_MODEL
@@ -110,6 +140,11 @@ class CorrectorConfig:
     def from_env(cls) -> "CorrectorConfig":
         """Build a config from ``HG_CORRECTOR_*`` environment overrides."""
         return cls(
+            provider=_env_str("HG_CORRECTOR_PROVIDER", cls.provider).strip().lower(),
+            groq_model=_env_str("HG_CORRECTOR_GROQ_MODEL", cls.groq_model),
+            groq_timeout_seconds=_env_float("HG_CORRECTOR_GROQ_TIMEOUT_SECONDS", cls.groq_timeout_seconds),
+            groq_max_retries=_env_int("HG_CORRECTOR_GROQ_MAX_RETRIES", cls.groq_max_retries),
+            groq_reasoning_effort=_env_str("HG_CORRECTOR_GROQ_REASONING_EFFORT", cls.groq_reasoning_effort),
             max_retries=_env_int("HG_CORRECTOR_MAX_RETRIES", cls.max_retries),
             evidence_alignment_threshold=_env_float(
                 "HG_CORRECTOR_EVIDENCE_ALIGNMENT_THRESHOLD",

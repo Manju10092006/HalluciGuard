@@ -14,10 +14,9 @@ to avoid. Three things are done here instead:
 2. **Mixed sentences are split, not guessed.** When a sentence contains both
    sufficient and problem spans, each maximal annotated region is emitted as
    its own example using that region's own human label. No label is invented.
-3. **Unrecognised label vocabulary is reported.** An unknown ``label_type`` is
-   treated conservatively as insufficient evidence (matching the previous
-   behaviour) *and* counted, so a dataset revision with new spellings shows up
-   in the stats instead of silently skewing the label mix.
+3. **Unrecognised label vocabulary is rejected during preparation.** An
+   unknown ``label_type`` is counted and raises before output is written; it
+   is never silently converted into a training label.
 
 Known limitation: RAGTruth annotates spans, not the atomic claims the runtime
 decomposer produces, and this conversion cannot recover atomisation. Span-level
@@ -120,10 +119,9 @@ def _match_concept(raw: str) -> str | None:
 def annotation_concept(annotation: dict) -> str:
     """Map one RAGTruth annotation onto a concept name.
 
-    Unknown vocabulary falls back to ``NOT_ENOUGH_INFO``: the conservative
-    reading, and the one this converter used before the alias table existed.
-    Callers should surface the unknown value via :func:`unknown_label_types`
-    rather than trust the fallback.
+    The standalone helper retains its historical fallback for compatibility.
+    Dataset preparation validates with :func:`unknown_label_types` first and
+    refuses to create examples when any unknown annotation is present.
     """
     return _match_concept(str(annotation.get("label_type", ""))) or "NOT_ENOUGH_INFO"
 
@@ -278,12 +276,18 @@ def _load_sources(dataset_dir: Path) -> dict[str, dict[str, str]]:
     """
     sources: dict[str, dict[str, str]] = {}
     with (dataset_dir / "source_info.jsonl").open(encoding="utf-8") as handle:
-        for line in handle:
-            row = json.loads(line)
+        for number, line in enumerate(handle, 1):
+            try:
+                row = json.loads(line)
+                source_id = str(row["source_id"])
+                if not source_id.strip() or source_id in sources:
+                    raise ValueError("missing or duplicate source_id")
+            except (ValueError, TypeError, KeyError) as exc:
+                raise ValueError(f"invalid source_info.jsonl row {number}: {type(exc).__name__}") from exc
             source_info = row.get("source_info")
             if not isinstance(source_info, str):
                 source_info = json.dumps(source_info, ensure_ascii=False, sort_keys=True)
-            sources[str(row["source_id"])] = {
+            sources[source_id] = {
                 "source_info": source_info,
                 "task_type": str(row.get("task_type") or ""),
             }
@@ -343,15 +347,37 @@ def iter_ragtruth_examples(
     """
     sources = _load_sources(dataset_dir) if sources is None else sources
     with (dataset_dir / "response.jsonl").open(encoding="utf-8") as handle:
-        for line in handle:
-            row = json.loads(line)
+        seen_ids: set[str] = set()
+        for number, line in enumerate(handle, 1):
+            try:
+                row = json.loads(line)
+                row_id = str(row["id"])
+                source_id = str(row["source_id"])
+                if not row_id.strip() or row_id in seen_ids or source_id not in sources:
+                    raise ValueError("duplicate/missing id or unknown source")
+                seen_ids.add(row_id)
+                if not isinstance(row["response"], str) or not isinstance(row.get("labels") or [], list):
+                    raise ValueError("invalid response or annotations")
+                for annotation in row.get("labels") or []:
+                    if not isinstance(annotation, dict) or not (0 <= int(annotation["start"]) < int(annotation["end"]) <= len(row["response"])):
+                        raise ValueError("invalid annotation span")
+                unknown = unknown_label_types(row.get("labels") or [])
+                if unknown:
+                    if stats is not None:
+                        for vocabulary in unknown:
+                            stats[f"unknown_label_type:{vocabulary or '<empty>'}"] += 1
+                    raise ValueError("unknown annotation label_type")
+            except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                if stats is not None:
+                    stats["invalid_response_rows"] += 1
+                raise ValueError(f"invalid response.jsonl row {number}: {type(exc).__name__}") from exc
             if row["split"] != split or row["quality"] != "good":
                 continue
             task_type = (sources.get(str(row["source_id"])) or {}).get("task_type", "")
             annotations = row.get("labels") or []
-            for vocabulary in unknown_label_types(annotations):
-                if stats is not None:
-                    stats[f"unknown_label_type:{vocabulary or '<empty>'}"] += 1
+            # (removed: unreachable unknown-label counter loop — any unknown
+            # label_type already raises in the pre-filter validation above, so this
+            # was dead code whose counts never reached stats.json; audit #21.)
             for span in sentence_spans(row["response"]):
                 record = _evidence_for(
                     span.text, sources, row["source_id"], evidence_shape, pool_k, stats
@@ -429,7 +455,10 @@ def prepare_ragtruth(
     the Experiment A/B comparison a controlled one rather than a comparison of
     two codebases that drifted.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not 0 < dev_fraction < 1:
+        raise ValueError("dev_fraction must be between 0 and 1")
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError(f"prepared output already exists: {output_dir}")
     counters: Counter = Counter()
     sources = _load_sources(dataset_dir)
     train_all = list(
@@ -445,6 +474,8 @@ def prepare_ragtruth(
         )
     )
     source_ids = sorted({x["source_id"] for x in train_all})
+    if len(source_ids) < 2:
+        raise ValueError("at least two training source groups are required")
     rng = random.Random(seed)
     rng.shuffle(source_ids)
     dev_ids = set(source_ids[: max(1, round(len(source_ids) * dev_fraction))])
@@ -453,6 +484,8 @@ def prepare_ragtruth(
         "dev": [x for x in train_all if x["source_id"] in dev_ids],
         "test": test,
     }
+    if not all(raw_splits.values()):
+        raise ValueError("RAGTruth preparation produced an empty train/dev/test split")
     # Downsample only the training majority class. Evaluation remains natural-distribution.
     train = raw_splits["train"]
     positives = [x for x in train if x["label"] != "SUPPORTED"]
@@ -460,7 +493,21 @@ def prepare_ragtruth(
     rng.shuffle(supported)
     supported = supported[: int(max_supported_ratio * max(1, len(positives)))]
     raw_splits["train"] = positives + supported
+    if not raw_splits["train"]:
+        raise ValueError("RAGTruth preparation produced an empty training split")
+    # Guard the data-production boundary against a SINGLE-CLASS train split (audit
+    # #22): if the filter/split leaves only SUPPORTED rows, a 3-class classifier
+    # cannot learn and threshold selection degenerates. Fail loudly here rather
+    # than silently emit a degenerate dataset.
+    train_labels = {x["label"] for x in raw_splits["train"]}
+    if len(train_labels) < 2:
+        raise ValueError(
+            f"RAGTruth preparation produced a single-class training split "
+            f"({sorted(train_labels)}); a classifier cannot be trained from one class. "
+            "Check the quality/task filter and the source-grouped split."
+        )
     rng.shuffle(raw_splits["train"])
+    output_dir.mkdir(parents=True, exist_ok=True)
     stats = {}
     for name, records in raw_splits.items():
         with (output_dir / f"{name}.jsonl").open("w", encoding="utf-8") as handle:
@@ -485,8 +532,7 @@ def prepare_ragtruth(
             "Sentence-level examples are emitted only when annotated problem spans "
             "cover the whole sentence. Mixed sentences are split into per-span "
             "examples using the human label of each annotated region. "
-            "'unknown_label_type:*' counters mean the dataset used a label_type this "
-            "converter does not recognise; those were treated as NOT_ENOUGH_INFO."
+            "Unknown label types abort preparation before this report is written."
         ),
     }
     (output_dir / "stats.json").write_text(json.dumps(stats, indent=2), encoding="utf-8")

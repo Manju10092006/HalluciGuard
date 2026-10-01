@@ -68,7 +68,7 @@ class WebEnhancedAdapter:
 
     def _get_settings(self):
         """Lazy-load settings to avoid circular imports."""
-        from config.settings import get_settings
+        from agents.verifier_agent.config.settings import get_settings
         return get_settings()
 
     def _get_web_retriever(self):

@@ -318,7 +318,8 @@ async def health(deep: bool = False) -> Dict[str, Any]:
     try:
         base_llm = (await BaseLLMService().health(check_network=True)).model_dump()
     except Exception as exc:
-        base_llm = {"available": False, "provider": "openrouter", "error": str(exc)}
+        base_llm = {"available": False, "error": "Base LLM health check failed",
+                    "error_type": type(exc).__name__}
 
     llm_ready = all(
         base_llm.get(field) is True

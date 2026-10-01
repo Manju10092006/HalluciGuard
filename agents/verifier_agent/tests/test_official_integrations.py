@@ -5,7 +5,7 @@ import pytest
 from adapters.general import GeneralAdapter
 from adapters.healthcare import HealthcareAdapter
 from adapters.legal_general import LegalGeneralAdapter
-from config.settings import get_settings
+from agents.verifier_agent.config.settings import get_settings
 from models.model_manager import get_model_manager
 
 

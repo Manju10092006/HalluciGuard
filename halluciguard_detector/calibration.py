@@ -26,6 +26,7 @@ only for the data distribution they were measured on.
 """
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -46,11 +47,15 @@ DEFAULT_MAX_LENGTH = 256
 
 
 def apply_temperature(logits: torch.Tensor, temperature: float) -> torch.Tensor:
+    if not math.isfinite(float(temperature)) or temperature <= 0 or not torch.isfinite(logits).all():
+        raise ValueError("temperature and logits must be finite; temperature must be positive")
     return torch.softmax(logits / max(temperature, 1e-4), dim=-1)
 
 
 def class_probabilities(logits: np.ndarray, temperature: float = 1.0) -> np.ndarray:
     """Return the calibrated three-class distribution for raw logits."""
+    if not math.isfinite(float(temperature)) or temperature <= 0:
+        raise ValueError("temperature must be finite and positive")
     scaled = torch.tensor(np.asarray(logits, dtype=np.float32)) / max(float(temperature), 1e-4)
     return apply_temperature(scaled, 1.0).numpy()
 
@@ -94,6 +99,12 @@ def save_calibration(
     ``verification_risk_threshold`` so older readers keep their previous value
     instead of silently picking up a different number.
     """
+    if path.exists():
+        raise FileExistsError("calibration artifact already exists")
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("invalid calibration temperature")
+    if any(not math.isfinite(value) or not 0 <= value <= 1 for value in (contradiction_threshold, verification_risk_threshold)):
+        raise ValueError("invalid calibration thresholds")
     path.write_text(
         json.dumps(
             {
@@ -122,6 +133,18 @@ def load_calibration(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("calibration must be an object")
+    # Use `.get(...) is not None` (not `in`): an explicit JSON null is treated as
+    # absent rather than crashing float(None)/int(None) with an undocumented
+    # TypeError the legacy-tolerance path below was meant to handle (audit M8).
+    if data.get("temperature") is not None and (not math.isfinite(float(data["temperature"])) or float(data["temperature"]) <= 0):
+        raise ValueError("invalid calibration temperature")
+    for key in ("contradiction_threshold", "verification_risk_threshold", DEPRECATED_HALLUCINATION_THRESHOLD):
+        if data.get(key) is not None and (not math.isfinite(float(data[key])) or not 0 <= float(data[key]) <= 1):
+            raise ValueError(f"invalid calibration {key}")
+    if data.get("max_length") is not None and int(data["max_length"]) <= 0:
+        raise ValueError("invalid calibration max_length")
     legacy = data.get(DEPRECATED_HALLUCINATION_THRESHOLD)
     if data.get("verification_risk_threshold") is None and legacy is not None:
         data["verification_risk_threshold"] = float(legacy)

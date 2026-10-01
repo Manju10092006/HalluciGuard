@@ -26,7 +26,7 @@ import torch
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from transformers import pipeline as hf_pipeline
 
-from config.settings import get_settings
+from agents.verifier_agent.config.settings import get_settings
 
 logger = logging.getLogger("halluciguard.model_manager")
 

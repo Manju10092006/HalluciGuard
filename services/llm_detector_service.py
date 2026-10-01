@@ -96,13 +96,20 @@ class BaseLLMDetectorService:
 
         # Step 2: pre-retrieval claim triage. Grounded truth probabilities are
         # computed only when retrieved evidence is supplied to DetectorAgent.
-        detection_result: dict[str, Any] = self.detector_agent.detect(
-            user_query=user_query,
-            llm_response=draft_response,
-        )
-
-        next_act_str = str(detection_result.get("next_action", "Verify")).upper()
-        decision = "VERIFY" if next_act_str == "VERIFY" else "ACCEPT"
+        try:
+            detection_result: dict[str, Any] = self.detector_agent.detect(
+                user_query=user_query, llm_response=draft_response,
+            )
+            if not isinstance(detection_result, dict):
+                raise ValueError("invalid_detector_result")
+        except Exception as exc:
+            detection_result = {
+                "status": "failed", "detector_degraded": True,
+                "verification_reason": "detector_failure",
+                "error_type": type(exc).__name__,
+            }
+        # This service supplies no evidence: triage cannot establish correctness.
+        decision = "VERIFY"
 
         detector_dict: dict[str, Any] = {
             "confidence_score": detection_result.get("confidence_score"),
@@ -114,6 +121,9 @@ class BaseLLMDetectorService:
             "grounded": bool(detection_result.get("grounded", False)),
             "claims": detection_result.get("claims", []),
             "verification_reason": detection_result.get("verification_reason"),
+            "status": detection_result.get("status", "completed"),
+            "detector_degraded": bool(detection_result.get("detector_degraded", False)),
+            "error_type": detection_result.get("error_type"),
         }
 
         return LLMDetectorSliceResult(

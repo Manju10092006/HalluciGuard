@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List
+from typing import List, Optional
 from bs4 import BeautifulSoup
 
-from config.settings import get_settings
+from agents.verifier_agent.config.settings import get_settings
 from schemas.models import Passage, AdapterMetadata
 from utils.async_executor import gather_results
 from utils.http_client import ResilientHttpClient, get_client

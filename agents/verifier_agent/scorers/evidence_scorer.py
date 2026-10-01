@@ -24,6 +24,13 @@ class EvidenceScorer:
     """
 
     MIN_NLI_SIGNAL = 0.35  # Aligned with decision-grade evidence selection threshold
+    # Calibrated evidential weight of a decisive structured relation result
+    # (MATCH / OBJECT_MISMATCH / RELATION_MISMATCH) when it drives the class. It
+    # floors the FUSED support/contradiction SIGNAL (never the NLI probability, so
+    # the HG-007 "no fabricated model scores" guarantee holds) so a fail-closed
+    # structural check is not erased by a weak or wrong NLI probability. This is a
+    # conservative prior pending held-out dev-set calibration (audit HG-021/H1).
+    RELATION_VOTE = 0.70
 
     def __init__(self, credibility_config: Dict[str, Any] | None = None) -> None:
         self.reliability_manager = SourceReliabilityManager()
@@ -32,7 +39,7 @@ class EvidenceScorer:
     def _get_relevance_gate_threshold(self) -> float:
         """Get the relevance gate threshold from settings, fallback to 0.20."""
         try:
-            from config.settings import get_settings
+            from agents.verifier_agent.config.settings import get_settings
             return float(get_settings().evidence_relevance_gate)
         except Exception:
             return 0.20
@@ -41,7 +48,7 @@ class EvidenceScorer:
         """Confidence ceiling for a VERIFIED verdict that no structured relation
         check could ground (F-1). Falls back to 0.70 if settings are unavailable."""
         try:
-            from config.settings import get_settings
+            from agents.verifier_agent.config.settings import get_settings
             return float(get_settings().ungrounded_confidence_ceiling)
         except Exception:
             return 0.70
@@ -107,6 +114,22 @@ class EvidenceScorer:
 
         return False
 
+    @staticmethod
+    def _historical_only_against_present_claim(claim: str, snippet: str) -> bool:
+        """Abstain on an explicitly bounded past premise, not infer present truth.
+
+        This deliberately narrow guard does not resolve dates, infer a new
+        capital, or modify NLI probabilities. Mixed past/present passages and
+        dated hypotheses remain eligible for ordinary scoring.
+        """
+        if re.search(r"\b\d{4}\b", claim) or not re.search(r"\b(?:is|are)\b", claim, re.I):
+            return False
+        # Adapter headings are labels, not assertions about the claim.
+        text = re.sub(r"^(?:Section|Article)\s*\[[^\]]*\]\s*:\s*", "", snippet, flags=re.I)
+        interval = re.search(r"\b(?:from\s+\d{4}\s+to|between\s+\d{4}\s+and)\s+\d{4}\b", text, re.I)
+        return bool(interval and re.search(r"\b(?:was|were)\b", text, re.I)
+                    and not re.search(r"\b(?:is|are)\b", text, re.I))
+
     def classify_evidence(
         self,
         claim: str,
@@ -137,30 +160,37 @@ class EvidenceScorer:
         if nli.get("nli_degraded", False) or nli.get("validity_factor", 1.0) == 0.0:
             return "NEUTRAL"
 
-        # Structured Relation Verification Check
-        rel_result = self.relation_verifier.verify_relation(claim, [passage])
-        if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
-            # Direct contradiction at relation level overrides false entailment or neutral
-            # Bypasses the word-coverage suppression check completely
-            return "CONTRADICTING"
-        elif rel_result.status == "MATCH":
-            return "SUPPORTING"
-
-        # Guard against myths / proverbs / common misconceptions matching
-        # assertively if the passage qualifies them as untrue, figurative, or an idiom.
         full_text = f"{getattr(passage, 'title', '')} {passage.snippet}"
-        snippet_lower = full_text.lower()
-        refutation_phrases = (
-            "disproven", "debunked", "misconception", "hoax", "untrue",
-            "falsely", "refuted", "no evidence", "scientifically disproven",
-            "incorrectly claimed", "not true", "not associated", "is false",
-        )
-        has_explicit_refutation = any(rf in snippet_lower for rf in refutation_phrases)
-        if has_explicit_refutation and not any(neg in claim.lower() for neg in ("not", "never", "disproven", "false", "myth")):
-            return "CONTRADICTING"
+        entailment = self._bounded(nli.get("entailment_score"))
+        contradiction = self._bounded(nli.get("contradiction_score"))
 
+        # Myth / idiom / misconception framing never SUPPORTS the surface claim,
+        # even when the (subject, relation, object) triple lexically matches.
         if self._is_non_assertive_claim_context(claim, full_text):
             return "NEUTRAL"
+
+        # Structured relation check as a CORROBORATION-GATED vote. The relation
+        # verifier proves the passage asserts the SAME subject+predicate, so it
+        # drives the class UNLESS the NLI model strongly disagrees (its veto). We
+        # never overwrite NLI probabilities here (that 0.95 fabrication stays
+        # removed); score_evidence floors only the passage WEIGHT for grounded
+        # pairs so a miscalibrated reranker cannot erase a structural signal.
+        rel_result = self.relation_verifier.verify_relation(claim, [passage])
+        if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
+            # A clean structural object/relation mismatch means the evidence
+            # asserts a DIFFERENT object for the same subject+relation (fail-closed
+            # extractor). An NLI model that "entails" a mismatched claim is making
+            # an error (e.g. "Hyderabad is the capital of India" against evidence
+            # that it is the capital of Telangana), so the high-precision structural
+            # check wins here -> CONTRADICTING. We still never mutate NLI scores.
+            return "CONTRADICTING"
+        if rel_result.status == "MATCH":
+            # A surface triple match can be fooled by negation/qualifiers the regex
+            # misses, so a STRONG NLI contradiction vetoes the match (abstain)
+            # rather than fabricate support.
+            if contradiction >= self.MIN_NLI_SIGNAL and contradiction > entailment:
+                return "NEUTRAL"
+            return "SUPPORTING"
 
         entailment = self._bounded(nli.get("entailment_score"))
         contradiction = self._bounded(nli.get("contradiction_score"))
@@ -173,6 +203,8 @@ class EvidenceScorer:
             return "NEUTRAL"
         elif ("contradiction" in label or contradiction >= self.MIN_NLI_SIGNAL) and contradiction > entailment:
             if contradiction >= self.MIN_NLI_SIGNAL:
+                if self._historical_only_against_present_claim(claim, passage.snippet):
+                    return "NEUTRAL"
                 # If passage lacks key predicate terms and has no explicit refutation phrases, it is neutral context
                 claim_words = [
                     w.lower() for w in re.findall(r"[a-zA-Z0-9]+", claim)
@@ -267,15 +299,7 @@ class EvidenceScorer:
             neutral = self._bounded(nli.get("neutral_score"))
             validity_factor = 0.0 if nli.get("nli_degraded", False) else float(nli.get("validity_factor", 1.0))
 
-            # Apply relation verification signal calibration
-            if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
-                contradiction = max(contradiction, 0.95)
-                entailment = 0.0
-                neutral = 0.05
-            elif rel_result.status == "MATCH":
-                entailment = max(entailment, 0.95)
-                contradiction = 0.0
-                neutral = 0.05
+            # Never replace model probabilities with deterministic rule values.
 
             source_id = str(
                 getattr(passage, "source_id", "")
@@ -296,25 +320,26 @@ class EvidenceScorer:
             relevance = self.relevance_weight(
                 getattr(passage, "relevance_score", 0.5)
             )
-            # A decisive structured relation comparison already proves that the
-            # passage discusses the same subject and predicate.  Do not let a
-            # poorly calibrated cross-encoder score erase that deterministic
-            # grounding signal; retain source/NLI weighting, but apply a strong
-            # relevance floor for the confirmed relation pair.
-            if rel_result.status in (
-                "MATCH",
-                "OBJECT_MISMATCH",
-                "RELATION_MISMATCH",
-            ):
+            # A decisive structured relation result proves this passage discusses
+            # the SAME subject+predicate as the claim, so it is on-topic by
+            # construction. Floor its relevance WEIGHT so a miscalibrated
+            # cross-encoder/reranker score cannot erase a structurally-grounded
+            # support/contradiction signal. This floors the WEIGHT only; it does
+            # NOT overwrite the NLI probability (the fabricated-0.95 override that
+            # Codex removed stays removed).
+            if rel_result.status in ("MATCH", "OBJECT_MISMATCH", "RELATION_MISMATCH"):
                 relevance = max(relevance, 0.80)
-
-            # Canonical URL / doc key for deduplication
             url_key = (getattr(passage, "url", "") or source_id or getattr(passage, "title", "")).strip().lower()
 
             base_weight = credibility * recency * relevance * validity_factor
 
             if evidence_class == "SUPPORTING":
                 support_signal = entailment * (1.0 - 0.35 * neutral)
+                # Calibrated relation vote: a structural MATCH is corroborating
+                # evidence in its own right, so floor the FUSED support signal to a
+                # bounded prior. The NLI probability itself is never rewritten.
+                if rel_result.status == "MATCH":
+                    support_signal = max(support_signal, self.RELATION_VOTE)
                 effective_support = support_signal * base_weight
                 # Keep strongest passage per canonical URL
                 if url_key not in url_support_weights or effective_support > url_support_weights[url_key]:
@@ -322,6 +347,11 @@ class EvidenceScorer:
                 supporting_sources.add(source_id)
             elif evidence_class == "CONTRADICTING":
                 contradiction_signal = contradiction * (1.0 - 0.35 * neutral)
+                # Calibrated relation vote: a structural OBJECT/RELATION mismatch
+                # is corroborating counter-evidence, so floor the FUSED
+                # contradiction signal to a bounded prior (NLI probability intact).
+                if rel_result.status in ("OBJECT_MISMATCH", "RELATION_MISMATCH"):
+                    contradiction_signal = max(contradiction_signal, self.RELATION_VOTE)
                 effective_contradiction = contradiction_signal * base_weight
                 # Keep strongest passage per canonical URL
                 if url_key not in url_contradiction_weights or effective_contradiction > url_contradiction_weights[url_key]:

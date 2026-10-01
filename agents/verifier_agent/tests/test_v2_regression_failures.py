@@ -69,6 +69,8 @@ class TestV2RegressionFailures:
 
         nli = {"label": "entailment", "entailment_score": 0.93, "contradiction_score": 0.05, "neutral_score": 0.02}
         ev_class = self.scorer.classify_evidence(claim, passage, nli)
+        # OBJECT_MISMATCH is high-precision: NLI "entailing" a mismatched claim is
+        # an NLI error, so the structural check wins -> CONTRADICTING (audit H1).
         assert ev_class == "CONTRADICTING"
 
         scores = self.scorer.score_evidence(claim, [passage], [nli], domain="general")
@@ -89,6 +91,8 @@ class TestV2RegressionFailures:
         # Notice NLI gives 0.00 contradiction, neutral label
         nli = {"label": "neutral", "entailment_score": 0.01, "contradiction_score": 0.02, "neutral_score": 0.97}
         ev_class = self.scorer.classify_evidence(claim, passage, nli)
+        # Structural OBJECT_MISMATCH (London vs Paris) carries the contradiction
+        # even when NLI is silent; it floors the passage weight, not the NLI score.
         assert ev_class == "CONTRADICTING"
 
         scores = self.scorer.score_evidence(claim, [passage], [nli], domain="general")
@@ -108,6 +112,7 @@ class TestV2RegressionFailures:
 
         nli = {"label": "neutral", "entailment_score": 0.02, "contradiction_score": 0.10, "neutral_score": 0.88}
         ev_class = self.scorer.classify_evidence(claim, passage, nli)
+        # OBJECT_MISMATCH (Chiranjeevi vs Allu Aravind) -> CONTRADICTING.
         assert ev_class == "CONTRADICTING"
 
         scores = self.scorer.score_evidence(claim, [passage], [nli], domain="general")

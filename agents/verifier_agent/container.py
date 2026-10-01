@@ -1,6 +1,6 @@
 from typing import Any, Optional
 import threading
-from config.settings import get_settings, Settings
+from agents.verifier_agent.config.settings import get_settings, Settings
 from models.model_manager import get_model_manager, ModelManager
 from utils.http_client import get_client, ResilientHttpClient
 from adapters.registry import get_registry

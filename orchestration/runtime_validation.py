@@ -55,6 +55,24 @@ def validate_openrouter_configuration() -> ComponentCheckResult:
     )
 
 
+def validate_base_llm_configuration() -> ComponentCheckResult:
+    """Check the same provider chain as generation, without making API calls."""
+    from services.llm_providers import build_provider_specs, resolve_provider_order
+    try:
+        order, specs = resolve_provider_order(), build_provider_specs()
+        configured = [name for name in order if specs[name].has_key]
+        return ComponentCheckResult(
+            ok=bool(configured), component="base_llm",
+            detail="Hosted LLM configuration is present; connectivity not tested." if configured
+                   else "No credential is configured for the selected provider chain.",
+            metadata={"provider_order": order, "configured_providers": configured,
+                      "inference_tested": False},
+        )
+    except Exception as exc:
+        return ComponentCheckResult(False, "base_llm", "Hosted LLM configuration is invalid.",
+                                    {"error_type": type(exc).__name__})
+
+
 def validate_detector_model_reference() -> ComponentCheckResult:
     """Validate the local reference-grounded detector package and artifacts."""
     from pathlib import Path
@@ -77,7 +95,7 @@ def validate_detector_model_reference() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=False,
             component="detector",
-            detail=f"HalluciGuard detector package is not importable: {type(exc).__name__}: {exc}",
+            detail=f"HalluciGuard detector package is not importable: {type(exc).__name__}: {str(exc)[:200]}",
             metadata={"detector": "halluciguard_detector", "model_dir": str(model_dir)},
         )
 
@@ -113,7 +131,7 @@ def validate_verifier_configuration() -> ComponentCheckResult:
         )
         if verifier_dir not in sys.path:
             sys.path.insert(0, verifier_dir)
-        from config.settings import get_settings
+        from agents.verifier_agent.config.settings import get_settings
         settings = get_settings()
         nli_model = os.environ.get("HALLUCIGUARD_NLI_MODEL_PATH") or settings.nli_model
         return ComponentCheckResult(
@@ -129,8 +147,8 @@ def validate_verifier_configuration() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=False,
             component="verifier",
-            detail=f"{type(exc).__name__}: {exc}",
-            metadata={"error": str(exc)},
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            metadata={"error_type": type(exc).__name__, "error": str(exc)[:200]},
         )
 
 
@@ -148,8 +166,8 @@ def validate_memory_configuration() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=False,
             component="memory",
-            detail=f"{type(exc).__name__}: {exc}",
-            metadata={"error": str(exc)},
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            metadata={"error_type": type(exc).__name__, "error": str(exc)[:200]},
         )
 
 
@@ -167,43 +185,59 @@ def validate_judge_configuration() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=False,
             component="judge",
-            detail=f"{type(exc).__name__}: {exc}",
-            metadata={"error": str(exc)},
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            metadata={"error_type": type(exc).__name__, "error": str(exc)[:200]},
         )
 
 
 def validate_corrector_configuration() -> ComponentCheckResult:
     """Validate the configured correction generator without loading model weights."""
-    provider = os.environ.get("HG_CORRECTOR_PROVIDER", "openrouter").strip().lower()
+    provider = os.environ.get("HG_CORRECTOR_PROVIDER", "local").strip().lower()
     try:
         from agents.corrector_agent.corrector import CorrectorAgent
-        if provider == "openrouter":
-            key_ready = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
+        from agents.corrector_agent.corrector.config import CorrectorConfig
+        config = CorrectorConfig.from_env()
+        if config.provider == "groq":
+            key_ready = bool(os.environ.get("GROQ_API_KEY", "").strip())
             return ComponentCheckResult(
                 ok=key_ready and callable(CorrectorAgent),
                 component="corrector",
-                detail="OpenRouter-backed Corrector is ready." if key_ready else "OPENROUTER_API_KEY is required by the configured Corrector.",
-                metadata={"provider": provider, "key_configured": key_ready},
+                detail="Groq Corrector configuration is present; connectivity not tested." if key_ready else "GROQ_API_KEY is required by the configured Corrector.",
+                metadata={"provider": "groq", "key_configured": key_ready, "inference_tested": False},
             )
-        from agents.corrector_agent.corrector.config import CorrectorConfig
-        from agents.corrector_agent.corrector.model_client import resolve_model
-        status = resolve_model(CorrectorConfig.from_env())
+        if config.provider == "local":
+            from agents.corrector_agent.corrector.model_client import resolve_model
+            status = resolve_model(config)
+            return ComponentCheckResult(
+                ok=bool(status.available),
+                component="corrector",
+                detail=status.detail or "Local Corrector model is available.",
+                metadata={"provider": "local", "model_status": status.model_dump()},
+            )
+        # Hosted providers (openrouter/gemini/hosted) generate through the shared
+        # multi-provider failover router (CharacterRegenerator -> Groq/Gemini/
+        # OpenRouter). Validate that chain exactly as the Base LLM does, with no
+        # network call; never load the local Qwen model for a hosted run.
+        from services.llm_providers import build_provider_specs, resolve_provider_order
+        order, specs = resolve_provider_order(), build_provider_specs()
+        configured = [name for name in order if specs[name].has_key]
         return ComponentCheckResult(
-            ok=bool(status.available),
+            ok=bool(configured) and callable(CorrectorAgent),
             component="corrector",
-            detail=status.detail or "Local Corrector model is available.",
-            metadata={"provider": "local", "model_status": status.model_dump()},
+            detail="Hosted Corrector router has a configured provider; connectivity not tested." if configured
+                   else "No provider credential configured for the hosted Corrector router.",
+            metadata={"provider": config.provider, "configured_providers": configured, "inference_tested": False},
         )
     except Exception as exc:
         return ComponentCheckResult(
             ok=False,
             component="corrector",
-            detail=f"{type(exc).__name__}: {exc}",
-            metadata={"provider": provider, "error": str(exc)},
+            detail=f"Corrector configuration unavailable: {type(exc).__name__}",
+            metadata={"provider": provider, "error_type": type(exc).__name__},
         )
 def validate_orchestration_startup() -> Dict[str, Any]:
     """Run comprehensive validation checks for all production components."""
-    openrouter = validate_openrouter_configuration()
+    openrouter = validate_base_llm_configuration()
     detector = validate_detector_model_reference()
     verifier = validate_verifier_configuration()
     judge = validate_judge_configuration()

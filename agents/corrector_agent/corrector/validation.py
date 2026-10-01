@@ -346,7 +346,7 @@ def _validation_error(gate: str, exc: BaseException) -> Finding:
     return Finding(
         Code.VALIDATION_ERROR.value,
         f"validation gate {gate!r} raised and the candidate was rejected",
-        {"gate": gate, "error_type": type(exc).__name__, "error": str(exc)[:200]},
+        {"gate": gate, "error_type": type(exc).__name__, "error": "validation execution failed"},
         retryable=False,
     )
 

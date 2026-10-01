@@ -63,6 +63,11 @@ class CitationFormatter:
         bge_score = float(getattr(passage, 'relevance_score', 0.0))
 
         return EvidenceItem(
+            source_id=passage.source_id,
+            model_input_snippet=passage.snippet,
+            snippet_truncated=len(passage.snippet) > 500,
+            score_provenance=nli_result.get("score_provenance", "nli"),
+            relation_status=nli_result.get("relation_status", "NO_TRIPLE_EXTRACTED"),
             title=getattr(passage, 'title', '') or "Reference Passage",
             source=source_name,
             snippet=snippet,

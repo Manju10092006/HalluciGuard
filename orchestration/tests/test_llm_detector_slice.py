@@ -104,7 +104,7 @@ async def test_successful_generation_reaches_detector():
     assert result.detector is not None
     assert result.detector["hallucination_probability"] == 0.05
     assert result.detector["risk_tier"] == "LOW"
-    assert result.detector["decision"] == "ACCEPT"
+    assert result.detector["decision"] == "VERIFY"  # evidence-free triage
 
 
 @pytest.mark.asyncio
@@ -277,4 +277,4 @@ async def test_final_contract_is_json_serializable():
     assert isinstance(serialized, str)
     deserialized = json.loads(serialized)
     assert deserialized["user_query"] == "JSON check"
-    assert deserialized["detector"]["decision"] == "ACCEPT"
+    assert deserialized["detector"]["decision"] == "VERIFY"

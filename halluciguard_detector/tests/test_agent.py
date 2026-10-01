@@ -54,6 +54,7 @@ def test_grounded_adapter_preserves_sentence_predictions(monkeypatch):
         },
         risk=RiskLevel.HIGH,
         evidence_snippets=["Java was created by James Gosling."],
+        model_input_evidence="Java was created by James Gosling.",
     )
     grounded = SimpleNamespace(
         sentences=[sentence],
@@ -97,6 +98,7 @@ def _grounded_response(**overrides):
         non_factual=False,
         risk=RiskLevel.MEDIUM,
         evidence_snippets=["Java was created by James Gosling."],
+        model_input_evidence="Java was created by James Gosling.",
     )
     grounded = SimpleNamespace(
         sentences=[sentence],
@@ -215,5 +217,7 @@ def test_grounded_excludes_non_factual_from_contradiction_mass(monkeypatch):
         evidence=["Python is a popular language."],
     )
     assert result["claims"][0]["non_factual"] is True
-    assert result["contradiction_mass"] == pytest.approx(0.0)
-    assert result["verification_risk"] == pytest.approx(0.0)
+    # No factual classifier call happened; unavailable must differ from zero.
+    assert result["contradiction_mass"] is None
+    assert result["verification_risk"] is None
+    assert result["inference_executed"] is False

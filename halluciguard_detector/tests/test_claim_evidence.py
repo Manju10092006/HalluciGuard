@@ -97,7 +97,8 @@ def test_numeric_mismatch_reinforces_contradiction_without_inventing_probs(monke
     assert any("Number/date mismatch" in w for w in result.warnings)
     # Contradiction rises above its floor but stays below an absolute 0.90
     # overwrite; supported drops correspondingly and the mass still sums to 1.
-    assert item.contradicted_probability > 0.05
+    assert item.contradicted_probability == pytest.approx(0.05)
+    assert item.requires_verification is True
     assert item.contradicted_probability < 0.90
     total = item.supported_probability + item.contradicted_probability + item.unknown_probability
     assert total == pytest.approx(1.0)
@@ -121,7 +122,8 @@ def test_entity_conflict_guard_renormalizes_without_extreme_values(monkeypatch):
     )
     item = result.sentences[0]
     assert any("Named-entity conflict" in w for w in result.warnings)
-    assert item.contradicted_probability > 0.10
+    assert item.contradicted_probability == pytest.approx(0.10)
+    assert item.requires_verification is True
     assert item.contradicted_probability < 0.90
     total = item.supported_probability + item.contradicted_probability + item.unknown_probability
     assert total == pytest.approx(1.0)

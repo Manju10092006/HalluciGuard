@@ -197,18 +197,33 @@ def select_evidence(
             k=pool_k,
             dense_model=dense_model,
         )
+        retrieval = (_hybrid_retriever.diagnostics()
+                     if hasattr(_hybrid_retriever, "diagnostics") else {})
+        if trace is not None:
+            trace["retrieval"] = retrieval
         # The shared retriever already returns at most ``pool_k`` fused
         # candidates, so the slice is a no-op guard rather than an extra slot.
         ranked = _reranker.rerank(claim, merged[:pool_k], k=rerank_top)
+        reranking = (_reranker.diagnostics() if hasattr(_reranker, "diagnostics") else {})
+        if trace is not None:
+            trace["reranking"] = reranking
         snippets = [p.snippet for p in ranked if p.snippet and p.snippet.strip()]
         if snippets:
-            _record_route(trace, "hybrid", False)
+            retrieval_route = retrieval.get("route", "unknown")
+            degraded = bool(retrieval.get("degraded", True) or
+                            not reranking.get("inference_executed", False))
+            _record_route(trace, retrieval_route, degraded,
+                          "retrieval or reranking fallback" if degraded else "")
+            if trace is not None:
+                trace["selected_count"] = len(snippets)
+                trace["model_input_evidence"] = snippets[0]
+                trace["tokenizer_truncation"] = "not_measured"
             return snippets
         # Reranker produced no usable snippet (degraded/unavailable): keep the
         # hybrid order as a real fallback rather than silently dropping evidence.
         reason = "reranker returned no usable snippet; kept pre-rerank hybrid order"
         logger.warning("Evidence selection for claim (%s) degraded: %s.", claim, reason)
-        _record_route(trace, "hybrid_order", True, reason)
+        _record_route(trace, retrieval.get("route", "unknown") + "_pre_rerank", True, reason)
         return [p.snippet for p in merged[:rerank_top] if p.snippet]
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(
