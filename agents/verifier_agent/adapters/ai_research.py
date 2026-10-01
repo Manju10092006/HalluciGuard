@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List
+from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from agents.verifier_agent.config.settings import get_settings

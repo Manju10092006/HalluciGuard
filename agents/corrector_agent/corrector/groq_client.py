@@ -30,6 +30,7 @@ class GroqGenerator:
             timeout_seconds=config.groq_timeout_seconds,
             max_retries=config.groq_max_retries,
             reasoning_effort=config.groq_reasoning_effort,
+            max_tokens=config.max_new_tokens,
         )
 
     def __init__(
@@ -40,12 +41,14 @@ class GroqGenerator:
         timeout_seconds: float = 45.0,
         max_retries: int = 2,
         reasoning_effort: str = "low",
+        max_tokens: int = 256,
     ) -> None:
         self.api_key = api_key or os.environ.get("GROQ_API_KEY", "")
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(0, int(max_retries))
         self.reasoning_effort = reasoning_effort
+        self.max_tokens = max(1, int(max_tokens))
 
     def generate(self, system_text: str, prompt_text: str) -> str:
         if not self.api_key:
@@ -58,7 +61,9 @@ class GroqGenerator:
                 {"role": "user", "content": prompt_text},
             ],
             "temperature": 0,
-            "max_completion_tokens": 256,
+            # Honor the configured budget (HG_CORRECTOR_MAX_NEW_TOKENS) instead of a
+            # hardcoded 256, so the hosted path matches the local path (audit #31).
+            "max_completion_tokens": self.max_tokens,
             "reasoning_effort": self.reasoning_effort,
             "response_format": {"type": "json_object"},
         }
