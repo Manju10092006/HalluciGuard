@@ -495,6 +495,17 @@ def prepare_ragtruth(
     raw_splits["train"] = positives + supported
     if not raw_splits["train"]:
         raise ValueError("RAGTruth preparation produced an empty training split")
+    # Guard the data-production boundary against a SINGLE-CLASS train split (audit
+    # #22): if the filter/split leaves only SUPPORTED rows, a 3-class classifier
+    # cannot learn and threshold selection degenerates. Fail loudly here rather
+    # than silently emit a degenerate dataset.
+    train_labels = {x["label"] for x in raw_splits["train"]}
+    if len(train_labels) < 2:
+        raise ValueError(
+            f"RAGTruth preparation produced a single-class training split "
+            f"({sorted(train_labels)}); a classifier cannot be trained from one class. "
+            "Check the quality/task filter and the source-grouped split."
+        )
     rng.shuffle(raw_splits["train"])
     output_dir.mkdir(parents=True, exist_ok=True)
     stats = {}

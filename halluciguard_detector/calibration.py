@@ -135,12 +135,15 @@ def load_calibration(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("calibration must be an object")
-    if "temperature" in data and (not math.isfinite(float(data["temperature"])) or float(data["temperature"]) <= 0):
+    # Use `.get(...) is not None` (not `in`): an explicit JSON null is treated as
+    # absent rather than crashing float(None)/int(None) with an undocumented
+    # TypeError the legacy-tolerance path below was meant to handle (audit M8).
+    if data.get("temperature") is not None and (not math.isfinite(float(data["temperature"])) or float(data["temperature"]) <= 0):
         raise ValueError("invalid calibration temperature")
     for key in ("contradiction_threshold", "verification_risk_threshold", DEPRECATED_HALLUCINATION_THRESHOLD):
-        if key in data and (not math.isfinite(float(data[key])) or not 0 <= float(data[key]) <= 1):
+        if data.get(key) is not None and (not math.isfinite(float(data[key])) or not 0 <= float(data[key]) <= 1):
             raise ValueError(f"invalid calibration {key}")
-    if "max_length" in data and int(data["max_length"]) <= 0:
+    if data.get("max_length") is not None and int(data["max_length"]) <= 0:
         raise ValueError("invalid calibration max_length")
     legacy = data.get(DEPRECATED_HALLUCINATION_THRESHOLD)
     if data.get("verification_risk_threshold") is None and legacy is not None:
