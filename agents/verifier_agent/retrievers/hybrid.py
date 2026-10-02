@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Dict, List, Tuple
 
 from schemas.models import Passage
@@ -83,6 +84,16 @@ class HybridRetriever:
         return min(1.0, 0.85 * overlap + 0.15 * phrase)
 
     def retrieve(
+        self, query: str, passages: List[Passage], k: int = 5,
+        dense_model: str | None = None,
+    ) -> List[Passage]:
+        started = time.perf_counter()
+        try:
+            return self._retrieve(query, passages, k, dense_model)
+        finally:
+            self.last_diagnostics["total_duration_ms"] = round((time.perf_counter() - started) * 1000, 3)
+
+    def _retrieve(
         self,
         query: str,
         passages: List[Passage],
@@ -94,12 +105,22 @@ class HybridRetriever:
             "sparse_attempted": False, "sparse_executed": False,
             "dense_attempted": False, "dense_executed": False,
             "dense_available": False, "dense_failure_stage": None,
+            "sparse_available": False,
+            "sparse_availability_checked": False, "dense_availability_checked": False,
             "sparse_contributed": False, "dense_contributed": False,
             "errors": [], "selected_count": 0,
             "input_count": len(passages), "deduplicated_count": 0,
             "sparse_result_count": 0, "dense_result_count": 0,
             "fusion_executed": False, "fusion_backend_count": 0,
             "fallback_reason": None,
+            "sparse_requested": True, "dense_requested": True,
+            "sparse_status": "not_run", "dense_status": "not_run",
+            "fusion_attempted": False, "fusion_status": "not_run",
+            "sparse_duration_ms": 0.0, "dense_duration_ms": 0.0,
+            "fusion_duration_ms": 0.0,
+            "sparse_model": "rank_bm25.BM25Okapi",
+            "dense_model": dense_model or self.dense.model_name,
+            "selected_contributors": [],
         }
         if not passages or k <= 0 or not query.strip():
             self.last_diagnostics["route"] = "empty_input"
@@ -113,6 +134,7 @@ class HybridRetriever:
         passages = list(unique.values())
         self.last_diagnostics["deduplicated_count"] = len(passages)
 
+        stage = "backend_setup"
         try:
             if dense_model and dense_model != self.dense.model_name:
                 self.dense = DenseRetriever(model_name=dense_model)
@@ -121,24 +143,59 @@ class HybridRetriever:
             sparse_results = []
             dense_results = []
             self.last_diagnostics["sparse_attempted"] = True
+            sparse_errored = False
+            sparse_started = time.perf_counter()
             try:
                 self.sparse.build_index(passages)
                 sparse_results = self.sparse.retrieve(query, candidate_k)
                 self.last_diagnostics["sparse_executed"] = True
+                self.last_diagnostics["sparse_status"] = "succeeded" if sparse_results else "empty"
             except Exception as exc:
+                sparse_errored = True
+                self.last_diagnostics["sparse_status"] = "timeout" if isinstance(exc, TimeoutError) else "failed"
                 self.last_diagnostics["errors"].append({"component": "sparse", "error_type": type(exc).__name__})
+            finally:
+                self.last_diagnostics["sparse_duration_ms"] = round((time.perf_counter() - sparse_started) * 1000, 3)
+            sparse_diag = self.sparse.diagnostics() if hasattr(self.sparse, "diagnostics") else {}
+            self.last_diagnostics["sparse_availability_checked"] = bool(sparse_diag)
+            self.last_diagnostics["sparse_available"] = bool(sparse_diag.get("model_available", sparse_results))
+            if sparse_diag:
+                self.last_diagnostics["sparse_details"] = sparse_diag
+                self.last_diagnostics["sparse_executed"] = sparse_diag.get("inference_executed") is True
+                if sparse_diag.get("error_type"):
+                    if not sparse_errored:
+                        self.last_diagnostics["sparse_status"] = "unavailable"
+                        self.last_diagnostics["errors"].append({"component": "sparse",
+                            "stage": sparse_diag.get("failure_stage"), "error_type": sparse_diag["error_type"]})
+                    else:
+                        for error in self.last_diagnostics["errors"]:
+                            if error["component"] == "sparse":
+                                error["stage"] = sparse_diag.get("failure_stage")
+                elif self.last_diagnostics["sparse_status"] not in {"failed", "timeout"} and not self.last_diagnostics["sparse_executed"]:
+                    self.last_diagnostics["sparse_status"] = "skipped"
             self.last_diagnostics["dense_attempted"] = True
             dense_errored = False
+            dense_started = time.perf_counter()
             try:
                 self.dense.build_index(passages)
                 dense_results = self.dense.retrieve(query, candidate_k)
             except Exception as exc:
                 dense_errored = True
                 self.last_diagnostics["errors"].append({"component": "dense", "error_type": type(exc).__name__})
+                self.last_diagnostics["dense_status"] = "timeout" if isinstance(exc, TimeoutError) else "failed"
+            finally:
+                self.last_diagnostics["dense_duration_ms"] = round((time.perf_counter() - dense_started) * 1000, 3)
             dense_diag = self.dense.diagnostics() if hasattr(self.dense, "diagnostics") else {}
+            self.last_diagnostics["dense_availability_checked"] = bool(dense_diag)
             self.last_diagnostics["dense_available"] = bool(dense_diag.get("model_available", dense_results))
             self.last_diagnostics["dense_executed"] = bool(dense_diag.get("inference_executed", dense_results))
             self.last_diagnostics["dense_failure_stage"] = dense_diag.get("failure_stage")
+            if not dense_errored:
+                self.last_diagnostics["dense_status"] = (
+                    "unavailable" if dense_diag.get("error_type") else
+                    "succeeded" if dense_results else
+                    "empty" if self.last_diagnostics["dense_executed"] else "skipped"
+                )
             # Record the dense failure ONCE: the re-raising path above already logged
             # it, so only add the stage-enriched diagnostic entry for the non-raising
             # path (e.g. a sticky init failure where retrieve() returns []), avoiding
@@ -166,6 +223,9 @@ class HybridRetriever:
             rank_scores: Dict[str, float] = {}
             passage_map: Dict[str, Passage] = {}
             backend_count = 0
+            fusion_started = time.perf_counter()
+            stage = "fusion"
+            self.last_diagnostics["fusion_attempted"] = bool(sparse_results or dense_results)
 
             for results in (sparse_results, dense_results):
                 if results:
@@ -182,7 +242,10 @@ class HybridRetriever:
             rrf_scores = _normalize_rank_fusion(rank_scores, max(backend_count, 1))
             self.last_diagnostics["fusion_executed"] = bool(rank_scores)
             self.last_diagnostics["fusion_backend_count"] = backend_count
+            self.last_diagnostics["fusion_status"] = "succeeded" if rank_scores else "skipped"
+            self.last_diagnostics["fusion_duration_ms"] = round((time.perf_counter() - fusion_started) * 1000, 3)
 
+            stage = "scoring"
             scored: List[Tuple[Passage, float]] = []
             for key, passage in passage_map.items():
                 lexical = self._lexical_score(query, passage)
@@ -212,6 +275,7 @@ class HybridRetriever:
 
             scored.sort(key=lambda item: item[1], reverse=True)
 
+            stage = "selection"
             final: List[Passage] = []
             for passage, score in scored:
                 if any(
@@ -227,14 +291,27 @@ class HybridRetriever:
                     break
 
             self.last_diagnostics["selected_count"] = len(final)
+            sparse_keys = {self._key(p) for p, _ in sparse_results}
+            dense_keys = {self._key(p) for p, _ in dense_results}
+            self.last_diagnostics["selected_contributors"] = [
+                {"source_id": p.source_id, "source": p.source, "url": p.url,
+                 "backends": (["sparse"] if self._key(p) in sparse_keys else [])
+                    + (["dense"] if self._key(p) in dense_keys else [])
+                    + (["lexical"] if self._lexical_score(query, p) > 0 else [])}
+                for p in final
+            ]
             return final
 
         except Exception as exc:
             # Deterministic fail-soft fallback when BM25/FAISS/embeddings fail.
             self.last_diagnostics["route"] = "lexical_fallback"
-            self.last_diagnostics["fallback_reason"] = "fusion_failure"
+            self.last_diagnostics["fallback_reason"] = f"{stage}_failure"
+            if stage == "fusion":
+                self.last_diagnostics["fusion_status"] = "failed"
+            if stage == "fusion" and "fusion_started" in locals():
+                self.last_diagnostics["fusion_duration_ms"] = round((time.perf_counter() - fusion_started) * 1000, 3)
             self.last_diagnostics["degraded"] = True
-            self.last_diagnostics["errors"].append({"component": "fusion", "error_type": type(exc).__name__})
+            self.last_diagnostics["errors"].append({"component": stage, "error_type": type(exc).__name__})
             fallback = sorted(
                 passages,
                 key=lambda p: self._lexical_score(query, p),
@@ -247,6 +324,10 @@ class HybridRetriever:
                 for p in fallback[:k]
             ]
             self.last_diagnostics["selected_count"] = len(selected)
+            self.last_diagnostics["selected_contributors"] = [
+                {"source_id": p.source_id, "source": p.source, "url": p.url, "backends": ["lexical"]}
+                for p in selected
+            ]
             return selected
 
     @staticmethod

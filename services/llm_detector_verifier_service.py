@@ -20,6 +20,12 @@ def _valid_risk_score(value: Any) -> bool:
     return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
 
 
+def _source_identifier(value: Any) -> str | None:
+    # Providers may omit this optional field. Never serialize a proxy/custom
+    # object or invent an identifier from its repr; preserve real scalar IDs.
+    return str(value) if type(value) in (str, int) else None
+
+
 def _load_verifier_imports():
     verifier_dir = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "agents", "verifier_agent")
@@ -58,6 +64,8 @@ class LLMDetectorVerifierSliceResult:
     generation: dict[str, Any]
     detector: dict[str, Any] | None
     verifier: dict[str, Any] | None
+    grounded_detector: dict[str, Any] | None = None
+    certification: dict[str, Any] | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Convert the slice result to a dictionary."""
@@ -159,6 +167,10 @@ class BaseLLMDetectorVerifierService:
 
             if not isinstance(detection_result, dict):
                 raise ValueError("invalid_detector_result")
+            for key in ("hallucination_probability", "confidence_score"):
+                value = detection_result.get(key)
+                if value is not None and not _valid_risk_score(value):
+                    raise ValueError("invalid_detector_score")
             status = str(detection_result.get("status", "unknown")).lower()
             completed = status == "completed"
             risk_tier = str(detection_result.get("risk_level", "HIGH")).upper()
@@ -193,13 +205,17 @@ class BaseLLMDetectorVerifierService:
                 "error": f"Detector error: {type(exc).__name__}",
                 "risk_tier": "UNKNOWN",
                 "decision": "VERIFY",
+                "hallucination_probability": None,
+                "confidence_score": None,
+                "probability_available": False,
+                "detector_degraded": True,
             }
             decision, risk_tier = "VERIFY", "UNKNOWN"
 
         # §28 certification: a degraded detector (baseline heuristic) must not be
         # silently certified. Initial triage cannot be certified as grounded. Import is
         # guarded so normal (non-certification) runs are never affected.
-        certification_requested = os.environ.get("CERTIFICATION_MODE", "false").lower() in {"true", "1", "yes"}
+        certification_requested = os.environ.get("CERTIFICATION_MODE", "false").strip().lower() in {"true", "1", "yes", "on"}
         certification_helpers_available = False
         try:
             _enforce_detector, _cert_from_env, _CertErr = _load_certification()
@@ -214,8 +230,8 @@ class BaseLLMDetectorVerifierService:
             "pending_grounded_detection" if certification_requested else "not_requested"
         )
         if certification_requested:
-            # This slice has no post-retrieval Detector stage. Never claim its
-            # evidence-free triage was certified, even if the Verifier succeeds.
+            # Initial triage is never certified; final stage certification is
+            # separate and runs only after independent evidence verification.
             detector_dict["certification_completed"] = False
             detector_dict["certification_reason"] = (
                 "grounded_detection_not_executed" if certification_helpers_available
@@ -299,6 +315,7 @@ class BaseLLMDetectorVerifierService:
                 for ev in getattr(claim_rep, "evidence", []):
                     ev_items.append(
                         {
+                            "source_id": _source_identifier(getattr(ev, "source_id", None)),
                             "title": str(getattr(ev, "title", "")),
                             "source": str(getattr(ev, "source", "")),
                             "url": str(getattr(ev, "url", "")),
@@ -404,10 +421,49 @@ class BaseLLMDetectorVerifierService:
             if certification_requested:
                 detector_dict["certification_reason"] = "verifier_failed_before_grounded_detection"
 
+        grounded_detector = None
+        certification = None
+        if certification_requested:
+            certification = {"requested": True, "completed": False, "status": "failed",
+                             "initial_triage_certified": False}
+            if verifier_dict.get("status") != "completed":
+                certification["reason"] = "verifier_failed_or_incomplete"
+            elif not certification_helpers_available:
+                certification["reason"] = "certification_helpers_unavailable"
+            else:
+                evidence = [
+                    {"text": ev["snippet"], "source_id": ev.get("source_id"),
+                     "source": ev.get("source"), "url": ev.get("url")}
+                    for report in verifier_dict["claim_evidence"]
+                    for ev in report["evidence"]
+                    if isinstance(ev.get("snippet"), str) and ev["snippet"].strip()
+                ]
+                if not evidence:
+                    certification["reason"] = "no_grounding_evidence"
+                else:
+                    try:
+                        grounded_detector = await asyncio.to_thread(
+                            self.detector_agent.detect, user_query=user_query,
+                            llm_response=draft_response, evidence=evidence, domain=domain,
+                        )
+                        _enforce_detector(grounded_detector, enabled=True)
+                        certification.update(status="passed", completed=True,
+                                             reason="grounded_detector_executed")
+                    except Exception as exc:
+                        # Never expose provider messages or certify an invalid
+                        # result. The independent Verifier result remains intact.
+                        grounded_detector = {"status": "failed", "detector_degraded": True,
+                                             "hallucination_probability": None,
+                                             "error_type": type(exc).__name__}
+                        certification.update(reason="grounded_detector_not_certified",
+                                             error_type=type(exc).__name__)
+
         return LLMDetectorVerifierSliceResult(
             user_query=user_query,
             draft_response=draft_response,
             generation=gen_dict,
             detector=detector_dict,
             verifier=verifier_dict,
+            grounded_detector=grounded_detector,
+            certification=certification,
         )

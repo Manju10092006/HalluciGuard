@@ -75,6 +75,8 @@ class ModelExecutionTrace(BaseModel):
     error_type: Optional[str] = None
     submitted_inputs: List[Dict[str, Any]] = Field(default_factory=list)
     tokenizer_observability: str = "not_exposed"
+    requested: bool = False
+    total_duration_ms: float = 0.0
 
 
 class EvidencePassageTrace(BaseModel):

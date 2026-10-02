@@ -5,12 +5,33 @@ import hashlib
 import copy
 import math
 import time
+import threading
+from functools import wraps
 from typing import Any, Dict, List, Optional
 
 from schemas.models import EntailmentLabel
 from models.model_manager import get_model_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _synchronized(function):
+    @wraps(function)
+    def run(self, *args, **kwargs):
+        with self._request_lock:
+            return function(self, *args, **kwargs)
+    return run
+
+
+def _timed_batch(function):
+    @wraps(function)
+    def run(self, *args, **kwargs):
+        started = time.perf_counter()
+        try:
+            return function(self, *args, **kwargs)
+        finally:
+            self.last_total_duration_ms = round((time.perf_counter() - started) * 1000, 3)
+    return run
 
 
 def _canonical_label(
@@ -111,6 +132,7 @@ class NLIEngine:
     def __init__(self, model_name: str = "cross-encoder/nli-deberta-v3-base") -> None:
         self.model_name = model_name
         self.pipeline = None
+        self._request_lock = threading.RLock()
         self._is_available = True
 
         # --- §15 engine-level execution diagnostics (real-execution-only proof) ---
@@ -123,6 +145,7 @@ class NLIEngine:
         self.last_degraded: bool = False
         self.last_device: str = "unknown"
         self.last_latency_ms: int = 0
+        self.last_total_duration_ms = 0.0
         self.last_batch_size: int = 0
         self.last_input_trace: list[dict] = []
         self.last_attempted = False
@@ -134,6 +157,7 @@ class NLIEngine:
         self.last_inference_executed = False
         self.last_degraded = False
         self.last_latency_ms = 0
+        self.last_total_duration_ms = 0.0
         self.last_batch_size = 0
         self.last_input_trace = []
         self.last_attempted = False
@@ -164,6 +188,7 @@ class NLIEngine:
             pass
         return "unknown"
 
+    @_synchronized
     def diagnostics(self) -> dict:
         """Return the last-run execution proof for tracing/certification (§15/§26)."""
         return {
@@ -175,10 +200,12 @@ class NLIEngine:
             "status": self.last_status,
             "device": self.last_device,
             "latency_ms": self.last_latency_ms,
+            "requested": self.last_attempted,
+            "total_duration_ms": self.last_total_duration_ms,
             "batch_size": self.last_batch_size,
             "attempted": self.last_attempted,
             "initialization_attempted": self.last_initialization_attempted,
-            "submitted_inputs": self.last_input_trace,
+            "submitted_inputs": copy.deepcopy(self.last_input_trace),
             "tokenizer_observability": self.last_tokenizer_observability,
         }
 
@@ -212,6 +239,33 @@ class NLIEngine:
                     "tokenizer_truncated": len(full) > len(retained),
                     "max_length": params.get("max_length"),
                 })
+                trace = self.last_input_trace[-1]
+                trace["hypothesis_sha256"] = hashlib.sha256((pair or "").encode()).hexdigest()
+                trace["survival_observability"] = "token_count_only"
+                # Offsets are evidence only if an independent fast-tokenizer
+                # encoding exactly matches the IDs actually preprocessed.
+                # Never equate selected prose or decoded tokens with survival.
+                if getattr(local.tokenizer, "is_fast", False):
+                    try:
+                        options = {k: params[k] for k in
+                            ("truncation", "max_length", "padding", "add_special_tokens") if k in params}
+                        encoded = local.tokenizer(text, text_pair=pair,
+                            return_offsets_mapping=True, **options)
+                        token_ids = encoded["input_ids"]
+                        token_mask = encoded.get("attention_mask", [1] * len(token_ids))
+                        active = [i for i, m in zip(token_ids, token_mask) if m]
+                        if active == retained:
+                            sequences = encoded.sequence_ids()
+                            offsets = encoded["offset_mapping"]
+                            trace["retained_character_ranges"] = {
+                                name: [list(offset) for offset, seq, m in zip(offsets, sequences, token_mask)
+                                       if m and seq == index and offset[1] > offset[0]]
+                                for index, name in ((0, "premise"), (1, "hypothesis"))}
+                            trace["survival_observability"] = "verified_token_offsets"
+                        else:
+                            trace["survival_observability"] = "offset_encoding_mismatch"
+                    except Exception:
+                        trace["survival_observability"] = "offsets_unavailable"
                 self.last_tokenizer_observability = "observed_preprocess"
             except Exception:
                 self.last_tokenizer_observability = "observation_failed"
@@ -247,6 +301,7 @@ class NLIEngine:
             "error": "nli_model_unavailable_or_failed",
         }
 
+    @_synchronized
     def classify(
         self, claim: str, evidence: str, model_name: str | None = None
     ) -> Dict[str, Any]:
@@ -269,6 +324,8 @@ class NLIEngine:
     def predict(self, claim: str, evidence: str) -> EntailmentLabel:
         return self.classify(claim, evidence)["label"]
 
+    @_synchronized
+    @_timed_batch
     def batch_classify(
         self,
         claim: str,

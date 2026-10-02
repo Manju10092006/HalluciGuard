@@ -17,9 +17,12 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
+import copy
+from functools import wraps
 from typing import Any, List, Optional, Sequence
 
-from .text import lexical_evidence
+from .text import lexical_documents
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +43,19 @@ _decomposer: Any = None
 _hybrid_retriever: Any = None
 _reranker: Any = None
 _passage_cls: Any = None
+_selection_lock = threading.RLock()
 
 
+def _serialized(function):
+    """Protect shared mutable indexes and diagnostics, retaining shared weights."""
+    @wraps(function)
+    def run(*args, **kwargs):
+        with _selection_lock:
+            return function(*args, **kwargs)
+    return run
+
+
+@_serialized
 def _ensure_verifier() -> bool:
     """Insert the verifier package on ``sys.path`` and import shared components.
 
@@ -71,7 +85,7 @@ def _ensure_verifier() -> bool:
         logger.warning(
             "Shared Verifier stack unavailable for evidence selection (%s); "
             "falling back to deterministic lexical selection.",
-            exc,
+            type(exc).__name__,
         )
         _loaded = True
         _decomposer = None
@@ -84,6 +98,7 @@ def is_available() -> bool:
     return _ensure_verifier()
 
 
+@_serialized
 def decompose_claims(text: str) -> List[str]:
     """Atomic-claim decomposition reusing the Verifier's ClaimDecomposer.
 
@@ -98,10 +113,11 @@ def decompose_claims(text: str) -> List[str]:
     try:
         return _decomposer.decompose(text)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("ClaimDecomposer failed (%s); falling back to sentence spans.", exc)
+        logger.warning("ClaimDecomposer failed (%s); falling back to sentence spans.", type(exc).__name__)
         return []
 
 
+@_serialized
 def is_checkable(text: str) -> bool:
     """Non-factual / opinion detection reusing the shared decomposer's filter.
 
@@ -148,6 +164,17 @@ def _record_route(
         trace["reason"] = reason
 
 
+def _lexical_fallback(claim, texts, limit, trace):
+    selected = lexical_documents(claim, texts, limit=limit)
+    if trace is not None:
+        trace.update(selected_count=len(selected), selected_evidence=selected,
+                     context_policy="whole_normalized_passages",
+                     tokenizer_truncation="not_measured",
+                     model_consumption_observed=False)
+    return selected
+
+
+@_serialized
 def select_evidence(
     claim: str,
     evidence_texts: Sequence[str],
@@ -181,13 +208,12 @@ def select_evidence(
     if not _ensure_verifier() or _hybrid_retriever is None or _reranker is None:
         reason = "shared hybrid retrieval/reranking stack unavailable"
         logger.warning(
-            "Evidence selection for claim (%s) fell back to deterministic lexical "
+            "Evidence selection fell back to deterministic lexical "
             "selection: %s.",
-            claim,
             reason,
         )
         _record_route(trace, "lexical", True, reason)
-        return lexical_evidence(claim, texts, limit=max(1, rerank_top))
+        return _lexical_fallback(claim, texts, max(1, rerank_top), trace)
 
     try:
         passages = [_to_passage(t) for t in texts]
@@ -197,14 +223,14 @@ def select_evidence(
             k=pool_k,
             dense_model=dense_model,
         )
-        retrieval = (_hybrid_retriever.diagnostics()
+        retrieval = (copy.deepcopy(_hybrid_retriever.diagnostics())
                      if hasattr(_hybrid_retriever, "diagnostics") else {})
         if trace is not None:
             trace["retrieval"] = retrieval
         # The shared retriever already returns at most ``pool_k`` fused
         # candidates, so the slice is a no-op guard rather than an extra slot.
         ranked = _reranker.rerank(claim, merged[:pool_k], k=rerank_top)
-        reranking = (_reranker.diagnostics() if hasattr(_reranker, "diagnostics") else {})
+        reranking = (copy.deepcopy(_reranker.diagnostics()) if hasattr(_reranker, "diagnostics") else {})
         if trace is not None:
             trace["reranking"] = reranking
         snippets = [p.snippet for p in ranked if p.snippet and p.snippet.strip()]
@@ -216,22 +242,25 @@ def select_evidence(
                           "retrieval or reranking fallback" if degraded else "")
             if trace is not None:
                 trace["selected_count"] = len(snippets)
+                trace["selected_evidence"] = snippets
+                trace["model_consumption_observed"] = False
+                # Legacy field: selection candidate, NOT observed token survival.
                 trace["model_input_evidence"] = snippets[0]
                 trace["tokenizer_truncation"] = "not_measured"
             return snippets
         # Reranker produced no usable snippet (degraded/unavailable): keep the
         # hybrid order as a real fallback rather than silently dropping evidence.
         reason = "reranker returned no usable snippet; kept pre-rerank hybrid order"
-        logger.warning("Evidence selection for claim (%s) degraded: %s.", claim, reason)
+        logger.warning("Evidence selection degraded: %s.", reason)
         _record_route(trace, retrieval.get("route", "unknown") + "_pre_rerank", True, reason)
         return [p.snippet for p in merged[:rerank_top] if p.snippet]
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(
-            "Shared evidence selection failed for claim (%s); using lexical fallback.",
-            claim,
+            "Shared evidence selection failed (%s); using lexical fallback.",
+            type(exc).__name__,
         )
-        _record_route(trace, "lexical", True, f"selection failed: {exc}")
-        return lexical_evidence(claim, texts, limit=max(1, rerank_top))
+        _record_route(trace, "lexical", True, f"selection failed: {type(exc).__name__}")
+        return _lexical_fallback(claim, texts, max(1, rerank_top), trace)
 
 
 class ClaimEvidenceEngine:

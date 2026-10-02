@@ -12,7 +12,7 @@ class SqliteCache:
 
     # Bump when retrieval/NLI/scoring semantics change so stale decisions are
     # never silently reused after an algorithm upgrade.
-    CACHE_SCHEMA_VERSION = "verifier-v2.3-evidence-scope"
+    CACHE_SCHEMA_VERSION = "verifier-v2.4-incorporation-scope"
 
     def __init__(self, db_path: str = "verification_cache.db", ttl_seconds: int = 86400) -> None:
         self.db_path = db_path

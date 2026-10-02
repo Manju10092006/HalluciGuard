@@ -153,7 +153,7 @@ class ModelManager:
                     logger.warning(
                         "GPU load failed for '%s': %s — retrying on CPU",
                         model_name,
-                        primary_err,
+                        type(primary_err).__name__,
                     )
                     model = SentenceTransformer(
                         model_name,
