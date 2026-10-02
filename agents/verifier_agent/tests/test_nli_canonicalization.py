@@ -70,6 +70,8 @@ _EXPECTED_DIAGNOSTICS = {
     "status": "not_run",
     "device": "unknown",
     "latency_ms": 0,
+    "requested": False,
+    "total_duration_ms": 0.0,
     "batch_size": 0,
     "attempted": False,
     "initialization_attempted": False,
@@ -138,6 +140,8 @@ def test_canonical_nli_diagnostics_contract_structure():
     assert isinstance(diag["device"], str)
     assert isinstance(diag["latency_ms"], int)
     assert isinstance(diag["batch_size"], int)
+    assert isinstance(diag["requested"], bool)
+    assert isinstance(diag["total_duration_ms"], float)
 
     # Every key must be a valid ModelExecutionTrace field so `ModelExecutionTrace(**diag)`
     # (api/pipeline.py) can never raise on an unexpected key.
@@ -189,6 +193,8 @@ def test_canonical_engine_records_execution_proof_across_states():
     assert diag["inference_executed"] is True
     assert diag["degraded"] is False
     assert diag["batch_size"] == 2
+    assert diag["requested"] is True
+    assert diag["total_duration_ms"] >= diag["latency_ms"]
     assert diag["device"] == "cpu"
     # robust_entailment._decision (unchanged production code) returns real scored
     # results WITHOUT a per-item "degraded" key on the success path; only the

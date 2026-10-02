@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -68,9 +69,33 @@ async def execute(args):
         "final_response": result.get("final_response"),
         "memory_status": (result.get("memory_result") or {}).get("status"),
         "memory_stored_count": (result.get("memory_result") or {}).get("stored_count")}
+    detector = result.get("detector_result") or result.get("detector") or {}
+    output["grounded_detector_execution"] = {
+        k: detector.get(k) for k in ("status", "model_loaded", "inference_executed",
+            "detector_degraded", "calibration_applied", "probability_semantics")}
+    output["memory_isolation"] = str(args.output.parent / (args.output.stem + "-memory"))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
     print(json.dumps({k:v for k,v in output.items() if k not in {"stage_trace", "original_reports", "reverification_reports"}}, indent=2))
+
+
+def isolate_runtime(output: Path):
+    """Use a fresh diagnostic store; never touch previously quarantined Memory."""
+    directory = output.parent / (output.stem + "-memory")
+    directory.mkdir(parents=True, exist_ok=False)
+    for key, name in {
+        "KG_PERSISTENCE_PATH": "knowledge_graph.json", "CACHE_DB_PATH": "memory-cache.db",
+        "VECTOR_STORE_PATH": "vector_store", "PATTERN_DB_PATH": "patterns.db",
+        "TRUST_DB_PATH": "source-trust.db",
+    }.items():
+        os.environ[key] = str((directory / name).resolve())
+    os.environ["CACHE_ENABLED"] = "false"
+    os.environ["VERIFIER_CACHE_ENABLED"] = "false"
+    os.environ["ALWAYS_VERIFY"] = "true"
+    os.environ["ALLOW_DETECTOR_FAST_PATH"] = "false"
+    os.environ["ALLOW_MODEL_DOWNLOADS"] = "false"
+    os.environ["MOCK_MODE"] = "false"
+    return directory
 
 
 def main():
@@ -88,6 +113,7 @@ def main():
         raise FileExistsError("trace artifact already exists")
     from dotenv import load_dotenv
     load_dotenv(args.env_file)
+    isolate_runtime(args.output)
     asyncio.run(execute(args))
 
 

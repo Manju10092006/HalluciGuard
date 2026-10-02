@@ -96,8 +96,6 @@ class QueryExpander:
         queries = [clean_q]
 
         resolution = self.entity_resolver.resolve(clean_q, domain)
-        if resolution.canonical_query and resolution.canonical_query.lower() != clean_q.lower():
-            queries.append(resolution.canonical_query)
 
         # Bidirectional relational query generation
         # 1. Passive creation: "Java was created by James Gosling" -> "Java created by", "who created Java"
@@ -201,6 +199,14 @@ class QueryExpander:
         if location_match:
             landmark = location_match.group(1).strip()
             queries.append(f"{landmark} location")
+
+        # Relationship queries must precede the resolver's entity-only query.
+        # The pipeline uses the first expanded query as its topicality anchor;
+        # putting a proposed (possibly false) creator's name first biases both
+        # retrieval and ranking toward unrelated biographies. Preserve the raw
+        # claim for NLI, and keep the generic resolver query as a last fallback.
+        if resolution.canonical_query and resolution.canonical_query.lower() != clean_q.lower():
+            queries.append(resolution.canonical_query)
 
         # Deduplicate while preserving order
         seen = set()

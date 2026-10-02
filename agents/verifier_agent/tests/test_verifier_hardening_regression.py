@@ -248,7 +248,14 @@ class TestEnforceDetector:
             enforce_detector({"detector_degraded": False, "detector_inference_executed": False}, enabled=True)
 
     def test_real_inference_passes(self):
-        enforce_detector({"detector_degraded": False, "detector_inference_executed": True}, enabled=True)
+        # Execution flags alone are not evidence of a complete grounded result.
+        enforce_detector({"status": "completed", "detector_degraded": False,
+            "grounded": True, "inference_executed": True, "model_loaded": True,
+            "calibration_applied": True, "hallucination_probability": .2,
+            "confidence_score": .8, "claims": [{"claim_risk": .2,
+                "model_input_evidence": "The Earth orbits the Sun.",
+                "probabilities": {"SUPPORTED": .8, "CONTRADICTED": .1,
+                                  "NOT_ENOUGH_INFO": .1}}]}, enabled=True)
 
     def test_noop_when_disabled(self):
         enforce_detector({"detector_degraded": True, "detector_inference_executed": False}, enabled=False)

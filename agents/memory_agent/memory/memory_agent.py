@@ -178,6 +178,37 @@ class MemoryAgent:
                 )
 
         if duplicate_of:
+            # In-memory similarity can find an earlier *failed* store. Do not
+            # reuse that entry as durable knowledge or raise its trust state.
+            failures = {}
+            confirmed = []
+            try:
+                duplicate_nodes = self.kg.verification_nodes(duplicate_of)
+                existing = duplicate_nodes[0]
+                duplicate_text = existing.properties["claim_text"]
+                duplicate_domain = existing.properties.get("domain", "general")
+                duplicate_confidence = float(existing.properties.get("confidence", existing.confidence))
+            except Exception as exc:
+                raise MemoryConsistencyError(duplicate_of, {"knowledge_graph.identity": type(exc).__name__}, []) from None
+            checks = [
+                ("knowledge_graph", lambda: self.kg.verify_persisted_verification(
+                    duplicate_nodes, request.verdict, duplicate_confidence,
+                    allow_legacy_verified_confidence=True)),
+                ("vector_store", lambda: self.vectors.verify_persisted_verification(
+                    duplicate_of, request.verdict, duplicate_confidence)),
+                ("cache", lambda: self.cache.verify_persisted_verification(
+                    duplicate_domain, duplicate_text, request.verdict, duplicate_confidence)),
+            ]
+            for name, check in checks:
+                try:
+                    result = check()
+                    if hasattr(result, "__await__"):
+                        await result
+                    confirmed.append(name)
+                except Exception as exc:
+                    failures[name + ".readback"] = type(exc).__name__
+            if failures:
+                raise MemoryConsistencyError(duplicate_of, failures, confirmed)
             logger.info("Duplicate claim detected, reusing fact %s", duplicate_of)
             return StoreFactResponse(
                 fact_id=duplicate_of,
@@ -209,6 +240,7 @@ class MemoryAgent:
                 "domain": request.domain,
                 "verdict": request.verdict,
                 "claim_text": request.claim_text,
+                "confidence": request.confidence,
             },
             confidence=request.confidence,
         )
@@ -285,7 +317,33 @@ class MemoryAgent:
             )
             trust_updates.append(update)
 
-        self.kg.save()
+        # A positive store response must not rely on close() or the vector
+        # store's every-100-entry autosave. Attempt both durable writes and
+        # verify every representation independently before reporting stored.
+        failures: dict[str, str] = {}
+        confirmed: list[str] = []
+        for name, save in (("knowledge_graph", self.kg.save), ("vector_store", self.vectors.save)):
+            try:
+                save()
+            except Exception as exc:
+                failures[name + ".write"] = type(exc).__name__
+        nodes = [fact_node, claim_node]
+        checks = [
+            ("knowledge_graph", lambda: self.kg.verify_persisted_verification(nodes, request.verdict, request.confidence)),
+            ("vector_store", lambda: self.vectors.verify_persisted_verification(fact_id, request.verdict, request.confidence)),
+            ("cache", lambda: self.cache.verify_persisted_verification(request.domain, request.claim_text, request.verdict, request.confidence)),
+        ]
+        for name, check in checks:
+            try:
+                result = check()
+                if hasattr(result, "__await__"):
+                    await result
+                if name + ".write" not in failures:
+                    confirmed.append(name)
+            except Exception as exc:
+                failures[name + ".readback"] = type(exc).__name__
+        if failures:
+            raise MemoryConsistencyError(fact_id, failures, confirmed)
 
         return StoreFactResponse(
             fact_id=fact_id,

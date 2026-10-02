@@ -20,6 +20,7 @@ so this module changes nothing for existing production callers.
 from __future__ import annotations
 
 import os
+import math
 from typing import Any, Dict, List
 
 __all__ = [
@@ -126,12 +127,44 @@ def enforce_retrieval_evidence(
 
 
 def enforce_detector(detector_result: Dict[str, Any], enabled: bool) -> None:
-    """Fail if grounded detector inference did not execute for real."""
-    if not enabled or not detector_result:
+    """Certify a complete grounded inference record, never pre-retrieval triage."""
+    if not enabled:
         return
-    degraded = bool(detector_result.get("detector_degraded"))
-    executed = bool(detector_result.get("detector_inference_executed"))
-    if degraded or not executed:
+    def score(value):
+        return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
+    result = detector_result if isinstance(detector_result, dict) else {}
+    claims = result.get("claims")
+    valid = (
+        result.get("status") == "completed"
+        and result.get("detector_degraded") is False
+        and result.get("grounded") is True
+        and result.get("inference_executed", result.get("detector_inference_executed")) is True
+        and result.get("model_loaded", result.get("detector_model_loaded")) is True
+        and result.get("calibration_applied", result.get("calibrated")) is True
+        and score(result.get("hallucination_probability"))
+        and score(result.get("confidence_score"))
+        and isinstance(claims, list) and bool(claims)
+    )
+    factual_count = 0
+    if valid:
+        for claim in claims:
+            if not isinstance(claim, dict):
+                valid = False
+                break
+            if claim.get("non_factual") is True:
+                continue
+            factual_count += 1
+            probabilities = claim.get("probabilities")
+            if (not isinstance(probabilities, dict)
+                    or set(probabilities) != {"SUPPORTED", "CONTRADICTED", "NOT_ENOUGH_INFO"}
+                    or not all(score(v) for v in probabilities.values())
+                    or not math.isclose(sum(probabilities.values()), 1., abs_tol=1e-5)
+                    or not score(claim.get("claim_risk"))
+                    or not isinstance(claim.get("model_input_evidence"), str)
+                    or not claim["model_input_evidence"].strip()):
+                valid = False
+                break
+    if not valid or not factual_count:
         raise CertificationError(
             "detector",
             "Evidence-grounded detector inference did not run. Pre-retrieval triage "

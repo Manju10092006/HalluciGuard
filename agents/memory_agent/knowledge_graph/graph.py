@@ -231,16 +231,22 @@ class KnowledgeGraph:
             # Analytics use NetworkX attributes, not the Pydantic node index.
             self._graph.nodes[node.entity_id]["confidence"] = confidence
 
-    def verify_persisted_verification(self, nodes: list[EntityNode], verdict: str, confidence: float) -> None:
+    def verify_persisted_verification(self, nodes: list[EntityNode], verdict: str, confidence: float,
+                                     *, allow_legacy_verified_confidence: bool = False) -> None:
+        # Old ordinary stores omitted the redundant fact-properties confidence.
+        # Reuse can validate the independently persisted top-level value instead.
+        # Quarantine/update read-back remains strict, including when this opt-in
+        # is accidentally supplied for an unverified record.
+        legacy = allow_legacy_verified_confidence and verdict in {"verified", "likely_verified"}
         data = json.loads(self._persistence_path.read_text(encoding="utf-8"))
         persisted = {n["entity_id"]: n for n in data["nodes"]}
         for node in nodes:
             row = persisted[node.entity_id]
             if (row["properties"].get("verdict") != verdict
-                    or row["properties"].get("confidence") != confidence
+                    or row["properties"].get("confidence", row["confidence"] if legacy else None) != confidence
                     or row["confidence"] != confidence
                     or node.properties.get("verdict") != verdict
-                    or node.properties.get("confidence") != confidence
+                    or node.properties.get("confidence", node.confidence if legacy else None) != confidence
                     or node.confidence != confidence
                     or self._graph.nodes[node.entity_id]["confidence"] != confidence):
                 raise RuntimeError("Graph verification read-back mismatch")

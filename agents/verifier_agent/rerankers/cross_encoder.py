@@ -33,6 +33,8 @@ class CrossEncoderReranker:
         self.last_initialization_attempted = False
         self.last_failure_stage: str | None = None
         self.last_error_type: str | None = None
+        self.last_total_duration_ms = 0.0
+        self._previous_init_error_type = None
 
     def _reset_run_diagnostics(self) -> None:
         self.last_status = "not_run"
@@ -50,7 +52,7 @@ class CrossEncoderReranker:
         model = self.model
         if model is None:
             return "unknown"
-        for attr in ("_target_device", "device"):
+        for attr in ("device", "_target_device"):
             try:
                 dev = getattr(model, attr, None)
                 if dev is not None:
@@ -82,10 +84,15 @@ class CrossEncoderReranker:
             "initialization_attempted": self.last_initialization_attempted,
             "failure_stage": self.last_failure_stage,
             "error_type": self.last_error_type,
+            "requested": True,
+            "total_duration_ms": self.last_total_duration_ms,
         }
 
     def _load_model(self) -> None:
         if self.model is not None or not self._is_available:
+            if not self._is_available:
+                self.last_failure_stage = "initialization"
+                self.last_error_type = self._previous_init_error_type
             return
         if self._load_attempts >= 2:
             self._is_available = False
@@ -100,9 +107,11 @@ class CrossEncoderReranker:
             logging.warning("transformers not installed. CrossEncoderReranker falling back.")
             self._is_available = False
             self.last_failure_stage, self.last_error_type = "initialization", "ImportError"
+            self._previous_init_error_type = "ImportError"
         except Exception as exc:
             logging.warning("Error loading cross-encoder model (%s)", type(exc).__name__)
             self.last_failure_stage, self.last_error_type = "initialization", type(exc).__name__
+            self._previous_init_error_type = type(exc).__name__
             if self._load_attempts >= 2:
                 self._is_available = False
 
@@ -121,6 +130,16 @@ class CrossEncoderReranker:
         ]
 
     def rerank(
+        self, claim: str, passages: List[Passage], k: int,
+        model_name: str | None = None,
+    ) -> List[Passage]:
+        started = time.perf_counter()
+        try:
+            return self._rerank(claim, passages, k, model_name)
+        finally:
+            self.last_total_duration_ms = round((time.perf_counter() - started) * 1000, 3)
+
+    def _rerank(
         self,
         claim: str,
         passages: List[Passage],
@@ -205,6 +224,16 @@ class CrossEncoderReranker:
         return 1.0 / (1.0 + math.exp(-x))
 
     def score_gate_candidates(
+        self, claim: str, passages: List[Passage], max_candidates: int = 5,
+        model_name: str | None = None,
+    ) -> Tuple[List[float], List[Passage]]:
+        started = time.perf_counter()
+        try:
+            return self._score_gate_candidates(claim, passages, max_candidates, model_name)
+        finally:
+            self.last_total_duration_ms = round((time.perf_counter() - started) * 1000, 3)
+
+    def _score_gate_candidates(
         self,
         claim: str,
         passages: List[Passage],

@@ -351,6 +351,21 @@ class VerificationPipeline:
             for s in sentences)
 
     @staticmethod
+    def _incorporation_event_absent(claim: str, passage: Passage) -> bool:
+        """Founding/establishment evidence alone cannot date legal incorporation.
+
+        This is a relevance veto, never a supported/contradicted verdict or
+        score floor. Missing incorporation evidence leaves uncertainty intact.
+        """
+        import re
+        if not re.search(r"\b(?:re)?incorporat(?:ed|ion|es|ing|e)\b", claim, re.I):
+            return False
+        return not re.search(
+            r"\b(?:re)?incorporat(?:ed|ion|es|ing|e)\b|"
+            r"\b(?:became|becomes|become|registered\s+as)\s+(?:a\s+)?(?:privately\s+held\s+)?corporation\b",
+            passage.snippet, re.I)
+
+    @staticmethod
     def _select_decision_grade_evidence(
         passages: List[Passage],
         nli_results: List[Dict[str, Any]],
@@ -372,6 +387,8 @@ class VerificationPipeline:
             # topicality gate to the country, without changing NLI or its scores.
             subject = aggregate.claim_triple.object
         for passage, raw_result in pairs:
+            if VerificationPipeline._incorporation_event_absent(claim, passage):
+                continue
             if VerificationPipeline._subject_only_in_possessive_fragment(claim, passage):
                 continue
             if (aggregate and aggregate.claim_triple and aggregate.claim_triple.relation == "capital_of"
@@ -849,7 +866,8 @@ class VerificationPipeline:
                                 "degraded": bool(n.get("degraded", False)),
                                 "selected_for_decision": p in decision_passages,
                                 "rejection_reason": (None if p in decision_passages else
-                                    "subject_only_in_possessive_fragment" if self._subject_only_in_possessive_fragment(sub_claim, p)
+                                    "incorporation_event_absent" if self._incorporation_event_absent(sub_claim, p)
+                                    else "subject_only_in_possessive_fragment" if self._subject_only_in_possessive_fragment(sub_claim, p)
                                     else "historical_scope_mismatch" if self._historical_capital_only(sub_claim, p)
                                     else "no_decision_grade_signal_or_relation_gate"),
                             } for p, n in zip(relevant_passages, nli_results)],

@@ -68,6 +68,23 @@ def lexical_evidence(claim: str, documents: list[str], limit: int = 6) -> list[s
     return selected
 
 
+def lexical_documents(claim: str, documents: list[str], limit: int = 6) -> list[str]:
+    """Rank supplied passages without silently removing their factual context.
+
+    Unlike ``lexical_evidence`` this fallback never splits a document into
+    sentences. Truncation remains the explicit normalizer/tokenizer's job.
+    Ranking is stable on ties; no relevance score is a truth probability.
+    """
+    if limit <= 0:
+        return []
+    query = set(_TOKEN.findall(claim.lower()))
+    def score(document: str) -> float:
+        terms = set(_TOKEN.findall(document.lower()))
+        return len(query & terms) / max(1.0, len(query) ** 0.5 * len(terms) ** 0.5)
+    return sorted((text for text in documents if text and text.strip()),
+                  key=score, reverse=True)[:limit]
+
+
 _RELATION_STOP = {
     "a", "an", "the", "and", "or", "of", "in", "on", "at", "by", "to", "for",
     "from", "with", "is", "are", "was", "were", "be", "been", "it", "its",

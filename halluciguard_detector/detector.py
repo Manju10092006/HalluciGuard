@@ -334,6 +334,7 @@ class Detector:
                 mapping = self._normalize_class_mapping(raw_mapping)
                 trace["tokenization"] = tokenization_trace
                 trace["tokenizer_truncation"] = tokenization_trace.get("truncated", "not_measured")
+                trace["model_consumption_observed"] = tokenization_trace.get("status") == "measured"
                 mapping, item_warnings, guard_requires = self._guard_signals(claim_text, best, mapping)
 
             label = max(mapping, key=mapping.get) if mapping else ClaimLabel.NOT_ENOUGH_INFO
