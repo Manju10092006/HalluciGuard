@@ -22,11 +22,9 @@ class DenseRetriever:
 
     def _reset_run(self) -> None:
         # A prior INITIALIZATION failure is sticky: _is_available stays False and
-        # _load_model early-returns on later claims without re-attempting. Reflect
-        # it as attempted this run too, so diagnostics never report
-        # failure_stage='initialization' alongside initialization_attempted=False
-        # (audit #38 self-contradiction).
-        self.initialization_attempted = self._failure_stage == "initialization"
+        # _load_model early-returns on later claims without re-attempting. Keep
+        # the historical failure but do not claim initialization ran again.
+        self.initialization_attempted = False
         self.indexing_attempted = False
         self.indexing_executed = False
         self.inference_attempted = False
@@ -41,7 +39,9 @@ class DenseRetriever:
                 "indexing_executed": self.indexing_executed,
                 "inference_attempted": self.inference_attempted,
                 "inference_executed": self.inference_executed,
-                "failure_stage": self.failure_stage, "error_type": self.error_type}
+                "failure_stage": self.failure_stage, "error_type": self.error_type,
+                "initialization_previously_failed": self._failure_stage == "initialization",
+                "skipped_reason": f"previous_{self._failure_stage}_failure" if not self._is_available else None}
         
     def _load_model(self) -> None:
         if self.model is not None or not self._is_available:

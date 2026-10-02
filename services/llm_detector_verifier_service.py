@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
 from halluciguard_detector import DetectorAgent
+from halluciguard_detector.phase1 import FAST_PATH_RELEASE_ENABLED
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 
 logger = logging.getLogger(__name__)
@@ -158,14 +159,14 @@ class BaseLLMDetectorVerifierService:
 
             if not isinstance(detection_result, dict):
                 raise ValueError("invalid_detector_result")
-            status = str(detection_result.get("status", "completed")).lower()
+            status = str(detection_result.get("status", "unknown")).lower()
             completed = status == "completed"
             risk_tier = str(detection_result.get("risk_level", "HIGH")).upper()
             next_act_str = str(detection_result.get("next_action", "Verify")).upper()
             decision = "ACCEPT" if next_act_str == "ACCEPT" else "VERIFY"
             model_source = str(detection_result.get("model_source", "halluciguard_detector"))
             # Prefer the explicit degraded flag and preserve execution diagnostics.
-            degraded = bool(detection_result.get("detector_degraded", not completed))
+            degraded = detection_result.get("detector_degraded") is not False or not completed
 
             detector_dict: dict[str, Any] = {
                 "confidence_score": detection_result.get("confidence_score"),
@@ -175,13 +176,13 @@ class BaseLLMDetectorVerifierService:
                 "status": status,
                 "model_source": model_source,
                 # §6 execution diagnostics — prove real inference vs. degraded fallback.
-                "detector_model_loaded": bool(detection_result.get("model_loaded", False)),
-                "detector_inference_executed": bool(detection_result.get("inference_executed", False)),
+                "detector_model_loaded": detection_result.get("model_loaded") is True,
+                "detector_inference_executed": detection_result.get("inference_executed") is True,
                 "detector_degraded": degraded,
-                "calibrated": bool(detection_result.get("calibration_applied", False)),
+                "calibrated": detection_result.get("calibration_applied") is True,
                 "detector_model_source": model_source,
                 "probability_available": detection_result.get("hallucination_probability") is not None,
-                "grounded": bool(detection_result.get("grounded", False)),
+                "grounded": detection_result.get("grounded") is True,
                 "claims": detection_result.get("claims", []),
                 "verification_reason": detection_result.get("verification_reason"),
             }
@@ -198,21 +199,34 @@ class BaseLLMDetectorVerifierService:
         # §28 certification: a degraded detector (baseline heuristic) must not be
         # silently certified. Initial triage cannot be certified as grounded. Import is
         # guarded so normal (non-certification) runs are never affected.
+        certification_requested = os.environ.get("CERTIFICATION_MODE", "false").lower() in {"true", "1", "yes"}
+        certification_helpers_available = False
         try:
             _enforce_detector, _cert_from_env, _CertErr = _load_certification()
+            certification_helpers_available = True
+            certification_requested = certification_requested or bool(_cert_from_env())
         except Exception as _imp_exc:  # pragma: no cover - defensive
             _enforce_detector = None
-            logger.debug("Certification helpers unavailable: %s", _imp_exc)
+            logger.debug("Certification helpers unavailable (%s)", type(_imp_exc).__name__)
         # This is evidence-free triage, not the grounded Detector stage. A
         # certification failure here must not prevent evidence retrieval.
-        certification_requested = bool(_enforce_detector and _cert_from_env())
         detector_dict["certification_status"] = (
             "pending_grounded_detection" if certification_requested else "not_requested"
         )
+        if certification_requested:
+            # This slice has no post-retrieval Detector stage. Never claim its
+            # evidence-free triage was certified, even if the Verifier succeeds.
+            detector_dict["certification_completed"] = False
+            detector_dict["certification_reason"] = (
+                "grounded_detection_not_executed" if certification_helpers_available
+                else "certification_helpers_unavailable"
+            )
 
         # Step 3: Conditional Verifier Routing
         should_verify = (
             force_verifier
+            or not FAST_PATH_RELEASE_ENABLED
+            or certification_requested
             or decision == "VERIFY"
             or risk_tier in {"MEDIUM", "HIGH"}
             or risk_tier not in {"LOW", "MEDIUM", "HIGH"}
@@ -387,6 +401,8 @@ class BaseLLMDetectorVerifierService:
                 "error": f"Verifier error: {type(exc).__name__}",
                 "claim_evidence": [],
             }
+            if certification_requested:
+                detector_dict["certification_reason"] = "verifier_failed_before_grounded_detection"
 
         return LLMDetectorVerifierSliceResult(
             user_query=user_query,

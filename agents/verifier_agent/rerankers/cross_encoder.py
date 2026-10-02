@@ -162,6 +162,8 @@ class CrossEncoderReranker:
                 raise ValueError(
                     f"Reranker returned {len(scores)} scores for {len(passages)} passages"
                 )
+            if not all(math.isfinite(float(score)) for score in scores):
+                raise ValueError("Nonfinite reranker scores")
 
             scored_passages = list(zip(passages, scores))
             scored_passages.sort(key=lambda item: float(item[1]), reverse=True)
@@ -215,6 +217,7 @@ class CrossEncoderReranker:
         Runs cross-encoder inference on at most ``max_candidates`` usable passages
         to decide whether primary evidence is semantically sufficient before Tavily.
         """
+        self._reset_run_diagnostics()
         if not passages or max_candidates <= 0:
             return [], []
 
@@ -223,7 +226,6 @@ class CrossEncoderReranker:
         # method left last_* untouched, so a failed/fallback gate looked like a
         # real BGE run (or stale from a prior rerank()). diagnostics() now tells
         # a real gate score apart from a fallback.
-        self._reset_run_diagnostics()
         self.last_attempted = True
         if model_name and model_name != self.model_name:
             self.model_name = model_name
@@ -246,6 +248,8 @@ class CrossEncoderReranker:
             pairs = [(claim or "", p.snippet or p.title or "") for p in candidates]
             raw_scores = self.model.predict(pairs, batch_size=min(8, len(pairs)))
             scores_list = raw_scores.tolist() if hasattr(raw_scores, "tolist") else list(raw_scores)
+            if len(scores_list) != len(candidates) or not all(math.isfinite(float(s)) for s in scores_list):
+                raise ValueError("Invalid gate scores")
             normalized = [self._normalize_gate_score(float(s)) for s in scores_list]
             self.last_status = "executed"
             self.last_inference_executed = True

@@ -16,6 +16,7 @@ import uuid
 import time
 import logging
 import math
+import hashlib
 from typing import List, Dict, Any, Tuple
 
 from schemas.models import (
@@ -299,6 +300,57 @@ class VerificationPipeline:
         return list(strongest_by_source.values())
 
     @staticmethod
+    def _subject_only_in_possessive_fragment(claim, passage):
+        import re
+        # A fragment about "Earth's Moon" does not assert that Earth itself
+        # orbits anything. Reject this scope error rather than refute the claim.
+        match = re.match(r"\s*(?:the\s+)?([A-Za-z][A-Za-z -]*?)\s+(?:orbits|is|was|are|were)\b", claim, re.I)
+        if not match:
+            return False
+        subject = match.group(1).strip()
+        text = passage.snippet
+        possessive = r"\b" + re.escape(subject) + r"(?:&#0?39;|['’])s\s+[^.!?]+(?=[.!?]|$)"
+        if not re.search(possessive, text, re.I):
+            return False
+        remaining = re.sub(possessive, "", text, flags=re.I)
+        return not re.search(r"\b" + re.escape(subject) + r"\b", remaining, re.I)
+
+    @staticmethod
+    def _capital_premise(claim, passage, relation_verifier):
+        """Normalize only whitespace segmentation of the same capital name,
+        anchored to the same country. Keep original evidence/provenance intact.
+        No aliases, translated names, or positive verdicts are synthesized.
+        """
+        import re
+        claims = relation_verifier.extract_triples(claim) if relation_verifier else []
+        facts = relation_verifier.extract_triples(passage.snippet) if relation_verifier else []
+        def country(name):
+            return re.sub(r"^(?:(?:socialist|democratic|federal) )?(?:republic|kingdom|state) of ", "", name)
+        for c in claims:
+            for f in facts:
+                if (c.relation == f.relation == "capital_of" and not c.negated and not f.negated
+                        and country(c.object) == country(f.object)
+                        and c.subject != f.subject
+                        and c.subject.replace(" ", "") == f.subject.replace(" ", "")):
+                    normalized = re.sub(r"\b" + re.escape(f.subject) + r"\b",
+                        c.subject, passage.snippet, flags=re.I)
+                    return normalized, ["capital_name_whitespace_segmentation"]
+        return passage.snippet, []
+
+    @staticmethod
+    def _historical_capital_only(claim, passage):
+        import re
+        # Explicitly historical assertions are not counter-evidence about the
+        # current capital. A current assertion (including negation) stays in.
+        if not re.search(r"\bis\b", claim, re.I) or re.search(r"\b(?:was|formerly|1\d{3}|20\d{2})\b", claim, re.I):
+            return False
+        sentences = [s for s in re.split(r"[.!?\n]", passage.snippet) if re.search(r"\bcapital\b", s, re.I)]
+        return bool(sentences) and all(
+            re.search(r"\b(?:ancient|former|historical|historic)\s+capital\b|\bwas\b[^.!?]*\bcapital\b", s, re.I)
+            and not re.search(r"\b(?:currently|today|now|no longer)\b|\b(?:is|isn't|isn’t)\s+(?:not\s+)?(?:the\s+)?(?:current\s+|national\s+)?capital\b", s, re.I)
+            for s in sentences)
+
+    @staticmethod
     def _select_decision_grade_evidence(
         passages: List[Passage],
         nli_results: List[Dict[str, Any]],
@@ -315,7 +367,16 @@ class VerificationPipeline:
         selected = []
         aggregate = relation_verifier.verify_relation(claim, passages) if relation_verifier and claim else None
         subject = aggregate.claim_triple.subject if aggregate and aggregate.claim_triple else ""
+        if aggregate and aggregate.claim_triple and aggregate.claim_triple.relation == "capital_of":
+            # A wrong city's absence is expected in counter-evidence. Anchor the
+            # topicality gate to the country, without changing NLI or its scores.
+            subject = aggregate.claim_triple.object
         for passage, raw_result in pairs:
+            if VerificationPipeline._subject_only_in_possessive_fragment(claim, passage):
+                continue
+            if (aggregate and aggregate.claim_triple and aggregate.claim_triple.relation == "capital_of"
+                    and VerificationPipeline._historical_capital_only(claim, passage)):
+                continue
             if raw_result.get("degraded") or raw_result.get("nli_degraded") or raw_result.get("validity_factor", 1.0) == 0:
                 continue
             try:
@@ -449,6 +510,27 @@ class VerificationPipeline:
                         if isinstance(cached_data, dict)
                         else cached_data
                     )
+                    # Cached inference is historical proof, not execution by
+                    # this request. Copy it before rewriting current telemetry.
+                    import copy
+                    trace = copy.deepcopy(report.retrieval_trace or {})
+                    historical = {k: copy.deepcopy(v) for k, v in trace.items()
+                        if k in {"backend_execution", "retrieval_degraded", "reranker_execution",
+                                 "nli_execution", "evidence_flow", "subclaim_executions"}}
+                    trace = {}
+                    for component in ("reranker_execution", "nli_execution"):
+                        trace[component] = {"status": "cache_hit", "attempted": False,
+                            "inference_executed": False, "initialization_attempted": False,
+                            "submitted_inputs": [], "degraded": False}
+                    trace["backend_execution"] = {"route": "cache_hit", "sparse_attempted": False,
+                        "dense_attempted": False, "sparse_executed": False, "dense_executed": False,
+                        "fusion_executed": False, "selected_count": 0}
+                    trace["evidence_flow"] = {"cache_reused_evidence_count": len(report.evidence),
+                        "nli_selected": 0, "selected_passages": []}
+                    trace["subclaim_executions"] = []
+                    trace["execution_origin"] = "cache"
+                    trace["cached_execution"] = historical
+                    report = report.model_copy(update={"retrieval_trace": trace})
                     # The cache is keyed by (domain, claim TEXT); the stored report
                     # still carries the claim_id/claim_text of whatever run first
                     # populated it. Rebind them to the CURRENT request so the graph's
@@ -484,6 +566,8 @@ class VerificationPipeline:
                 sub_reports: List[Dict[str, Any]] = []
                 claim_retrieved = 0
                 claim_reranked = 0
+                subclaim_executions = []
+                backend_diag = {"route": "not_run", "degraded": True}
 
                 for sub_claim in sub_claims:
                     with tracker.track(PipelineStage.QUERY_EXPANSION):
@@ -557,12 +641,11 @@ class VerificationPipeline:
                                 all_raw.extend(q_passages)
                             except Exception as e:
                                 self.logger.error(
-                                    "Adapter retrieval failed for query '%s': %s",
-                                    q,
-                                    e,
+                                    "Adapter retrieval failed (%s)",
+                                    type(e).__name__,
                                 )
                                 adapter_failures.append(
-                                    f"{validated_domain}:{str(e)[:100]}"
+                                    f"{validated_domain}:{type(e).__name__}"
                                 )
 
                         # Attach n8n trace to adapter trace or initialize retrieval trace
@@ -610,6 +693,17 @@ class VerificationPipeline:
                             search_queries=list(dict.fromkeys([expanded_query, *search_queries])),
                             domain=validated_domain,
                         )
+
+                        from schemas.retrieval_trace import RetrievalTrace
+                        if getattr(adapter, "last_retrieval_trace", None) is None:
+                            adapter.last_retrieval_trace = RetrievalTrace(
+                                requested_domain=validated_domain, primary_adapter=adapter.name,
+                                retrieval_mode=payload.retrieval_mode,
+                            )
+                        adapter.last_retrieval_trace.evidence_flow = {
+                            "raw_candidates": len(all_raw), "deduplicated_candidates": len(seen_doc_keys),
+                            "after_relevance_ranking": len(raw_passages),
+                        }
 
 
                     with tracker.track(PipelineStage.AGGREGATION):
@@ -680,11 +774,10 @@ class VerificationPipeline:
                         nli_results = (
                             self.nli_engine.batch_classify(
                                 sub_claim,
-                                [p.snippet for p in relevant_passages],
+                                [self._capital_premise(sub_claim, p, self.evidence_scorer.relation_verifier)[0]
+                                 for p in relevant_passages],
                                 model_name=route.nli_model,
                             )
-                            if relevant_passages
-                            else []
                         )
                         self.metrics.record_nli_inference(
                             int((time.time() - nli_start) * 1000)
@@ -733,6 +826,42 @@ class VerificationPipeline:
                             relation_verifier=self.evidence_scorer.relation_verifier,
                         )
                     )
+                    current_trace = getattr(adapter, "last_retrieval_trace", None)
+                    if current_trace is not None:
+                        current_trace.evidence_flow.update({
+                            "hybrid_selected": len(hybrid_passages), "reranker_selected": len(reranked_passages),
+                            "nli_selected": len(relevant_passages), "decision_grade_selected": len(decision_passages),
+                            "selected_passages": [{
+                                "source_id": p.source_id, "source": p.source,
+                                "snippet_sha256": hashlib.sha256(p.snippet.encode()).hexdigest(),
+                                "characters": len(p.snippet),
+                                "model_input_sha256": hashlib.sha256(self._capital_premise(
+                                    sub_claim, p, self.evidence_scorer.relation_verifier)[0].encode()).hexdigest(),
+                                "input_transforms": self._capital_premise(
+                                    sub_claim, p, self.evidence_scorer.relation_verifier)[1],
+                            } for p in relevant_passages],
+                            "nli_outputs": [{
+                                "source_id": p.source_id,
+                                "label": str(getattr(n.get("label"), "value", n.get("label"))),
+                                "entailment": n.get("entailment_score"),
+                                "contradiction": n.get("contradiction_score"),
+                                "neutral": n.get("neutral_score"),
+                                "degraded": bool(n.get("degraded", False)),
+                                "selected_for_decision": p in decision_passages,
+                                "rejection_reason": (None if p in decision_passages else
+                                    "subject_only_in_possessive_fragment" if self._subject_only_in_possessive_fragment(sub_claim, p)
+                                    else "historical_scope_mismatch" if self._historical_capital_only(sub_claim, p)
+                                    else "no_decision_grade_signal_or_relation_gate"),
+                            } for p, n in zip(relevant_passages, nli_results)],
+                        })
+                        subclaim_executions.append({
+                            "subclaim_sha256": hashlib.sha256(sub_claim.encode()).hexdigest(),
+                            "backend_execution": backend_diag,
+                            "reranker_execution": self._last_reranker_diag,
+                            "nli_execution": self._last_nli_diag,
+                            "evidence_flow": dict(current_trace.evidence_flow),
+                        })
+                        current_trace.subclaim_executions = list(subclaim_executions)
 
                     with tracker.track(PipelineStage.SCORING):
                         scores_dict = self.evidence_scorer.score_evidence(
@@ -856,8 +985,7 @@ class VerificationPipeline:
                 self.logger.error(
                     "Pipeline error processing claim %s: %s",
                     claim.claim_id,
-                    e,
-                    exc_info=True,
+                    type(e).__name__,
                 )
                 error_report = ClaimReport(
                     claim_id=claim.claim_id,
@@ -868,7 +996,7 @@ class VerificationPipeline:
                     trust_score=0.0,
                     confidence_score=0.0,
                     verdict=VerdictLabel.UNVERIFIED,
-                    explanation=f"Pipeline error: {type(e).__name__} — {str(e)[:200]}. This claim could not be verified.",
+                    explanation=f"Pipeline error: {type(e).__name__}. This claim could not be verified.",
                 )
                 claim_reports.append(error_report)
 

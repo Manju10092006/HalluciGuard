@@ -96,6 +96,10 @@ class HybridRetriever:
             "dense_available": False, "dense_failure_stage": None,
             "sparse_contributed": False, "dense_contributed": False,
             "errors": [], "selected_count": 0,
+            "input_count": len(passages), "deduplicated_count": 0,
+            "sparse_result_count": 0, "dense_result_count": 0,
+            "fusion_executed": False, "fusion_backend_count": 0,
+            "fallback_reason": None,
         }
         if not passages or k <= 0 or not query.strip():
             self.last_diagnostics["route"] = "empty_input"
@@ -107,6 +111,7 @@ class HybridRetriever:
             if key not in unique:
                 unique[key] = passage
         passages = list(unique.values())
+        self.last_diagnostics["deduplicated_count"] = len(passages)
 
         try:
             if dense_model and dense_model != self.dense.model_name:
@@ -142,10 +147,17 @@ class HybridRetriever:
                 self.last_diagnostics["errors"].append({"component": "dense", "stage": dense_diag.get("failure_stage"), "error_type": dense_diag["error_type"]})
             self.last_diagnostics["sparse_contributed"] = bool(sparse_results)
             self.last_diagnostics["dense_contributed"] = bool(dense_results)
+            self.last_diagnostics["sparse_result_count"] = len(sparse_results)
+            self.last_diagnostics["dense_result_count"] = len(dense_results)
+            self.last_diagnostics["dense_details"] = dense_diag
             route = ("hybrid" if sparse_results and dense_results else
                      "bm25_only" if sparse_results else
                      "dense_only" if dense_results else "lexical_fallback")
             self.last_diagnostics["route"] = route
+            if route != "hybrid":
+                self.last_diagnostics["fallback_reason"] = (
+                    "backend_failure" if self.last_diagnostics["errors"] else "backend_empty_results"
+                )
             self.last_diagnostics["degraded"] = (route != "hybrid" or bool(self.last_diagnostics["errors"])
                                                   or not self.last_diagnostics["dense_executed"])
 
@@ -168,6 +180,8 @@ class HybridRetriever:
                 passage_map.setdefault(self._key(passage), passage)
 
             rrf_scores = _normalize_rank_fusion(rank_scores, max(backend_count, 1))
+            self.last_diagnostics["fusion_executed"] = bool(rank_scores)
+            self.last_diagnostics["fusion_backend_count"] = backend_count
 
             scored: List[Tuple[Passage, float]] = []
             for key, passage in passage_map.items():
@@ -218,6 +232,7 @@ class HybridRetriever:
         except Exception as exc:
             # Deterministic fail-soft fallback when BM25/FAISS/embeddings fail.
             self.last_diagnostics["route"] = "lexical_fallback"
+            self.last_diagnostics["fallback_reason"] = "fusion_failure"
             self.last_diagnostics["degraded"] = True
             self.last_diagnostics["errors"].append({"component": "fusion", "error_type": type(exc).__name__})
             fallback = sorted(

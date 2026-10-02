@@ -6,6 +6,7 @@ import os
 import sys
 import uuid
 from dataclasses import asdict, is_dataclass
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
@@ -24,10 +25,12 @@ from .state import (
 
 def _dump(value: Any) -> Any:
     """Recursively serialize Pydantic models and dataclasses to plain dictionaries."""
+    if isinstance(value, Enum):
+        return value.value
     if hasattr(value, "model_dump"):
-        return value.model_dump()
+        return _dump(value.model_dump())
     if is_dataclass(value):
-        return asdict(value)
+        return _dump(asdict(value))
     if isinstance(value, dict):
         return {k: _dump(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -256,6 +259,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
     # the bridge fails closed (routes to Verify) on any detector runtime failure;
     # it never fabricates an Accept or silently substitutes a different model.
     from .detector_bridge import run_detection
+    from halluciguard_detector.phase1 import FAST_PATH_RELEASE_ENABLED
 
     node_start = start_timer()
     try:
@@ -301,7 +305,8 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         is_stress = state.get("generation_mode") == "stress_test"
         detector_degraded = bool(detector.get("detector_degraded")) or str(detector.get("status", "")).lower() in {"failed", "degraded", "fallback", "unavailable"}
         score_valid = _valid_detector_score(detector.get("hallucination_probability")) is not None
-        safe_fast_path = (score_valid and detector.get("probability_available") is True
+        safe_fast_path = (FAST_PATH_RELEASE_ENABLED
+                          and score_valid and detector.get("probability_available") is True
                           and detector.get("grounded") is True
                           and detector.get("calibrated") is True
                           and detector.get("inference_executed") is True
@@ -470,7 +475,10 @@ def _build_canonical_verifier_result(
             if isinstance(ev, CanonicalEvidence):
                 canonical_ev_list.append(ev)
                 continue
-            entail_raw = str(ev.get("entailment_label", "neutral")).lower()
+            raw_label = ev.get("entailment_label", "neutral")
+            entail_raw = str(getattr(raw_label, "value", raw_label)).strip().lower()
+            if entail_raw.startswith("entailmentlabel."):
+                entail_raw = entail_raw.split(".", 1)[1]
             if entail_raw in {"contradiction", "contradicted", "contradicts", "refutes", "refuted"}:
                 entail_lbl = CanonicalEntailmentLabel.CONTRADICTION
             elif entail_raw in {"entailment", "entails", "supported", "supports", "support"}:
@@ -490,6 +498,11 @@ def _build_canonical_verifier_result(
                     entailment_label=entail_lbl,
                     entailment_score=float(ev.get("entailment_score", 0.0)),
                     credibility_score=float(ev.get("credibility_score", 0.0)),
+                    nli_entailment=ev.get("nli_entailment"),
+                    nli_contradiction=ev.get("nli_contradiction"),
+                    nli_neutral=ev.get("nli_neutral"),
+                    score_provenance=ev.get("score_provenance"),
+                    relation_status=ev.get("relation_status"),
                 )
             )
 
@@ -503,6 +516,10 @@ def _build_canonical_verifier_result(
                 contradiction_score=float(report.get("contradiction_score", 0.0)),
                 confidence_score=float(report.get("confidence_score", report.get("trust_score", 0.0))),
                 evidence=canonical_ev_list,
+                retrieval_trace={key: value for key, value in (report.get("retrieval_trace") or {}).items()
+                                 if key in {"backend_execution", "retrieval_degraded", "reranker_execution",
+                                            "nli_execution", "evidence_flow", "subclaim_executions",
+                                            "execution_origin", "cached_execution"}},
             )
         )
 

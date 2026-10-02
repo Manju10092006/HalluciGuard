@@ -18,6 +18,10 @@ from pydantic import BaseModel, Field, model_validator
 
 
 FEATURE_SCHEMA = "hg-token-logits-v2"
+# Phase1Service deliberately rejects fast_path mode until a held-out release
+# evaluation exists. Routing consumers must honor the same release gate:
+# grounded DeBERTa risk is not a generation-bound uncertainty certificate.
+FAST_PATH_RELEASE_ENABLED = False
 FEATURE_NAMES = ("mean_nll", "max_nll", "mean_entropy", "mean_margin", "log_token_count")
 LABELS = {"SUPPORTED": 0, "HALLUCINATION_RELATED": 1}
 

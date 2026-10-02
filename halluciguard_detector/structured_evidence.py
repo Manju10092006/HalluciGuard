@@ -95,8 +95,8 @@ def normalize_evidence(value: Any) -> tuple[list[str], dict[str, Any]]:
         elif isinstance(item, Mapping):
             source = next((str(item[k]) for k in _SOURCE_KEYS if item.get(k) is not None), inherited)
             own = fields(item)
-            wrapper = next((key for key in _WRAPPERS if key in item), None)
-            if wrapper is not None:
+            wrappers = [key for key in _WRAPPERS if key in item]
+            if wrappers:
                 # Emit the mapping's OWN sibling fields as their own record so a
                 # usable fact (e.g. a top-level "summary") is never lost when the
                 # wrapper collection is empty (#10). Do NOT prepend them to each
@@ -105,7 +105,8 @@ def normalize_evidence(value: Any) -> tuple[list[str], dict[str, Any]]:
                 # context onto children either; only the source id propagates.
                 if own or inherited_fields:
                     add("; ".join([*inherited_fields, *own]), source)
-                visit(item[wrapper], source, [], depth + 1)
+                for wrapper in wrappers:
+                    visit(item[wrapper], source, [], depth + 1)
             else:
                 add("; ".join([*inherited_fields, *own]), source)
         elif isinstance(item, Sequence) and not isinstance(item, (bytes, bytearray)):

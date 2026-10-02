@@ -154,6 +154,18 @@ class VerificationCache:
         await self._db.commit()
         return cursor.rowcount > 0
 
+    async def verify_persisted_verification(self, domain: str, claim_text: str,
+                                           verdict: str, confidence: float) -> None:
+        if not self._db:
+            raise RuntimeError("Cache not initialized")
+        async with self._db.execute(
+            "SELECT verdict, confidence FROM verification_cache WHERE cache_key = ?",
+            (self._make_key(domain, claim_text),),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None or row[0] != verdict or row[1] != confidence:
+            raise RuntimeError("Cache verification read-back mismatch")
+
     async def invalidate_domain(self, domain: str) -> int:
         if not self._db:
             return 0

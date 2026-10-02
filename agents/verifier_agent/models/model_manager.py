@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from sentence_transformers import SentenceTransformer, CrossEncoder
-from transformers import pipeline as hf_pipeline
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline as hf_pipeline
 
 from agents.verifier_agent.config.settings import get_settings
 
@@ -179,7 +179,10 @@ class ModelManager:
             self._evict_if_needed()
             settings = get_settings()
             t0 = time.monotonic()
-            ce_kwargs: Dict[str, Any] = {"device": self.device}
+            ce_kwargs: Dict[str, Any] = {
+                "device": self.device,
+                "local_files_only": not settings.allow_model_downloads,
+            }
 
             try:
                 model = CrossEncoder(model_name, **ce_kwargs)
@@ -188,7 +191,7 @@ class ModelManager:
                     logger.warning(
                         "GPU load failed for reranker '%s': %s — retrying on CPU",
                         model_name,
-                        primary_err,
+                        type(primary_err).__name__,
                     )
                     ce_kwargs["device"] = "cpu"
                     model = CrossEncoder(model_name, **ce_kwargs)
@@ -218,9 +221,18 @@ class ModelManager:
             self._evict_if_needed()
             t0 = time.monotonic()
 
+            # Load BOTH tokenizer and weights under the same policy before the
+            # pipeline factory. Passing tokenizer_kwargs to pipeline is not a
+            # portable enforcement mechanism across Transformers versions.
+            local_only = not settings.allow_model_downloads
+            tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=local_only)
+            weights = AutoModelForSequenceClassification.from_pretrained(
+                model_name, local_files_only=local_only,
+            )
             kwargs: Dict[str, Any] = {
                 "task": "text-classification",
-                "model": model_name,
+                "model": weights,
+                "tokenizer": tokenizer,
                 "top_k": None,
                 "device": self._hf_device,
             }
@@ -228,26 +240,12 @@ class ModelManager:
             try:
                 model = hf_pipeline(**kwargs)
             except Exception as primary_err:
-                logger.warning(f"Primary NLI load failed for {model_name}: {primary_err}. Attempting local_files_only fallback.")
-                try:
-                    model = hf_pipeline(
-                        task="text-classification",
-                        model=model_name,
-                        top_k=None,
-                        device=self._hf_device,
-                        model_kwargs={"local_files_only": True},
-                    )
-                except Exception as offline_err:
-                    if self.device == "cuda":
-                        logger.warning(
-                            "GPU load failed for NLI '%s': %s — retrying on CPU",
-                            model_name,
-                            primary_err,
-                        )
-                        kwargs["device"] = -1
-                        model = hf_pipeline(**kwargs)
-                    else:
-                        raise primary_err
+                if self.device != "cuda":
+                    raise
+                logger.warning("NLI device placement failed (%s); retrying cached weights on CPU",
+                               type(primary_err).__name__)
+                kwargs["device"] = -1
+                model = hf_pipeline(**kwargs)
             elapsed = time.monotonic() - t0
             self._models[model_name] = model
             self._model_load_times[model_name] = elapsed

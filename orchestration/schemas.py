@@ -287,6 +287,11 @@ class Evidence(BaseModel):
         description="Name or provider of the source (e.g. wikipedia, pubmed, sec_edgar).",
     )
     source_id: Optional[str] = None
+    nli_entailment: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    nli_contradiction: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    nli_neutral: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    score_provenance: Optional[str] = None
+    relation_status: Optional[str] = None
     url: Optional[str] = Field(
         default=None,
         description="Direct URL to the source document if available.",
@@ -351,6 +356,7 @@ class ClaimReport(BaseModel):
         le=1.0,
         description="Calibrated confidence score for the claim verdict (0.0 to 1.0).",
     )
+    retrieval_trace: Optional[Dict[str, Any]] = None
     evidence: List[Evidence] = Field(
         default_factory=list,
         description="Authoritative evidence passages matched to this claim.",

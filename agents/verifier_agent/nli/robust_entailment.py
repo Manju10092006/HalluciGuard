@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import copy
 import math
 import time
 from typing import Any, Dict, List, Optional
@@ -122,6 +124,10 @@ class NLIEngine:
         self.last_device: str = "unknown"
         self.last_latency_ms: int = 0
         self.last_batch_size: int = 0
+        self.last_input_trace: list[dict] = []
+        self.last_attempted = False
+        self.last_initialization_attempted = False
+        self.last_tokenizer_observability = "not_exposed"
 
     def _reset_run_diagnostics(self) -> None:
         self.last_status = "not_run"
@@ -129,6 +135,10 @@ class NLIEngine:
         self.last_degraded = False
         self.last_latency_ms = 0
         self.last_batch_size = 0
+        self.last_input_trace = []
+        self.last_attempted = False
+        self.last_initialization_attempted = False
+        self.last_tokenizer_observability = "not_exposed"
 
     def is_loaded(self) -> bool:
         """True iff the NLI pipeline is loaded and usable."""
@@ -166,16 +176,58 @@ class NLIEngine:
             "device": self.last_device,
             "latency_ms": self.last_latency_ms,
             "batch_size": self.last_batch_size,
+            "attempted": self.last_attempted,
+            "initialization_attempted": self.last_initialization_attempted,
+            "submitted_inputs": self.last_input_trace,
+            "tokenizer_observability": self.last_tokenizer_observability,
         }
+
+    def _invoke(self, inputs, **kwargs):
+        """Observe this invocation's actual preprocessing without mutating a
+        cached/shared pipeline. Weights and tokenizer are shared read-only;
+        the shallow pipeline copy owns only this local preprocessing callback.
+        Observation errors never replace model outputs with invented scores.
+        """
+        if not callable(getattr(self.pipeline, "preprocess", None)) or not callable(
+            getattr(self.pipeline, "tokenizer", None)
+        ):
+            return self.pipeline(inputs, **({} if isinstance(inputs, list) else kwargs))
+        local = copy.copy(self.pipeline)
+        original = self.pipeline.preprocess
+        def observed(item, **params):
+            processed = original(item, **params)
+            try:
+                ids = processed["input_ids"].tolist()[0]
+                mask = processed.get("attention_mask")
+                mask = mask.tolist()[0] if mask is not None else [1] * len(ids)
+                retained = [i for i, m in zip(ids, mask) if m]
+                text = item["text"] if isinstance(item, dict) else item
+                pair = item.get("text_pair") if isinstance(item, dict) else None
+                full = local.tokenizer(text, text_pair=pair, truncation=False,
+                    add_special_tokens=True, return_attention_mask=False)["input_ids"]
+                self.last_input_trace.append({"stage": "tokenized",
+                    "premise_sha256": hashlib.sha256(text.encode()).hexdigest(),
+                    "untruncated_pair_tokens": len(full), "retained_pair_tokens": len(retained),
+                    "input_ids_sha256": hashlib.sha256(str(retained).encode()).hexdigest(),
+                    "tokenizer_truncated": len(full) > len(retained),
+                    "max_length": params.get("max_length"),
+                })
+                self.last_tokenizer_observability = "observed_preprocess"
+            except Exception:
+                self.last_tokenizer_observability = "observation_failed"
+            return processed
+        local.preprocess = observed
+        return local(inputs, **kwargs)
 
     def _load_model(self) -> None:
         if self.pipeline is not None or not self._is_available:
             return
+        self.last_initialization_attempted = True
         try:
             self.pipeline = get_model_manager().load_nli_model(self.model_name)
         except Exception as exc:
             logger.warning(
-                "NLI model unavailable (%s); using degraded neutral result", exc
+                "NLI model unavailable (%s); using degraded neutral result", type(exc).__name__
             )
             self._is_available = False
 
@@ -207,7 +259,7 @@ class NLIEngine:
             return self._neutral()
         try:
             # Premise = evidence, hypothesis = claim.
-            raw = self.pipeline({"text": (evidence or "")[:1500], "text_pair": (claim or "")[:500]}, truncation=True, max_length=512)
+            raw = self._invoke({"text": (evidence or "")[:1500], "text_pair": (claim or "")[:500]}, truncation=True, max_length=512)
             scores = _normalize_scores(_flatten_predictions(raw), self._get_id2label())
             return _decision(scores) if sum(scores.values()) > 0 else self._neutral()
         except Exception as exc:
@@ -227,6 +279,7 @@ class NLIEngine:
         self._reset_run_diagnostics()
         if not evidences:
             return []
+        self.last_attempted = True
         if model_name and model_name != self.model_name:
             self.model_name = model_name
             self.pipeline = None
@@ -242,8 +295,13 @@ class NLIEngine:
                 {"text": evidence or "", "text_pair": claim or ""}
                 for evidence in evidences
             ]
+            self.last_input_trace = [{
+                "premise_sha256": hashlib.sha256((ev or "").encode()).hexdigest(),
+                "premise_characters": len(ev or ""), "hypothesis_characters": len(claim or ""),
+                "character_truncated": False, "tokenizer_truncated": None,
+            } for ev in evidences]
             _t0 = time.perf_counter()
-            raw_batch = self.pipeline(batch)
+            raw_batch = self._invoke(batch, truncation=True, max_length=512)
             self.last_latency_ms = int((time.perf_counter() - _t0) * 1000)
             if not isinstance(raw_batch, list) or len(raw_batch) != len(evidences):
                 raise ValueError("NLI batch output is not aligned with input batch")
@@ -279,7 +337,19 @@ class NLIEngine:
             self.last_status = "degraded"
             self.last_degraded = True
             self.last_inference_executed = False
-            return [
+            outputs = [
                 self.classify(claim, evidence, model_name=self.model_name)
                 for evidence in evidences
             ]
+            # The retry path has a distinct character bound. Preserve both
+            # attempted batch inputs and actually submitted retry pairs.
+            self.last_input_trace.extend({
+                "stage": "individual_retry",
+                "premise_sha256": hashlib.sha256((ev or "")[:1500].encode()).hexdigest(),
+                "premise_characters": min(len(ev or ""), 1500),
+                "hypothesis_characters": min(len(claim or ""), 500),
+                "character_truncated": len(ev or "") > 1500 or len(claim or "") > 500,
+                "tokenizer_truncated": None,
+            } for ev in evidences if self.is_loaded())
+            self.last_inference_executed = any(not o.get("degraded", False) for o in outputs)
+            return outputs

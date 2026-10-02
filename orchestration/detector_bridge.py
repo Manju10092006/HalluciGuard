@@ -70,15 +70,17 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
     probability = valid_score(raw_probability)
     raw_confidence = result.get("confidence_score")
     confidence = valid_score(raw_confidence)
-    status = str(result.get("status", "completed")).lower()
-    degraded = bool(result.get("detector_degraded", status != "completed")) or status != "completed"
+    status = str(result.get("status", "unknown")).lower()
+    degraded = result.get("detector_degraded", status != "completed") is not False or status != "completed"
     next_action = str(result.get("next_action", "Verify"))
     risk_level = str(result.get("risk_level", "HIGH")).upper()
     if risk_level not in {"LOW", "MEDIUM", "HIGH"} or next_action.lower() not in {"verify", "accept"}:
         raise ValueError("invalid_detector_route")
-    grounded = bool(result.get("grounded", False))
-    calibrated = bool(result.get("calibration_applied", False))
-    if degraded or not grounded or not calibrated or probability is None or confidence is None:
+    grounded = result.get("grounded") is True
+    calibrated = result.get("calibration_applied") is True
+    executed = result.get("inference_executed") is True
+    loaded = result.get("model_loaded") is True
+    if degraded or not grounded or not calibrated or not executed or not loaded or probability is None or confidence is None:
         next_action = "Verify"
         risk_level = "HIGH"
 
@@ -155,8 +157,8 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "calibrated": calibrated,
         "calibration_applied": calibrated,
-        "inference_executed": bool(result.get("inference_executed", False)),
-        "model_loaded": bool(result.get("model_loaded", False)),
+        "inference_executed": executed,
+        "model_loaded": loaded,
         "model_version": result.get("model_version"),
         "calibrator_version": result.get("calibrator_version"),
         "detector_degraded": degraded,

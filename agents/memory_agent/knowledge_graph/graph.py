@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -69,9 +71,22 @@ class KnowledgeGraph:
         nodes = [nd.model_dump(mode="json") for nd in self._entity_index.values()]
         edges = [ed.model_dump(mode="json") for ed in self._edge_index.values()]
         payload = {"nodes": nodes, "edges": edges}
-        self._persistence_path.write_text(
-            json.dumps(payload, default=str, indent=2), encoding="utf-8"
-        )
+        # Replace a complete file, never truncate the last durable graph first.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                dir=self._persistence_path.parent, delete=False) as tmp:
+            temporary = Path(tmp.name)
+            try:
+                json.dump(payload, tmp, default=str, indent=2)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            except BaseException:
+                tmp.close()
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            os.replace(temporary, self._persistence_path)
+        finally:
+            temporary.unlink(missing_ok=True)
         logger.debug("Saved KG: %d nodes, %d edges", len(nodes), len(edges))
 
     # ------------------------------------------------------------------
@@ -188,6 +203,47 @@ class KnowledgeGraph:
 
     def get_entity(self, entity_id: str) -> Optional[EntityNode]:
         return self._entity_index.get(entity_id)
+
+    def verification_nodes(self, fact_id: str) -> list[EntityNode]:
+        """Resolve an update by identity, not truncated claim text similarity."""
+        if not fact_id:
+            raise ValueError("Fact not found: missing identifier")
+        facts = self.find_entity_by_name(fact_id, EntityType.FACT)
+        if len(facts) != 1:
+            raise ValueError("Fact not found or ambiguous")
+        fact = facts[0]
+        claims = {n.entity_id: n for n in self._entity_index.values()
+                  if n.entity_type == EntityType.CLAIM and n.properties.get("fact_id") == fact_id}
+        for node, edge in self.get_neighbors(fact.entity_id, direction="in"):
+            if node.entity_type == EntityType.CLAIM and edge.relation == RelationType.DERIVED_FROM:
+                if node.properties.get("fact_id") not in (None, fact_id):
+                    raise ValueError("Linked claim belongs to a different fact; update is ambiguous")
+                claims[node.entity_id] = node
+        if not claims:
+            raise ValueError("Fact has no identifiable linked claim")
+        return [fact, *claims.values()]
+
+    def set_verification(self, nodes: list[EntityNode], verdict: str, confidence: float) -> None:
+        for node in nodes:
+            node.properties.update(verdict=verdict, confidence=confidence)
+            node.confidence = confidence
+            node.updated_at = datetime.utcnow()
+            # Analytics use NetworkX attributes, not the Pydantic node index.
+            self._graph.nodes[node.entity_id]["confidence"] = confidence
+
+    def verify_persisted_verification(self, nodes: list[EntityNode], verdict: str, confidence: float) -> None:
+        data = json.loads(self._persistence_path.read_text(encoding="utf-8"))
+        persisted = {n["entity_id"]: n for n in data["nodes"]}
+        for node in nodes:
+            row = persisted[node.entity_id]
+            if (row["properties"].get("verdict") != verdict
+                    or row["properties"].get("confidence") != confidence
+                    or row["confidence"] != confidence
+                    or node.properties.get("verdict") != verdict
+                    or node.properties.get("confidence") != confidence
+                    or node.confidence != confidence
+                    or self._graph.nodes[node.entity_id]["confidence"] != confidence):
+                raise RuntimeError("Graph verification read-back mismatch")
 
     def get_neighbors(
         self,

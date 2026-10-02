@@ -21,13 +21,15 @@ def _microsoft_passage() -> Passage:
     )
 
 
-def test_title_anchored_passive_creation_detects_wrong_founder() -> None:
+def test_title_anchored_passive_creation_defers_non_exhaustive_founder_list() -> None:
     result = RelationVerifier().verify_relation(
         "Snehith founded Microsoft.",
         [_microsoft_passage()],
     )
 
-    assert result.status == "OBJECT_MISMATCH"
+    # Naming other founders is not an exhaustive exclusion of this person.
+    # Neural contradiction, not a closed-world list assumption, must decide.
+    assert result.status == "NO_TRIPLE_EXTRACTED"
     assert result.claim_triple is not None
     assert result.claim_triple.subject == "microsoft"
     assert any(t.subject == "microsoft" for t in result.evidence_triples)
@@ -51,7 +53,7 @@ def test_unanchored_passive_text_does_not_invent_a_subject() -> None:
     assert RelationVerifier()._contextual_creation_triples(passage) == []
 
 
-def test_structured_founder_mismatch_survives_low_reranker_score() -> None:
+def test_non_exhaustive_founder_list_does_not_manufacture_relevance_floor() -> None:
     passage = _microsoft_passage().model_copy(update={"relevance_score": 0.01})
     scores = EvidenceScorer().score_evidence(
         claim="Snehith founded Microsoft.",
@@ -67,10 +69,8 @@ def test_structured_founder_mismatch_survives_low_reranker_score() -> None:
         domain="general",
     )
 
-    # A structurally-grounded OBJECT_MISMATCH with 0.999 NLI contradiction must
-    # SURVIVE a miscalibrated reranker (relevance 0.01). The relevance WEIGHT is
-    # floored for grounded pairs (the NLI probability is NOT rewritten), so the
-    # false founder claim is CONTRADICTED rather than erased to UNVERIFIED.
-    assert scores["verdict"].value == "contradicted"
-    assert scores["contradiction_score"] >= 0.50
-    assert scores["confidence_score"] >= 0.40
+    # Unknown list completeness cannot manufacture structural grounding and
+    # boost a very-low-relevance passage into a decision-grade contradiction.
+    assert scores["verdict"].value == "unverified"
+    assert scores["contradiction_score"] < 0.50
+    assert scores["confidence_score"] < 0.40
