@@ -182,6 +182,16 @@ class QueryExpander:
             country = capital_match.group(2).strip()
             queries.append(f"capital of {country}")
 
+        # Equivalent inverse wording must also retrieve independently of the
+        # proposed city. This changes search only, never the claim sent to NLI.
+        inverse_capital = re.search(
+            r"^(?:the\s+)?capital\s+of\s+([A-Za-z0-9\s\-]+?)\s+is\s+\S+",
+            clean_q,
+            re.IGNORECASE,
+        )
+        if inverse_capital:
+            queries.append(f"capital of {inverse_capital.group(1).strip()}")
+
         # 6. Location relations: "The Eiffel Tower is located in London" -> "Eiffel Tower location"
         location_match = re.search(
             r"^([A-Za-z0-9\s\-]+?)\s+is\s+(?:located\s+in|in)\s+([A-Za-z0-9\s\-]+)",

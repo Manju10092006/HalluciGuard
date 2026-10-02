@@ -6,6 +6,7 @@ import os
 import sys
 import uuid
 from dataclasses import asdict, is_dataclass
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
@@ -24,10 +25,12 @@ from .state import (
 
 def _dump(value: Any) -> Any:
     """Recursively serialize Pydantic models and dataclasses to plain dictionaries."""
+    if isinstance(value, Enum):
+        return value.value
     if hasattr(value, "model_dump"):
-        return value.model_dump()
+        return _dump(value.model_dump())
     if is_dataclass(value):
-        return asdict(value)
+        return _dump(asdict(value))
     if isinstance(value, dict):
         return {k: _dump(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -470,7 +473,10 @@ def _build_canonical_verifier_result(
             if isinstance(ev, CanonicalEvidence):
                 canonical_ev_list.append(ev)
                 continue
-            entail_raw = str(ev.get("entailment_label", "neutral")).lower()
+            raw_label = ev.get("entailment_label", "neutral")
+            entail_raw = str(getattr(raw_label, "value", raw_label)).strip().lower()
+            if entail_raw.startswith("entailmentlabel."):
+                entail_raw = entail_raw.split(".", 1)[1]
             if entail_raw in {"contradiction", "contradicted", "contradicts", "refutes", "refuted"}:
                 entail_lbl = CanonicalEntailmentLabel.CONTRADICTION
             elif entail_raw in {"entailment", "entails", "supported", "supports", "support"}:
@@ -490,6 +496,11 @@ def _build_canonical_verifier_result(
                     entailment_label=entail_lbl,
                     entailment_score=float(ev.get("entailment_score", 0.0)),
                     credibility_score=float(ev.get("credibility_score", 0.0)),
+                    nli_entailment=ev.get("nli_entailment"),
+                    nli_contradiction=ev.get("nli_contradiction"),
+                    nli_neutral=ev.get("nli_neutral"),
+                    score_provenance=ev.get("score_provenance"),
+                    relation_status=ev.get("relation_status"),
                 )
             )
 

@@ -137,7 +137,7 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
     if draft:
         print(f'  Supplied draft (Base LLM skipped): "{draft}"')
     print("\n  Running the LangGraph multi-agent workflow end-to-end ...")
-    print("  (first run downloads/loads the detector, reranker, and NLI models)")
+    print("  (models load on demand; downloads require explicit configuration)")
 
     t0 = time.time()
     kwargs = {"user_query": query, "domain": domain}
@@ -176,9 +176,9 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
         "ROLE : estimate hallucination RISK of the draft (a priority signal).",
         "IN   : the query + the draft answer.",
         "OUT  : a risk level / probability and a suggested route.",
-        "NOTE : this model has known train/serve skew (near-constant output), so",
-        "       by design it can NEVER accept/reject on its own — it only decides",
-        "       how urgently the Verifier should look. The Verifier is the arbiter.",
+        "NOTE : before retrieval, grounded probabilities are unavailable.",
+        "       After retrieval, this section shows the final grounded assessment.",
+        "       Operational verification risk is not probability of falsehood.",
     )
     detector = result.get("detector_result") or result.get("detector", {})
     probability_available = bool(
@@ -192,7 +192,8 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
     if probability_available:
         prob = float(detector.get("hallucination_probability", 0.0))
         conf = float(detector.get("confidence_score", detector.get("confidence", 0.0)))
-        val("Hallucination probability", f"{prob:.4f}")
+        val("Verification risk", f"{prob:.4f}")
+        val("Contradiction probability", detector.get("contradiction_mass", "unavailable"))
         val("Confidence score", f"{conf:.4f}")
     else:
         val("Hallucination probability", "N/A — grounded evidence is unavailable at triage")
@@ -230,9 +231,11 @@ async def run(query: str, draft: str | None, domain: str, stress: bool, dump_jso
         for j, ev in enumerate(ev_list[:3], 1):
             src = ev.get("source", "unknown")
             lbl = ev.get("entailment_label", "")
-            score = ev.get("entailment_score", "")
+            score = ev.get("entailment_score", "unavailable")
             snippet = (ev.get("snippet", "") or "")[:120]
-            print(f"         ({j}) [{src}] NLI={lbl} {score}: {snippet}...")
+            print(f"         ({j}) [{src}] label={lbl} P(entailment)={score}: {snippet}...")
+            if ev.get("nli_contradiction") is not None:
+                print(f"             P(contradiction)={ev['nli_contradiction']} P(neutral)={ev.get('nli_neutral')}")
 
     # ── 4. JUDGE ───────────────────────────────────────────────────────────────
     header("4", "JUDGE AGENT  (Arbitration & Decision)",

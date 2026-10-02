@@ -406,7 +406,13 @@ def train(
     learning_rate: float = 2e-5,
     max_length: int = DEFAULT_MAX_LENGTH,
     seed: int = 42,
+    calibration_data: Path | None = None,
+    selection_metric: str = "verification_f1",
+    local_files_only: bool = False,
+    gradient_checkpointing: bool = False,
 ) -> dict:
+    if selection_metric not in {"verification_f1", "macro_f1"}:
+        raise ValueError("unsupported checkpoint selection metric")
     if output_dir.exists() and any(output_dir.iterdir()):
         raise FileExistsError(f"model output already exists: {output_dir}")
     recovery_dir = output_dir.parent / f"{output_dir.name}-last"
@@ -424,19 +430,34 @@ def train(
     dev_groups = {str(row["source_id"]) for row in dev_rows if row.get("source_id") is not None}
     if train_groups & dev_groups:
         raise ValueError("train/dev source groups overlap")
+    calibration_rows = load_rows(calibration_data) if calibration_data is not None else dev_rows
+    if not calibration_rows:
+        raise ValueError("calibration split must be nonempty")
+    for row in calibration_rows:
+        if row.get("label_id") not in ID_TO_LABEL or row.get("label") != ID_TO_LABEL[row["label_id"]]:
+            raise ValueError("invalid calibration label")
+    if calibration_data is not None:
+        if any(not str(row.get("source_id") or "").strip() for row in train_rows + dev_rows + calibration_rows):
+            raise ValueError("independent calibration requires source group identifiers")
+        calibration_groups = {str(row["source_id"]) for row in calibration_rows}
+        if calibration_groups & (train_groups | dev_groups):
+            raise ValueError("calibration source groups overlap training or validation")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    tokenizer = AutoTokenizer.from_pretrained(base_model, local_files_only=local_files_only)
     model = AutoModelForSequenceClassification.from_pretrained(
         base_model,
         num_labels=3,
         id2label=ID_TO_LABEL,
         label2id={v: k for k, v in ID_TO_LABEL.items()},
+        local_files_only=local_files_only,
     ).float().to(device)
+    if gradient_checkpointing:
+        model.gradient_checkpointing_enable()
     collate = _collator(tokenizer, max_length)
     train_loader = DataLoader(JsonlDataset(data_dir / "train.jsonl"), batch_size=batch_size, shuffle=True, collate_fn=collate)
     dev_loader = DataLoader(JsonlDataset(data_dir / "dev.jsonl"), batch_size=batch_size, shuffle=False, collate_fn=collate)
@@ -486,15 +507,23 @@ def train(
             "train_loss": float(np.mean(losses)),
             "task_b_verification_needed_f1": verification_metrics["f1"],
             "task_a_contradiction_f1": contradiction_view["f1"],
+            "macro_f1": three_class_metrics(logits, labels)["macro_f1"],
         }
         history.append(metrics)
-        if verification_metrics["f1"] > best_f1:
-            best_f1 = verification_metrics["f1"]
+        selection_score = metrics["macro_f1"] if selection_metric == "macro_f1" else verification_metrics["f1"]
+        if selection_score > best_f1:
+            best_f1 = selection_score
             model.save_pretrained(output_dir, safe_serialization=True)
             tokenizer.save_pretrained(output_dir)
             np.savez_compressed(output_dir / "dev_predictions.npz", logits=logits, labels=labels)
+    del model, optimizer
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
     saved = AutoModelForSequenceClassification.from_pretrained(output_dir).to(device)
-    logits, labels = _evaluate(saved, dev_loader, device)
+    calibration_loader = DataLoader(
+        _ListDataset(calibration_rows), batch_size=batch_size, shuffle=False, collate_fn=collate,
+    )
+    logits, labels = _evaluate(saved, calibration_loader, device)
     temperature = fit_temperature(logits, labels)
     # One threshold per question, both selected on dev only.
     contradiction_threshold, contradiction_f1 = best_threshold(
@@ -519,17 +548,21 @@ def train(
         "learning_rate": float(learning_rate),
         "seed": int(seed),
         "label_map": ID_TO_LABEL,
+        "selection_metric": selection_metric,
+        "calibration_split": "independent" if calibration_data is not None else "dev",
+        "calibration_sample_count": len(calibration_rows),
+        "gradient_checkpointing": gradient_checkpointing,
         "temperature": temperature,
         "thresholds": {
             "contradiction": {
                 "value": contradiction_threshold,
-                "selected_on": "dev",
+                "selected_on": "calibration" if calibration_data is not None else "dev",
                 "dev_f1": contradiction_f1,
                 "optimises": "Task A: P(CONTRADICTED) vs CONTRADICTED",
             },
             "verification_risk": {
                 "value": verification_risk_threshold,
-                "selected_on": "dev",
+                "selected_on": "calibration" if calibration_data is not None else "dev",
                 "dev_f1": verification_f1,
                 "optimises": "Task B: P(CONTRADICTED)+P(NOT_ENOUGH_INFO) vs non-SUPPORTED",
             },
@@ -538,7 +571,7 @@ def train(
                 "status": "deprecated mirror of verification_risk_threshold",
             },
         },
-        "dev_evaluation": evaluate_saved_predictions(
+        "calibration_evaluation" if calibration_data is not None else "dev_evaluation": evaluate_saved_predictions(
             logits,
             labels,
             temperature,
