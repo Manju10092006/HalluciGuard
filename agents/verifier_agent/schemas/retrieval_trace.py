@@ -73,6 +73,8 @@ class ModelExecutionTrace(BaseModel):
     initialization_attempted: bool = False
     failure_stage: Optional[str] = None
     error_type: Optional[str] = None
+    submitted_inputs: List[Dict[str, Any]] = Field(default_factory=list)
+    tokenizer_observability: str = "not_exposed"
 
 
 class EvidencePassageTrace(BaseModel):
@@ -168,4 +170,6 @@ class RetrievalTrace(BaseModel):
     backend_execution: Dict[str, Any] = Field(default_factory=dict)
     retrieval_degraded: bool = False
     timings: dict = Field(default_factory=dict)
+    evidence_flow: Dict[str, Any] = Field(default_factory=dict)
+    subclaim_executions: List[Dict[str, Any]] = Field(default_factory=list)
 

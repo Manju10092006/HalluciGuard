@@ -514,6 +514,10 @@ def _build_canonical_verifier_result(
                 contradiction_score=float(report.get("contradiction_score", 0.0)),
                 confidence_score=float(report.get("confidence_score", report.get("trust_score", 0.0))),
                 evidence=canonical_ev_list,
+                retrieval_trace={key: value for key, value in (report.get("retrieval_trace") or {}).items()
+                                 if key in {"backend_execution", "retrieval_degraded", "reranker_execution",
+                                            "nli_execution", "evidence_flow", "subclaim_executions",
+                                            "execution_origin", "cached_execution"}},
             )
         )
 

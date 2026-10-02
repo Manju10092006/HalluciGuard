@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -37,6 +38,17 @@ from ..vector_store.faiss_store import VectorStore
 logger = logging.getLogger(__name__)
 
 
+class MemoryConsistencyError(RuntimeError):
+    """Partial update: safe to retry the same request, never roll back trust."""
+
+    def __init__(self, fact_id: str, failures: dict[str, str], updated_in: list[str]):
+        self.fact_id = fact_id
+        self.failures = failures
+        self.updated_in = updated_in
+        super().__init__("Memory update incomplete; retry required. Failed checks: "
+                         + ", ".join(sorted(failures)))
+
+
 class MemoryAgent:
     """Orchestrator that ties all memory subsystems together."""
 
@@ -50,6 +62,7 @@ class MemoryAgent:
         vector_store: Optional[VectorStore] = None,
     ):
         self._settings = settings or get_settings()
+        self._update_lock = asyncio.Lock()
         self.kg = knowledge_graph or KnowledgeGraph(
             persistence_path=self._settings.kg_persistence_path,
             max_nodes=self._settings.kg_max_nodes,
@@ -352,15 +365,25 @@ class MemoryAgent:
         )
 
     async def update_fact(self, request: UpdateFactRequest) -> UpdateFactResponse:
-        """Update verdict/confidence of an existing fact across subsystems."""
-        # fact_id is stored as entity NAME, not ID
-        entities = self.kg.find_entity_by_name(request.fact_id, EntityType.FACT)
-        entity = entities[0] if entities else None
-        if not entity:
-            raise ValueError(f"Fact {request.fact_id} not found")
+        """Serialize updates in this agent; success requires durable read-back.
+
+        Stores do not share a transaction. Every store is attempted even after
+        another fails, and failures never restore older trusted values. Callers
+        must retry an incomplete operation with the same requested state.
+        """
+        async with self._update_lock:
+            return await self._update_fact(request)
+
+    async def _update_fact(self, request: UpdateFactRequest) -> UpdateFactResponse:
+        nodes = self.kg.verification_nodes(request.fact_id)
+        entity = nodes[0]
+        claim_text = entity.properties.get("claim_text")
+        if not claim_text:
+            raise ValueError("Fact has no claim text; update identity is incomplete")
+        domain = entity.properties.get("domain", "general")
 
         old_verdict = str(entity.properties.get("verdict", "unknown"))
-        old_confidence = float(entity.properties.get("confidence", 0.0))
+        old_confidence = float(entity.properties.get("confidence", entity.confidence))
         new_verdict = request.new_verdict or old_verdict
         new_confidence = (
             request.new_confidence
@@ -368,26 +391,20 @@ class MemoryAgent:
             else old_confidence
         )
         updated_in: list[str] = []
+        failures: dict[str, str] = {}
 
-        # Update KG entity properties
-        entity.properties["verdict"] = new_verdict
-        entity.properties["confidence"] = new_confidence
-        entity.updated_at = datetime.utcnow()
-        updated_in.append("knowledge_graph")
-
-        # Update vector store metadata
-        vec_entry = self.vectors.get(request.fact_id)
-        if vec_entry and vec_entry.metadata:
-            vec_entry.metadata["verdict"] = new_verdict
-            vec_entry.metadata["confidence"] = new_confidence
-            updated_in.append("vector_store")
-
-        # Update cache if claim text exists
-        claim_text = entity.properties.get("claim_text")
-        if claim_text:
-            domain = entity.properties.get("domain", "general")
-            # Invalidate old cache, re-set with new verdict
-            await self.cache.invalidate(domain, claim_text)
+        try:
+            self.kg.set_verification(nodes, new_verdict, new_confidence)
+            self.kg.save()
+        except Exception as exc:
+            failures["knowledge_graph.write"] = type(exc).__name__
+        try:
+            self.vectors.update_verification(request.fact_id, new_verdict, new_confidence)
+        except Exception as exc:
+            failures["vector_store.write"] = type(exc).__name__
+        try:
+            # UPSERT commits the replacement atomically within SQLite; do not
+            # delete the row first and create an unnecessary failure window.
             await self.cache.set(
                 domain=domain,
                 claim_text=claim_text,
@@ -396,9 +413,27 @@ class MemoryAgent:
                 confidence=new_confidence,
                 source_count=0,
             )
-            updated_in.append("cache")
+        except Exception as exc:
+            failures["cache.write"] = type(exc).__name__
 
-        self.kg.save()
+        checks = [
+            ("knowledge_graph", lambda: self.kg.verify_persisted_verification(nodes, new_verdict, new_confidence)),
+            ("vector_store", lambda: self.vectors.verify_persisted_verification(request.fact_id, new_verdict, new_confidence)),
+            ("cache", lambda: self.cache.verify_persisted_verification(domain, claim_text, new_verdict, new_confidence)),
+        ]
+        for name, check in checks:
+            try:
+                result = check()
+                if hasattr(result, "__await__"):
+                    await result
+                if name + ".write" not in failures:
+                    updated_in.append(name)
+            except Exception as exc:
+                failures[name + ".readback"] = type(exc).__name__
+        if failures:
+            # Only component/stage/error classes, never raw provider messages.
+            logger.error("Memory update incomplete for fact %s: %s", request.fact_id, failures)
+            raise MemoryConsistencyError(request.fact_id, failures, updated_in)
 
         return UpdateFactResponse(
             fact_id=request.fact_id,

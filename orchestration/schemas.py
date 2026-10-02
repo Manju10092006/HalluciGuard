@@ -356,6 +356,7 @@ class ClaimReport(BaseModel):
         le=1.0,
         description="Calibrated confidence score for the claim verdict (0.0 to 1.0).",
     )
+    retrieval_trace: Optional[Dict[str, Any]] = None
     evidence: List[Evidence] = Field(
         default_factory=list,
         description="Authoritative evidence passages matched to this claim.",

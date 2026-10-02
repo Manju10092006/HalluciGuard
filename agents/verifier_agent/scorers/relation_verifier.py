@@ -194,6 +194,11 @@ class RelationVerifier:
             )
             if loc_match:
                 subj = loc_match.group(1).strip()
+                # The generic location pattern can swallow a descriptive
+                # predicate into the subject ("Eiffel Tower is a lattice tower
+                # on ... in Paris"). Fix the parse, not entity equality.
+                subj = re.split(r"\s+(?:is|was|are)\s+(?:a|an|the)\b", subj,
+                    maxsplit=1, flags=re.IGNORECASE)[0].strip()
                 obj = loc_match.group(2).strip()
                 obj = re.split(r"\b(and|with|which|where|at|from|is|whose)\b", obj, flags=re.IGNORECASE)[0].strip()
                 triples.append(
@@ -513,7 +518,8 @@ class RelationVerifier:
         smaller, larger = (t1, t2) if len(t1) <= len(t2) else (t2, t1)
         # Require the contained name to be multi-token: a bare token (Paris,
         # India, Washington) can never be engulfed by a longer distinct name.
-        if len(smaller) >= 2 and smaller.issubset(larger):
+        if (len(smaller) >= 2 and smaller.issubset(larger)
+                and larger - smaller <= {"landmark"}):
             return True
         return False
 
@@ -667,6 +673,49 @@ class RelationVerifier:
         relative-time word), deferring that case to the polarity/time-aware NLI.
         """
         result = self._verify_relation_impl(claim_text, evidence_passages)
+        relation = result.claim_triple.relation if result.claim_triple else None
+        if relation == "capital_of" and result.status == "OBJECT_MISMATCH":
+            # A formal country name is not a different country merely because
+            # the triple extractor preserved its governmental prefix. Do not
+            # assert an alias (or a match); let NLI read the complete sentence.
+            country = result.claim_triple.object
+            for triple in result.evidence_triples:
+                names = (country, triple.object)
+                short, long = sorted(names, key=len)
+                spaced_city = (result.claim_triple.subject.replace(" ", "")
+                               == triple.subject.replace(" ", "")
+                               and result.claim_triple.subject != triple.subject
+                               and self._names_match(country, triple.object))
+                formal_country = (short and re.fullmatch(
+                            r"(?:socialist |democratic |people s |federal )?"
+                            r"(?:republic|kingdom|state) of " + re.escape(short), long))
+                if triple.relation == "capital_of" and (formal_country or spaced_city):
+                    return RelationCheckResult(claim_triple=result.claim_triple,
+                        evidence_triples=result.evidence_triples, status="NO_TRIPLE_EXTRACTED",
+                        mismatch_detail="Formal country-name or city segmentation alignment requires NLI")
+        # Leadership and location can change. A mismatch in a timeless triple
+        # cannot refute a dated claim; let NLI evaluate the time-qualified text.
+        if relation in {"leads", "location_of"} and re.search(
+            r"\b(?:currently|today|now|formerly|previously|until|since|1[0-9]{3}|20[0-9]{2})\b",
+            claim_text, re.IGNORECASE,
+        ):
+            return RelationCheckResult(claim_triple=result.claim_triple,
+                evidence_triples=result.evidence_triples, status="NO_TRIPLE_EXTRACTED",
+                mismatch_detail="Temporal qualifiers on a changeable relationship require NLI")
+        def location_slot(text):
+            if re.search(r"\b(?:headquarters|headquartered|hq)\b", text, re.I):
+                return "headquarters"
+            if re.search(r"\b(?:founded|started|established)\b", text, re.I):
+                return "founding"
+            return None
+        claim_slot = location_slot(claim_text)
+        other_slots = {location_slot(t.raw_text) for t in result.evidence_triples}
+        if (relation == "location_of" and result.status == "OBJECT_MISMATCH"
+                and claim_slot and other_slots - {None} and claim_slot not in other_slots):
+            # Founding place and current headquarters are different attributes.
+            return RelationCheckResult(claim_triple=result.claim_triple,
+                evidence_triples=result.evidence_triples, status="NO_TRIPLE_EXTRACTED",
+                mismatch_detail="Different location alone does not establish exclusive location or the same event")
         if result.status == "MATCH" and re.search(
             r"\b(?:currently|today|now|formerly|previously|until|since)\b"
             r"|\b(?:1[0-9]{3}|20[0-9]{2})\b",
@@ -778,6 +827,13 @@ class RelationVerifier:
             ]
             if not subj_aligned:
                 continue
+            if rel == "created_by" and " and " in c_triple.object:
+                named = [n.strip() for n in c_triple.object.split(" and ")]
+                if all(any(self._names_match(n, e.object) for e in subj_aligned) for n in named):
+                    return RelationCheckResult(claim_triple=c_triple, evidence_triples=all_evidence_triples,
+                        status="MATCH", combination_rule_applied="CONFIRM_ENTAILMENT")
+                return RelationCheckResult(claim_triple=c_triple, evidence_triples=all_evidence_triples,
+                    status="NO_TRIPLE_EXTRACTED", mismatch_detail="Every named creator requires evidence; a partial match is insufficient")
             if any(self._names_match(c_triple.object, e.object) for e in subj_aligned):
                 return RelationCheckResult(
                     claim_triple=c_triple,
@@ -786,6 +842,11 @@ class RelationVerifier:
                     combination_rule_applied="CONFIRM_ENTAILMENT",
                 )
             proven = subj_aligned[0].object
+            if (rel == "created_by"
+                    and re.search(r"\b(?:founder|founded|co-founder)\b", claim_text, re.I)):
+                return RelationCheckResult(claim_triple=c_triple,
+                    evidence_triples=all_evidence_triples, status="NO_TRIPLE_EXTRACTED",
+                    mismatch_detail="Naming another founder does not exclude an unmentioned co-founder")
             return RelationCheckResult(
                 claim_triple=c_triple,
                 evidence_triples=all_evidence_triples,

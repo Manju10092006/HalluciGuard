@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -186,6 +187,42 @@ class VectorStore:
         if idx is not None and idx < len(self._entries):
             return self._entries[idx]
         return None
+
+    def update_verification(self, entry_id: str, verdict: str, confidence: float) -> None:
+        """Persist metadata without rebuilding or rewriting the FAISS index."""
+        entry = self.get(entry_id)
+        if entry is None:
+            raise RuntimeError("Vector entry missing")
+        entry.metadata.update(verdict=verdict, confidence=confidence)
+        self._store_path.mkdir(parents=True, exist_ok=True)
+        path = self._store_path / "entries.json"
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                dir=self._store_path, delete=False) as tmp:
+            temporary = Path(tmp.name)
+            try:
+                json.dump([{**e.model_dump(), "embedding": None} for e in self._entries],
+                          tmp, default=str, indent=2)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            except BaseException:
+                tmp.close()
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def verify_persisted_verification(self, entry_id: str, verdict: str, confidence: float) -> None:
+        rows = json.loads((self._store_path / "entries.json").read_text(encoding="utf-8"))
+        matches = [r for r in rows if r["entry_id"] == entry_id]
+        entry = self.get(entry_id)
+        if (len(matches) != 1 or entry is None
+                or matches[0]["metadata"].get("verdict") != verdict
+                or matches[0]["metadata"].get("confidence") != confidence
+                or entry.metadata.get("verdict") != verdict
+                or entry.metadata.get("confidence") != confidence):
+            raise RuntimeError("Vector verification read-back mismatch")
 
     def delete(self, entry_id: str) -> bool:
         idx = self._id_map.get(entry_id)

@@ -119,6 +119,35 @@ def test_shared_error_helper_sanitizes_all_node_errors():
     assert "dummy-secret" not in str(add_error({}, "analyzer", ValueError("dummy-secret")))
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verdict", ["contradicted", "unverified"])
+async def test_reverifier_does_not_release_an_unsuccessful_repair(monkeypatch, verdict):
+    text = "The capital of Vietnam is Bangkok."
+    monkeypatch.setattr("agents.verifier_agent.claims.claim_decomposer.ClaimDecomposer.decompose",
+                        lambda self, value: [text])
+    r = report("rev-1", text)
+    r["verdict"] = verdict
+    r["evidence"][0]["entailment_label"] = "contradiction" if verdict == "contradicted" else "neutral"
+    verify = AsyncMock(return_value={"status": "completed", "claim_reports": [r]})
+    monkeypatch.setattr(graph, "_get_verifier_imports", lambda: (
+        lambda: SimpleNamespace(verify=verify), lambda **kw: SimpleNamespace(**kw),
+        lambda **kw: SimpleNamespace(**kw)))
+    result = await graph._reverifier_node({"llm_response": text, "domain": "general"})
+    verify.assert_awaited_once()
+    assert result["reverification_result"]["passed"] is False
+
+
+def test_canonical_retains_execution_trace_not_raw_provider_payload():
+    r = report()
+    r["retrieval_trace"] = {"backend_execution": {"route": "bm25_only", "degraded": True},
+        "evidence_flow": {"nli_selected": 1}, "provider_response": "dummy-secret"}
+    result = graph._build_canonical_verifier_result({"claim_reports": [r]}, "q", "general")
+    trace = result.claim_reports[0].retrieval_trace
+    assert trace["backend_execution"]["degraded"]
+    assert trace["evidence_flow"]["nli_selected"] == 1
+    assert "dummy-secret" not in str(trace)
+
+
 @pytest.mark.parametrize("raw", [
     {"claim_evidence": [{"claim_text": "Alpha exists.", "verdict": "unverified",
                           "evidence": [evidence()]}]},

@@ -71,6 +71,10 @@ _EXPECTED_DIAGNOSTICS = {
     "device": "unknown",
     "latency_ms": 0,
     "batch_size": 0,
+    "attempted": False,
+    "initialization_attempted": False,
+    "submitted_inputs": [],
+    "tokenizer_observability": "not_exposed",
 }
 
 
