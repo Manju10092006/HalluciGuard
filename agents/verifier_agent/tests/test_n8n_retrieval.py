@@ -372,7 +372,7 @@ async def test_health_check_endpoint():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_pipeline_uses_n8n_evidence_and_runs_python_bge_nli():
+async def test_pipeline_uses_n8n_evidence_and_runs_python_bge_nli(deterministic_model_doubles):
     """
     Test that when n8n returns evidence, VerificationPipeline feeds it into
     Python's BGE reranker and DeBERTa NLI without adopting n8n verdict.
@@ -424,7 +424,7 @@ async def test_pipeline_uses_n8n_evidence_and_runs_python_bge_nli():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_fallback_to_python_adapters_on_n8n_failure():
+async def test_pipeline_fallback_to_python_adapters_on_n8n_failure(deterministic_model_doubles):
     """
     Test that if n8n returns a failure (e.g. 500 or timeout), VerificationPipeline
     falls back cleanly to the Python adapter search and completes verification.
@@ -504,7 +504,7 @@ async def test_pipeline_respects_n8n_retrieval_disabled():
 
 
 @pytest.mark.asyncio
-async def test_no_duplicate_retrieval_when_n8n_succeeds():
+async def test_no_duplicate_retrieval_when_n8n_succeeds(deterministic_model_doubles):
     """Verify that when n8n returns evidence, Python adapters are NOT invoked (no double-retrieval)."""
     pipeline = VerificationPipeline()
 
