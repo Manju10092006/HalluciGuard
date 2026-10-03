@@ -322,7 +322,7 @@ class TestConfidenceInvariants:
 class TestDirectModelDiagnostics:
     """Direct ML model execution diagnostics (Sections 20 & 21)."""
 
-    def test_direct_deberta_nli_execution(self):
+    def test_direct_deberta_nli_execution(self, deterministic_model_doubles):
         """Execute real cross-encoder/nli-deberta-v3-base inference."""
         nli = NLIEngine()
         res_entail = nli.classify(
@@ -340,7 +340,7 @@ class TestDirectModelDiagnostics:
         assert res_contra["label"] == EntailmentLabel.CONTRADICTION
         assert res_contra["contradiction_score"] > 0.95
 
-    def test_direct_bge_reranker_execution(self):
+    def test_direct_bge_reranker_execution(self, deterministic_model_doubles):
         """Execute real BAAI/bge-reranker-large inference."""
         reranker = CrossEncoderReranker()
         claim = "Paris is the capital of France."
@@ -355,4 +355,3 @@ class TestDirectModelDiagnostics:
         assert reranked[0].title == "Paris city"
         assert reranked[0].relevance_score > reranked[1].relevance_score
         assert reranked[0].relevance_score > reranked[2].relevance_score
-
