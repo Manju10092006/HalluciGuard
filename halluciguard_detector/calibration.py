@@ -30,6 +30,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+from .data_roles import require_development
+
 import numpy as np
 import torch
 
@@ -70,7 +72,8 @@ def verification_risk_score(probabilities: np.ndarray) -> np.ndarray:
     return probabilities[:, 1] + probabilities[:, 2]
 
 
-def fit_temperature(logits: np.ndarray, labels: np.ndarray) -> float:
+def fit_temperature(logits: np.ndarray, labels: np.ndarray, *, data_role: str | None = None) -> float:
+    require_development(labels, data_role)
     values = torch.tensor(logits, dtype=torch.float32)
     targets = torch.tensor(labels, dtype=torch.long)
     log_temperature = torch.nn.Parameter(torch.zeros(1))

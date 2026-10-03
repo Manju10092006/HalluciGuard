@@ -212,9 +212,9 @@ def test_calibration_report_is_small_for_a_confident_correct_model():
 def test_best_threshold_is_fitted_per_task():
     logits, labels = _fixture(n_per_class=80)
     contradiction_threshold, contradiction_f1 = best_threshold(
-        logits, labels, 1.0, "contradiction"
+        logits, labels, 1.0, "contradiction", data_role="development"
     )
-    risk_threshold, risk_f1 = best_threshold(logits, labels, 1.0, "verification_needed")
+    risk_threshold, risk_f1 = best_threshold(logits, labels, 1.0, "verification_needed", data_role="development")
     assert 0.0 <= contradiction_threshold <= 1.0
     assert 0.0 <= risk_threshold <= 1.0
     assert contradiction_f1 > 0.9
@@ -226,7 +226,7 @@ def test_best_threshold_is_fitted_per_task():
 def test_best_threshold_rejects_unknown_task():
     logits, labels = _fixture(n_per_class=5)
     with pytest.raises(ValueError):
-        best_threshold(logits, labels, 1.0, "nonsense")
+        best_threshold(logits, labels, 1.0, "nonsense", data_role="development")
 
 
 def test_evaluate_saved_predictions_reports_both_tasks_and_calibration():

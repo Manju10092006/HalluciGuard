@@ -19,6 +19,7 @@ from .calibration import (
     verification_risk_score,
 )
 from .nli_input import TOKENIZER_KWARGS, prepare_nli_input
+from .data_roles import require_development, require_rows_role
 
 
 ID_TO_LABEL = {0: "SUPPORTED", 1: "CONTRADICTED", 2: "NOT_ENOUGH_INFO"}
@@ -338,8 +339,11 @@ def best_threshold(
     temperature: float,
     task: str,
     grid: np.ndarray | None = None,
+    *,
+    data_role: str | None = None,
 ) -> tuple[float, float]:
     """F1-optimal threshold for one task, selected on the given split."""
+    require_development(labels, data_role)
     if grid is None:
         grid = np.linspace(0.05, 0.95, 181)
     probabilities = class_probabilities(logits, temperature)
@@ -412,8 +416,12 @@ def train(
     recovery_dir = output_dir.parent / f"{output_dir.name}-last"
     if recovery_dir.exists() and any(recovery_dir.iterdir()):
         raise FileExistsError(f"recovery output already exists: {recovery_dir}")
+    from .evaluation_data import verify_training_directory
+    verify_training_directory(data_dir)
     train_rows = load_rows(data_dir / "train.jsonl")
     dev_rows = load_rows(data_dir / "dev.jsonl")
+    require_rows_role(train_rows, "training")
+    require_rows_role(dev_rows, "development")
     if not train_rows or not dev_rows:
         raise ValueError("train and dev splits must be nonempty")
     for name, rows in (("train", train_rows), ("dev", dev_rows)):
@@ -495,13 +503,13 @@ def train(
             np.savez_compressed(output_dir / "dev_predictions.npz", logits=logits, labels=labels)
     saved = AutoModelForSequenceClassification.from_pretrained(output_dir).to(device)
     logits, labels = _evaluate(saved, dev_loader, device)
-    temperature = fit_temperature(logits, labels)
+    temperature = fit_temperature(logits, labels, data_role="development")
     # One threshold per question, both selected on dev only.
     contradiction_threshold, contradiction_f1 = best_threshold(
-        logits, labels, temperature, "contradiction"
+        logits, labels, temperature, "contradiction", data_role="development"
     )
     verification_risk_threshold, verification_f1 = best_threshold(
-        logits, labels, temperature, "verification_needed"
+        logits, labels, temperature, "verification_needed", data_role="development"
     )
     save_calibration(
         output_dir / "calibration.json",
@@ -632,4 +640,3 @@ def train_arm(
         max_length=max_length,
         seed=seed,
     )
-
