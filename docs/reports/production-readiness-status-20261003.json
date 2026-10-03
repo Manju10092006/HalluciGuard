@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "updated_at_utc": "2026-10-03T03:43:21.504868+00:00",
+  "source_git_sha_tested": "39b7522bb68a139b130bb1deaf10b944a5dcd1cb",
+  "independent_detector_evaluation": "blocked",
+  "live_verifier_n8n": "unverified",
+  "production_ready": false,
+  "fast_path_acceptance_enabled": false,
+  "conclusion": "INDEPENDENT_EVALUATION_BLOCKED",
+  "evaluation_manifest": "detector-independent-evaluation-20261003.manifest.json",
+  "evaluation_manifest_sha256": "79f820d74da26f45043aec38809d66f31c87f7cf51414d80d8e4c34b975dd29e",
+  "locked_test_manifest_sha256": null,
+  "blocked_reasons": [
+    "Approved prepared train/dev/test claim+evidence rows with immutable row/source/response IDs are absent.",
+    "Raw RAGTruth source_info.jsonl/response.jsonl and the prior paired-experiment artifacts are absent.",
+    "Historical complete checkpoint-linked training and calibration exposure, source hashes and dataset version are not reconstructed by the saved logits.",
+    "Prior report records five exact train/dev pairs and seven excluded test matches; actual rows are absent, so current exact/near counts cannot be measured.",
+    "No legitimate final locked-test artifact/manifest exists; no independent metrics, source-cluster intervals or locked-test bypass results can be computed."
+  ]
+}
