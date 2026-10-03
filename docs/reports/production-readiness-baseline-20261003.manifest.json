@@ -1,0 +1,3374 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-10-03T03:06:23.251329+00:00",
+  "repository": "https://github.com/Manju10092006/HalluciGuard",
+  "git": {
+    "branch": "agents/production-readiness-20261003",
+    "remote_branch_existed_before_execution": false,
+    "tested_commit": "82cdc6fb734f5fa31cd345a4060f60178bea2118",
+    "origin_main_at_fetch": "82cdc6fb734f5fa31cd345a4060f60178bea2118",
+    "required_baseline": "82cdc6fb734f5fa31cd345a4060f60178bea2118",
+    "release_validation_commit": "6c6681833023a20d2bc45fa6ee1b47d88757661e",
+    "baseline_ancestor_of_origin_main": true,
+    "release_validation_ancestor_of_origin_main": true,
+    "clean_checkout_before_tests": true,
+    "main_reset_or_rewritten": false
+  },
+  "readiness": {
+    "production_readiness_established": false,
+    "fast_path_acceptance_enabled": false,
+    "release_constant": "halluciguard_detector/phase1.py: FAST_PATH_RELEASE_ENABLED = False",
+    "verifier_live_status": "BLOCKED/UNVERIFIED: owner laptop-hosted n8n unavailable",
+    "baseline_fully_reproduced": false
+  },
+  "runtime": {
+    "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+    "python_expected_by_repository": "3.11.9",
+    "python_deviation": "Only the supplied Python 3.12.14 interpreter was used; repository specifies 3.11.9. Prior audit reported 3.13.2.",
+    "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+    "uname": [
+      "Linux",
+      "8c91abecc7d1",
+      "6.18.44",
+      "#1 SMP Sat Sep 26 20:02:31 UTC 2026",
+      "x86_64",
+      "x86_64"
+    ],
+    "os_release": "PRETTY_NAME=\"Ubuntu 24.04.3 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.3 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+    "cpu_count": 9,
+    "venv": {
+      "created_fresh": true,
+      "system_site_packages": false
+    },
+    "huggingface_cache": "initially empty <scratch>/baseline-hf-cache; public all-MiniLM-L6-v2 cached after setup errors; final tests offline; no pretrained Verifier retrieval/reranker/NLI weights"
+  },
+  "dependencies": {
+    "install_command": "python -m venv <scratch>/baseline-venv && <scratch>/baseline-venv/bin/python -m pip install -r requirements.txt pytest pytest-asyncio",
+    "install_exit_code": 0,
+    "environment_addition": {
+      "command": "python -m pip install socksio",
+      "version": "1.0.0",
+      "reason": "httpx inherited workspace SOCKS proxy; missing optional transport dependency caused setup and client construction errors"
+    },
+    "pip_check_exit_code": 0,
+    "trio_addition": {
+      "command": "python -m pip install trio",
+      "reason": "Restores 14 AnyIO backend parametrizations; AnyIO 4.15.1 collects only installed backends"
+    },
+    "exact_python_lock_at_baseline": false,
+    "lock_state": "Python requirements use ranges and a public spaCy wheel URL, not a complete resolved lock. frontend-v2/package-lock.json is present but no frontend build is in scope.",
+    "source_files": {
+      ".python-version": {
+        "sha256": "61141e9590171b900fdf709e7ea8f050d5c2a69198d4a4a1977d7c45186307e5",
+        "size_bytes": 7
+      },
+      "Dockerfile": {
+        "sha256": "860af21640dd6fa6c38d8072ff9e25c1a0d1d18eb4ec2756e7f31d4d563f105f",
+        "size_bytes": 1127
+      },
+      "agents/corrector_agent/requirements.txt": {
+        "sha256": "eb916ba97abfb133570b34ece26203ceb3acf699d31dfd1f6a7faa1b2c8a662d",
+        "size_bytes": 86
+      },
+      "agents/memory_agent/requirements.txt": {
+        "sha256": "8764c769fe83f403b6c36e436414ee1e8d4996020f2dc323f9840e09912d56e5",
+        "size_bytes": 260
+      },
+      "agents/verifier_agent/requirements.txt": {
+        "sha256": "1720fc348b5c95065b4e5b172115b7c4de76afead4b75d4b7f87d253e942bcd0",
+        "size_bytes": 367
+      },
+      "frontend-v2/package-lock.json": {
+        "sha256": "b1164960a4225d33692b521c9d8110a4501f8555d285623ab6afa2df46f38957",
+        "size_bytes": 172173
+      },
+      "halluciguard_judge/requirements.txt": {
+        "sha256": "951a63fc06405d2fa741dc9a5190ed1d40efbe3323979f1e47bf303ab6ec11f8",
+        "size_bytes": 718
+      },
+      "orchestration/requirements.txt": {
+        "sha256": "76e2711f904cdcab0f9bd7e2a788e9d7885c032b8b4d003bf7fcdc28e41c4152",
+        "size_bytes": 527
+      },
+      "pytest.ini": {
+        "sha256": "2872da94c7934e5935c10cca032152f7accca7a0488d574d5226c82ab3ab81a4",
+        "size_bytes": 372
+      },
+      "requirements-hfspace.txt": {
+        "sha256": "13ddd943f18559bc7c5552474c3b61d0781b4aa7181dcd511d3f7314a49f7cfc",
+        "size_bytes": 1876
+      },
+      "requirements.txt": {
+        "sha256": "921ee005501a41f3406c7884b1ce0312a63c90376d5afd4c3aba138163b1f890",
+        "size_bytes": 1668
+      }
+    },
+    "resolved_packages": [
+      {
+        "name": "accelerate",
+        "version": "1.15.0"
+      },
+      {
+        "name": "aiohappyeyeballs",
+        "version": "2.7.1"
+      },
+      {
+        "name": "aiohttp",
+        "version": "3.14.3"
+      },
+      {
+        "name": "aiosignal",
+        "version": "1.4.0"
+      },
+      {
+        "name": "aiosqlite",
+        "version": "0.22.1"
+      },
+      {
+        "name": "annotated-doc",
+        "version": "0.0.5"
+      },
+      {
+        "name": "annotated-types",
+        "version": "0.8.0"
+      },
+      {
+        "name": "anyio",
+        "version": "4.15.1"
+      },
+      {
+        "name": "attrs",
+        "version": "26.1.0"
+      },
+      {
+        "name": "beautifulsoup4",
+        "version": "4.15.0"
+      },
+      {
+        "name": "blis",
+        "version": "1.3.3"
+      },
+      {
+        "name": "catalogue",
+        "version": "2.0.10"
+      },
+      {
+        "name": "certifi",
+        "version": "2026.7.22"
+      },
+      {
+        "name": "charset-normalizer",
+        "version": "3.5.2"
+      },
+      {
+        "name": "click",
+        "version": "8.5.0"
+      },
+      {
+        "name": "cloudpathlib",
+        "version": "0.26.0"
+      },
+      {
+        "name": "cloudpickle",
+        "version": "3.1.2"
+      },
+      {
+        "name": "confection",
+        "version": "1.3.3"
+      },
+      {
+        "name": "cuda-bindings",
+        "version": "13.4.3"
+      },
+      {
+        "name": "cuda-pathfinder",
+        "version": "1.8.3"
+      },
+      {
+        "name": "cuda-toolkit",
+        "version": "13.0.3.0"
+      },
+      {
+        "name": "cymem",
+        "version": "2.0.13"
+      },
+      {
+        "name": "datasets",
+        "version": "5.0.1"
+      },
+      {
+        "name": "dill",
+        "version": "0.4.1"
+      },
+      {
+        "name": "distro",
+        "version": "1.9.0"
+      },
+      {
+        "name": "dnspython",
+        "version": "2.8.0"
+      },
+      {
+        "name": "email-validator",
+        "version": "2.3.0"
+      },
+      {
+        "name": "en_core_web_sm",
+        "version": "3.8.0"
+      },
+      {
+        "name": "faiss-cpu",
+        "version": "1.15.1"
+      },
+      {
+        "name": "fastapi",
+        "version": "0.142.2"
+      },
+      {
+        "name": "filelock",
+        "version": "4.0.9"
+      },
+      {
+        "name": "frozenlist",
+        "version": "1.8.0"
+      },
+      {
+        "name": "fsspec",
+        "version": "2026.6.0"
+      },
+      {
+        "name": "h11",
+        "version": "0.16.0"
+      },
+      {
+        "name": "h2",
+        "version": "4.4.1"
+      },
+      {
+        "name": "hf-xet",
+        "version": "1.6.0"
+      },
+      {
+        "name": "hpack",
+        "version": "4.2.0"
+      },
+      {
+        "name": "httpcore",
+        "version": "1.0.9"
+      },
+      {
+        "name": "httpcore2",
+        "version": "2.13.1"
+      },
+      {
+        "name": "httptools",
+        "version": "0.8.0"
+      },
+      {
+        "name": "httpx",
+        "version": "0.28.1"
+      },
+      {
+        "name": "httpx2",
+        "version": "2.13.1"
+      },
+      {
+        "name": "huggingface_hub",
+        "version": "1.33.0"
+      },
+      {
+        "name": "hyperframe",
+        "version": "6.1.0"
+      },
+      {
+        "name": "idna",
+        "version": "3.20"
+      },
+      {
+        "name": "iniconfig",
+        "version": "2.3.0"
+      },
+      {
+        "name": "Jinja2",
+        "version": "3.1.6"
+      },
+      {
+        "name": "joblib",
+        "version": "1.6.0"
+      },
+      {
+        "name": "jsonpatch",
+        "version": "1.33"
+      },
+      {
+        "name": "jsonpointer",
+        "version": "3.1.1"
+      },
+      {
+        "name": "langchain-core",
+        "version": "1.6.6"
+      },
+      {
+        "name": "langchain-protocol",
+        "version": "0.0.19"
+      },
+      {
+        "name": "langgraph",
+        "version": "1.2.12"
+      },
+      {
+        "name": "langgraph-checkpoint",
+        "version": "4.2.0"
+      },
+      {
+        "name": "langgraph-prebuilt",
+        "version": "1.1.0"
+      },
+      {
+        "name": "langgraph-sdk",
+        "version": "0.4.5"
+      },
+      {
+        "name": "langsmith",
+        "version": "0.14.4"
+      },
+      {
+        "name": "lxml",
+        "version": "6.1.3"
+      },
+      {
+        "name": "markdown-it-py",
+        "version": "4.2.0"
+      },
+      {
+        "name": "MarkupSafe",
+        "version": "3.0.4"
+      },
+      {
+        "name": "mdurl",
+        "version": "0.1.2"
+      },
+      {
+        "name": "mpmath",
+        "version": "1.3.0"
+      },
+      {
+        "name": "multidict",
+        "version": "6.9.1"
+      },
+      {
+        "name": "multiprocess",
+        "version": "0.70.19"
+      },
+      {
+        "name": "murmurhash",
+        "version": "1.0.15"
+      },
+      {
+        "name": "narwhals",
+        "version": "2.26.0"
+      },
+      {
+        "name": "networkx",
+        "version": "3.7"
+      },
+      {
+        "name": "numpy",
+        "version": "2.5.3"
+      },
+      {
+        "name": "nvidia-cublas",
+        "version": "13.1.1.3"
+      },
+      {
+        "name": "nvidia-cuda-cupti",
+        "version": "13.0.85"
+      },
+      {
+        "name": "nvidia-cuda-nvrtc",
+        "version": "13.0.88"
+      },
+      {
+        "name": "nvidia-cuda-runtime",
+        "version": "13.0.96"
+      },
+      {
+        "name": "nvidia-cudnn-cu13",
+        "version": "9.24.0.43"
+      },
+      {
+        "name": "nvidia-cufft",
+        "version": "12.0.0.61"
+      },
+      {
+        "name": "nvidia-cufile",
+        "version": "1.15.1.6"
+      },
+      {
+        "name": "nvidia-curand",
+        "version": "10.4.0.35"
+      },
+      {
+        "name": "nvidia-cusolver",
+        "version": "12.0.4.66"
+      },
+      {
+        "name": "nvidia-cusparse",
+        "version": "12.6.3.3"
+      },
+      {
+        "name": "nvidia-cusparselt-cu13",
+        "version": "0.8.1"
+      },
+      {
+        "name": "nvidia-nccl-cu13",
+        "version": "2.30.7"
+      },
+      {
+        "name": "nvidia-nvjitlink",
+        "version": "13.4.92"
+      },
+      {
+        "name": "nvidia-nvshmem-cu13",
+        "version": "3.4.5"
+      },
+      {
+        "name": "nvidia-nvtx",
+        "version": "13.0.85"
+      },
+      {
+        "name": "opentelemetry-api",
+        "version": "1.45.0"
+      },
+      {
+        "name": "orjson",
+        "version": "3.12.0"
+      },
+      {
+        "name": "ormsgpack",
+        "version": "1.12.2"
+      },
+      {
+        "name": "outcome",
+        "version": "1.3.0.post0"
+      },
+      {
+        "name": "packaging",
+        "version": "26.3"
+      },
+      {
+        "name": "pandas",
+        "version": "3.0.6"
+      },
+      {
+        "name": "pip",
+        "version": "25.0.1"
+      },
+      {
+        "name": "pluggy",
+        "version": "1.6.0"
+      },
+      {
+        "name": "preshed",
+        "version": "3.0.13"
+      },
+      {
+        "name": "prometheus_client",
+        "version": "0.26.0"
+      },
+      {
+        "name": "propcache",
+        "version": "0.5.4"
+      },
+      {
+        "name": "psutil",
+        "version": "7.2.2"
+      },
+      {
+        "name": "pyarrow",
+        "version": "25.0.1"
+      },
+      {
+        "name": "pydantic",
+        "version": "2.13.5"
+      },
+      {
+        "name": "pydantic_core",
+        "version": "2.46.5"
+      },
+      {
+        "name": "pydantic-settings",
+        "version": "2.15.0"
+      },
+      {
+        "name": "Pygments",
+        "version": "2.21.0"
+      },
+      {
+        "name": "PyJWT",
+        "version": "2.15.1"
+      },
+      {
+        "name": "pytest",
+        "version": "9.1.1"
+      },
+      {
+        "name": "pytest-asyncio",
+        "version": "1.4.0"
+      },
+      {
+        "name": "python-dateutil",
+        "version": "2.9.0.post0"
+      },
+      {
+        "name": "python-dotenv",
+        "version": "1.2.4"
+      },
+      {
+        "name": "PyYAML",
+        "version": "6.0.3"
+      },
+      {
+        "name": "rank-bm25",
+        "version": "0.2.2"
+      },
+      {
+        "name": "regex",
+        "version": "2026.9.29"
+      },
+      {
+        "name": "requests",
+        "version": "2.34.2"
+      },
+      {
+        "name": "requests-toolbelt",
+        "version": "1.0.0"
+      },
+      {
+        "name": "rich",
+        "version": "15.0.0"
+      },
+      {
+        "name": "safetensors",
+        "version": "0.8.0"
+      },
+      {
+        "name": "scikit-learn",
+        "version": "1.9.1"
+      },
+      {
+        "name": "scipy",
+        "version": "1.18.1"
+      },
+      {
+        "name": "sentence-transformers",
+        "version": "6.1.0"
+      },
+      {
+        "name": "setuptools",
+        "version": "84.0.0"
+      },
+      {
+        "name": "shellingham",
+        "version": "1.5.4"
+      },
+      {
+        "name": "six",
+        "version": "1.17.0"
+      },
+      {
+        "name": "smart_open",
+        "version": "8.0.2"
+      },
+      {
+        "name": "sniffio",
+        "version": "1.3.1"
+      },
+      {
+        "name": "socksio",
+        "version": "1.0.0"
+      },
+      {
+        "name": "sortedcontainers",
+        "version": "2.4.0"
+      },
+      {
+        "name": "soupsieve",
+        "version": "2.10"
+      },
+      {
+        "name": "spacy",
+        "version": "3.8.16"
+      },
+      {
+        "name": "spacy-legacy",
+        "version": "3.0.12"
+      },
+      {
+        "name": "spacy-loggers",
+        "version": "1.0.5"
+      },
+      {
+        "name": "srsly",
+        "version": "2.5.4"
+      },
+      {
+        "name": "starlette",
+        "version": "1.7.0"
+      },
+      {
+        "name": "sympy",
+        "version": "1.14.0"
+      },
+      {
+        "name": "tavily-python",
+        "version": "0.8.4"
+      },
+      {
+        "name": "tenacity",
+        "version": "9.1.4"
+      },
+      {
+        "name": "thinc",
+        "version": "8.3.13"
+      },
+      {
+        "name": "threadpoolctl",
+        "version": "3.7.0"
+      },
+      {
+        "name": "tiktoken",
+        "version": "0.14.0"
+      },
+      {
+        "name": "tokenizers",
+        "version": "0.23.2"
+      },
+      {
+        "name": "torch",
+        "version": "2.14.1"
+      },
+      {
+        "name": "tqdm",
+        "version": "4.70.1"
+      },
+      {
+        "name": "transformers",
+        "version": "5.18.0"
+      },
+      {
+        "name": "trio",
+        "version": "0.34.0"
+      },
+      {
+        "name": "triton",
+        "version": "3.8.0"
+      },
+      {
+        "name": "truststore",
+        "version": "0.10.4"
+      },
+      {
+        "name": "typer",
+        "version": "0.27.2"
+      },
+      {
+        "name": "typing_extensions",
+        "version": "4.16.0"
+      },
+      {
+        "name": "typing-inspection",
+        "version": "0.4.4"
+      },
+      {
+        "name": "urllib3",
+        "version": "2.8.0"
+      },
+      {
+        "name": "uuid_utils",
+        "version": "0.17.1"
+      },
+      {
+        "name": "uvicorn",
+        "version": "0.54.0"
+      },
+      {
+        "name": "uvloop",
+        "version": "0.23.0"
+      },
+      {
+        "name": "wasabi",
+        "version": "1.1.3"
+      },
+      {
+        "name": "watchfiles",
+        "version": "1.3.0"
+      },
+      {
+        "name": "weasel",
+        "version": "1.0.0"
+      },
+      {
+        "name": "websockets",
+        "version": "16.1.1"
+      },
+      {
+        "name": "wrapt",
+        "version": "2.5.0"
+      },
+      {
+        "name": "xxhash",
+        "version": "4.0.1"
+      },
+      {
+        "name": "yarl",
+        "version": "1.25.1"
+      },
+      {
+        "name": "zstandard",
+        "version": "0.25.0"
+      }
+    ],
+    "pip_freeze_all_sha256": "6721f9e603274dd5d90df0bcd4ba0c74abdeee8950fc87a866ffa0c6dd92df90",
+    "pip_freeze_all": "accelerate==1.15.0\naiohappyeyeballs==2.7.1\naiohttp==3.14.3\naiosignal==1.4.0\naiosqlite==0.22.1\nannotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\nattrs==26.1.0\nbeautifulsoup4==4.15.0\nblis==1.3.3\ncatalogue==2.0.10\ncertifi==2026.7.22\ncharset-normalizer==3.5.2\nclick==8.5.0\ncloudpathlib==0.26.0\ncloudpickle==3.1.2\nconfection==1.3.3\ncuda-bindings==13.4.3\ncuda-pathfinder==1.8.3\ncuda-toolkit==13.0.3.0\ncymem==2.0.13\ndatasets==5.0.1\ndill==0.4.1\ndistro==1.9.0\ndnspython==2.8.0\nemail-validator==2.3.0\nen_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85\nfaiss-cpu==1.15.1\nfastapi==0.142.2\nfilelock==4.0.9\nfrozenlist==1.8.0\nfsspec==2026.6.0\nh11==0.16.0\nh2==4.4.1\nhf-xet==1.6.0\nhpack==4.2.0\nhttpcore==1.0.9\nhttpcore2==2.13.1\nhttptools==0.8.0\nhttpx==0.28.1\nhttpx2==2.13.1\nhuggingface_hub==1.33.0\nhyperframe==6.1.0\nidna==3.20\niniconfig==2.3.0\nJinja2==3.1.6\njoblib==1.6.0\njsonpatch==1.33\njsonpointer==3.1.1\nlangchain-core==1.6.6\nlangchain-protocol==0.0.19\nlanggraph==1.2.12\nlanggraph-checkpoint==4.2.0\nlanggraph-prebuilt==1.1.0\nlanggraph-sdk==0.4.5\nlangsmith==0.14.4\nlxml==6.1.3\nmarkdown-it-py==4.2.0\nMarkupSafe==3.0.4\nmdurl==0.1.2\nmpmath==1.3.0\nmultidict==6.9.1\nmultiprocess==0.70.19\nmurmurhash==1.0.15\nnarwhals==2.26.0\nnetworkx==3.7\nnumpy==2.5.3\nnvidia-cublas==13.1.1.3\nnvidia-cuda-cupti==13.0.85\nnvidia-cuda-nvrtc==13.0.88\nnvidia-cuda-runtime==13.0.96\nnvidia-cudnn-cu13==9.24.0.43\nnvidia-cufft==12.0.0.61\nnvidia-cufile==1.15.1.6\nnvidia-curand==10.4.0.35\nnvidia-cusolver==12.0.4.66\nnvidia-cusparse==12.6.3.3\nnvidia-cusparselt-cu13==0.8.1\nnvidia-nccl-cu13==2.30.7\nnvidia-nvjitlink==13.4.92\nnvidia-nvshmem-cu13==3.4.5\nnvidia-nvtx==13.0.85\nopentelemetry-api==1.45.0\norjson==3.12.0\normsgpack==1.12.2\noutcome==1.3.0.post0\npackaging==26.3\npandas==3.0.6\npip==25.0.1\npluggy==1.6.0\npreshed==3.0.13\nprometheus_client==0.26.0\npropcache==0.5.4\npsutil==7.2.2\npyarrow==25.0.1\npydantic==2.13.5\npydantic-settings==2.15.0\npydantic_core==2.46.5\nPygments==2.21.0\nPyJWT==2.15.1\npytest==9.1.1\npytest-asyncio==1.4.0\npython-dateutil==2.9.0.post0\npython-dotenv==1.2.4\nPyYAML==6.0.3\nrank-bm25==0.2.2\nregex==2026.9.29\nrequests==2.34.2\nrequests-toolbelt==1.0.0\nrich==15.0.0\nsafetensors==0.8.0\nscikit-learn==1.9.1\nscipy==1.18.1\nsentence-transformers==6.1.0\nsetuptools==84.0.0\nshellingham==1.5.4\nsix==1.17.0\nsmart_open==8.0.2\nsniffio==1.3.1\nsocksio==1.0.0\nsortedcontainers==2.4.0\nsoupsieve==2.10\nspacy==3.8.16\nspacy-legacy==3.0.12\nspacy-loggers==1.0.5\nsrsly==2.5.4\nstarlette==1.7.0\nsympy==1.14.0\ntavily-python==0.8.4\ntenacity==9.1.4\nthinc==8.3.13\nthreadpoolctl==3.7.0\ntiktoken==0.14.0\ntokenizers==0.23.2\ntorch==2.14.1\ntqdm==4.70.1\ntransformers==5.18.0\ntrio==0.34.0\ntriton==3.8.0\ntruststore==0.10.4\ntyper==0.27.2\ntyping-inspection==0.4.4\ntyping_extensions==4.16.0\nurllib3==2.8.0\nuuid_utils==0.17.1\nuvicorn==0.54.0\nuvloop==0.23.0\nwasabi==1.1.3\nwatchfiles==1.3.0\nweasel==1.0.0\nwebsockets==16.1.1\nwrapt==2.5.0\nxxhash==4.0.1\nyarl==1.25.1\nzstandard==0.25.0\n",
+    "initial_install_log_sha256": "6b5bf6a91e5b41e54a75433938ed4448dfc1c643fcdb26839fdae09f50e63d84"
+  },
+  "environment_flags": {
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+    "CUDA_VISIBLE_DEVICES": "-1",
+    "OMP_NUM_THREADS": "2",
+    "MKL_NUM_THREADS": "2",
+    "ALLOW_DETECTOR_FAST_PATH": "false",
+    "RUN_LIVE_N8N_TESTS": "false",
+    "RUN_LIVE_WEB_TESTS": "false",
+    "HF_HOME": "<scratch>/baseline-hf-cache",
+    "PYTHONPATH": "<scratch>"
+  },
+  "credential_handling": "API-key variables and owner n8n URL variables removed from test subprocess environment; repository test fixtures provide dummy mocked n8n URLs; no credentials or live traces published",
+  "detector": {
+    "priority": "centerpiece of follow-up evaluation gate and research",
+    "checkpoint": {
+      "path": "artifacts/detector-best/model.safetensors",
+      "sha256_expected": "470261f81870f5c4f97fe85918d02aa08673ac08744b5cae4d4621ee9d631bf9",
+      "sha256_observed": "470261f81870f5c4f97fe85918d02aa08673ac08744b5cae4d4621ee9d631bf9",
+      "match": true,
+      "storage": "existing tracked Git LFS artifact downloaded during clone; not added or changed by this commit"
+    },
+    "calibration": {
+      "path": "artifacts/detector-best/calibration.json",
+      "sha256_prior_report": "7f1b411d4943141f8ab80fc4f8696917828dd41b85a9ea783c37039b9a7911a8",
+      "sha256_observed": "3ce4724edd70d41cbf5975cf65643ddf1a8f3479bb983e324fb19789a27a3f32",
+      "match": false,
+      "status": "EXPLAINED_LINE_ENDINGS; repository Git blob and Linux checkout are LF; exact LF-to-CRLF conversion matches the prior recorded hash",
+      "sha256_of_lf_to_crlf_bytes": "7f1b411d4943141f8ab80fc4f8696917828dd41b85a9ea783c37039b9a7911a8",
+      "sha256_of_git_blob": "3ce4724edd70d41cbf5975cf65643ddf1a8f3479bb983e324fb19789a27a3f32",
+      "parameters": {
+        "temperature": 0.7586129307746887,
+        "contradiction_threshold": 0.4599999999999999,
+        "verification_risk_threshold": 0.625,
+        "hallucination_threshold": 0.625,
+        "max_length": 256
+      },
+      "changed": false
+    },
+    "last_measured_metrics": {
+      "source": "docs/reports/detector-release-validation-20261002.md",
+      "measured_in_this_run": false,
+      "cohort": 18770,
+      "production_representation": {
+        "accuracy": 0.837666,
+        "contradiction_precision": 0.244866,
+        "contradiction_recall": 0.523649,
+        "contradiction_f1": 0.333692
+      },
+      "historical_prepared_evidence_accuracy": 0.838253,
+      "whole_passage_fallback_accuracy": 0.83788,
+      "prior_sentence_fragment_accuracy": 0.729622,
+      "limitations": "Prepared claim labels, source-correlated cohort, seven exact cross-split test duplicates excluded; five train/dev exact pairs remain; near duplicates not audited; weak contradiction precision and independent held-out calibration unresolved."
+    },
+    "committed_archival_metrics": {
+      "source": "artifacts/detector-best/test_metrics.json",
+      "cohort": 18777,
+      "accuracy": 0.8383128295254832,
+      "contradiction_task": {
+        "task": "contradiction",
+        "score": "P(CONTRADICTED)",
+        "positive_class": "CONTRADICTED",
+        "support": {
+          "positives": 592,
+          "negatives": 18185,
+          "total": 18777
+        },
+        "positive_rate": 0.03152793310965543,
+        "accuracy": 0.9340682750173084,
+        "precision": 0.24486571879936808,
+        "recall": 0.5236486486486487,
+        "f1": 0.333692142088267,
+        "false_positive_rate": 0.052570800109980755,
+        "false_negative_rate": 0.47635135135135137,
+        "confusion_matrix": {
+          "tn": 17229,
+          "fp": 956,
+          "fn": 282,
+          "tp": 310
+        },
+        "threshold": 0.4599999999999999,
+        "brier": 0.0409430583995022,
+        "ece": 0.05133677069937967,
+        "reliability": [
+          {
+            "lower": 0.0,
+            "upper": 0.1,
+            "count": 16442,
+            "mean_confidence": 0.02852,
+            "empirical_rate": 0.012468
+          },
+          {
+            "lower": 0.1,
+            "upper": 0.2,
+            "count": 595,
+            "mean_confidence": 0.136605,
+            "empirical_rate": 0.057143
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.3,
+            "count": 217,
+            "mean_confidence": 0.247613,
+            "empirical_rate": 0.082949
+          },
+          {
+            "lower": 0.3,
+            "upper": 0.4,
+            "count": 152,
+            "mean_confidence": 0.350815,
+            "empirical_rate": 0.085526
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.5,
+            "count": 172,
+            "mean_confidence": 0.450172,
+            "empirical_rate": 0.122093
+          },
+          {
+            "lower": 0.5,
+            "upper": 0.6,
+            "count": 193,
+            "mean_confidence": 0.550591,
+            "empirical_rate": 0.11399
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.7,
+            "count": 379,
+            "mean_confidence": 0.661515,
+            "empirical_rate": 0.200528
+          },
+          {
+            "lower": 0.7,
+            "upper": 0.8,
+            "count": 627,
+            "mean_confidence": 0.740489,
+            "empirical_rate": 0.323764
+          },
+          {
+            "lower": 0.8,
+            "upper": 0.9,
+            "count": 0,
+            "mean_confidence": null,
+            "empirical_rate": null
+          },
+          {
+            "lower": 0.9,
+            "upper": 1.0,
+            "count": 0,
+            "mean_confidence": null,
+            "empirical_rate": null
+          }
+        ],
+        "roc_auc": 0.8500465374640518,
+        "pr_auc": 0.23113876752964124
+      },
+      "note": "Existing archived metrics, not new inference; 18,777-row cohort differs from 18,770-row paired experiment."
+    },
+    "artifact_and_reference_hash_inventory": {
+      "artifacts/detector-best/calibration.json": {
+        "sha256": "3ce4724edd70d41cbf5975cf65643ddf1a8f3479bb983e324fb19789a27a3f32",
+        "size_bytes": 185
+      },
+      "artifacts/detector-best/config.json": {
+        "sha256": "3b672544504a85b7568c5205539c9ae83054ef96faf6debfed38b2b0a0d60653",
+        "size_bytes": 1105
+      },
+      "artifacts/detector-best/dev_predictions.npz": {
+        "sha256": "236f5f327a1086b05cc49466ed75be96b08c4a754e31828209dd3a38dd053b02",
+        "size_bytes": 117175
+      },
+      "artifacts/detector-best/model.safetensors": {
+        "sha256": "470261f81870f5c4f97fe85918d02aa08673ac08744b5cae4d4621ee9d631bf9",
+        "size_bytes": 283348948
+      },
+      "artifacts/detector-best/model_metadata.json": {
+        "sha256": "9a5343f2bf1b32042d7cf94dbaa53341211f8af1662b476e0f5b0ee7778c1281",
+        "size_bytes": 841
+      },
+      "artifacts/detector-best/test_metrics.json": {
+        "sha256": "75a8638f1571bc2708662ad34631a6bdb35f5bd6052acaa9d8dd760a53cec1be",
+        "size_bytes": 6814
+      },
+      "artifacts/detector-best/test_predictions.npz": {
+        "sha256": "3afe8a328e5810063527b1f0bad6836ef378bfb766c550de37cf8b8a056592d7",
+        "size_bytes": 201151
+      },
+      "artifacts/detector-best/tokenizer.json": {
+        "sha256": "51fc0b18375ded8eb40b79af35803047f43d539c8397be682878beeddf38c151",
+        "size_bytes": 8339346
+      },
+      "artifacts/detector-best/tokenizer_config.json": {
+        "sha256": "68e2cfacb31d997f50c96acbef68bee7db9ece9b7d1303ed44346a34131683a8",
+        "size_bytes": 410
+      },
+      "artifacts/detector-best/training_report.json": {
+        "sha256": "e20471c2cb3fd30aa9be67678a8977430eba5d0d164db43e391c6f4b873e8fd6",
+        "size_bytes": 475
+      },
+      "docs/detector.md": {
+        "sha256": "2a7e0816bf101af93a32e26ef103fc7f78c7c2a15b8eea732a65e56dc1007a5b",
+        "size_bytes": 604
+      },
+      "docs/reports/CHANGELOG_V1.1_TO_V1.4.md": {
+        "sha256": "8afbc63f0ed687eae6996828d40e0f85c8f58b28866bb17a67f328a7f074ae56",
+        "size_bytes": 29728
+      },
+      "docs/reports/INTEGRATION_ENGINEERING_REPORT.md": {
+        "sha256": "f82557d67b0e605d9dc46aee56e9d7aad6efd1f686f73478108155f28e6b6822",
+        "size_bytes": 13232
+      },
+      "docs/reports/LIVE_VALIDATION_WINDOWS.md": {
+        "sha256": "5b49bce5e51c81be57762eacb78fa2318e6e5469d9448c98681f6741ec15f2b3",
+        "size_bytes": 16313
+      },
+      "docs/reports/PROJECT.md": {
+        "sha256": "7fbfde164db95bb32595b92159fdfb26a36345155d760df2badf2b15e9c52bfc",
+        "size_bytes": 11356
+      },
+      "docs/reports/README_STATUS.md": {
+        "sha256": "34d38537ea11ca7f4940fd90811249a3633cb2243b2212f8d3e3a7ee32b9a59c",
+        "size_bytes": 3393
+      },
+      "docs/reports/TEST_INFRA.md": {
+        "sha256": "4845555394ed095029d7beb25926d9673e71b8e2cc2e5b046270b9197ff9ad72",
+        "size_bytes": 2821
+      },
+      "docs/reports/VERIFIER_IMPLEMENTATION_REPORT.md": {
+        "sha256": "fad7f6184cf52cba28f67632acea4cb44dd909e7bd97203467f40a853e5c22f4",
+        "size_bytes": 30605
+      },
+      "docs/reports/VERIFIER_V1_BASELINE.md": {
+        "sha256": "ae5939b5b1f0b71b92b00bcbc676122f737db59a761e3c9eb2254bcdb47ea73c",
+        "size_bytes": 5873
+      },
+      "docs/reports/VERIFIER_V1_BENCHMARK_REPORT.md": {
+        "sha256": "833fe54b9caeb00348733b29f490f2344e5e3f85c435f7973ace50a2cf023c23",
+        "size_bytes": 8781
+      },
+      "docs/reports/VERIFIER_V1_VALIDATION.md": {
+        "sha256": "92602d8a126fe3694ade0e778a028c8c7d6fb2301f5275b2e0d5a19428cc37ac",
+        "size_bytes": 5183
+      },
+      "docs/reports/Verifier_Agent_Build_Spec_v2.md": {
+        "sha256": "c1c2a0aaa438633fabda85aecd0580d40302a3cb6e6672c09d604a40e34d5395",
+        "size_bytes": 10622
+      },
+      "docs/reports/current-state-audit.md": {
+        "sha256": "a03037af22e9d46f55eab44080586007bbbe79ac61bd6ef9aa05b4a84a4f9ba6",
+        "size_bytes": 7750
+      },
+      "docs/reports/detector-audit-report.md": {
+        "sha256": "0a61e235b39f853978e2da869a6a7300e422a33d4125e3ea22f41036189b4b8f",
+        "size_bytes": 12947
+      },
+      "docs/reports/detector-release-validation-20261002.md": {
+        "sha256": "400e2757e916748229b1d0f6c5b01807efb31190e0f92d6602bac3f67d63bd9f",
+        "size_bytes": 13262
+      },
+      "docs/reports/full-system-audit-20261001.md": {
+        "sha256": "adcd1ab458e0f02d4866ac9c1713b3f56a3d5114664835786a2f1a15c3c3e875",
+        "size_bytes": 33584
+      },
+      "docs/reports/integration-20261002-final.md": {
+        "sha256": "08e1c64f296b063352c3d10d219ebcb6c079fb0be303d6142a1677843a25d7d3",
+        "size_bytes": 3612
+      },
+      "docs/reports/known-limitations-and-remaining-work.md": {
+        "sha256": "da7e5c600ebac041207d549bee39bb056261931223381dd8579f90858bd9b18b",
+        "size_bytes": 4894
+      },
+      "docs/reports/verification-report.md": {
+        "sha256": "3f618de96efc09e4e01edfbbc4017afc040d0daa6a6dc70936a0f2483e979a03",
+        "size_bytes": 9737
+      },
+      "docs/research.md": {
+        "sha256": "0ef402d74ec1b910aeff35cba28d3bf4049fceb2be403c928a9697d9f6f99981",
+        "size_bytes": 3524
+      },
+      "halluciguard_detector/MODEL_CARD.md": {
+        "sha256": "3ee12804b7a8273b98d3ba1b387097e1e4604498fac5cad41a3ce0d1837bd246",
+        "size_bytes": 10742
+      },
+      "halluciguard_detector/README.md": {
+        "sha256": "b3d89f80950d0cdbfd088275346500eac49a16b85f19fe32c2b1e962f01ef8f7",
+        "size_bytes": 12745
+      },
+      "halluciguard_detector/__init__.py": {
+        "sha256": "14e26c9747cc3a66b3fe0d4cf475687f5af13adcb9b4ab006e3dbf64991fa411",
+        "size_bytes": 202
+      },
+      "halluciguard_detector/agent.py": {
+        "sha256": "174115e1ef60be03acc80c57f5169daf81628a84891f1403edcfe5fc2770a9ff",
+        "size_bytes": 13829
+      },
+      "halluciguard_detector/api.py": {
+        "sha256": "2ce559686d2c64017facdaeddd19f7ea74ba7265d97992ee91711a5a5331171a",
+        "size_bytes": 1015
+      },
+      "halluciguard_detector/benchmark.py": {
+        "sha256": "6a3bfb3e94c1147e74b61bcb39ae9c4b07223b5b0eae952ab6953d42bf96e12c",
+        "size_bytes": 15045
+      },
+      "halluciguard_detector/calibration.py": {
+        "sha256": "7344df0b3a8feb85dc862f10bae0e2dcab98fb474e9820a8861066e23fd0db8d",
+        "size_bytes": 6700
+      },
+      "halluciguard_detector/cli.py": {
+        "sha256": "47a132ad4f713de7cc0086777d2d42202434b55634ccaf05add9f8eb5bc140a1",
+        "size_bytes": 2499
+      },
+      "halluciguard_detector/data.py": {
+        "sha256": "2a48b7929b62fb05672866b1fa0acaad6b1e72226f7eb258e50d3a0232917372",
+        "size_bytes": 23811
+      },
+      "halluciguard_detector/detector.py": {
+        "sha256": "5fa9d31b03d16b5b417d578a6cf41315d01fac7d0ac8aec8e525053f4c242d65",
+        "size_bytes": 21311
+      },
+      "halluciguard_detector/error_analysis.py": {
+        "sha256": "37018315e248ddcc8559da384d46ff18c4a07573d535dbcdb316ce83f5baf03d",
+        "size_bytes": 15230
+      },
+      "halluciguard_detector/evidence.py": {
+        "sha256": "aaf25bb04375614f5695841a533289a23a804c613bcb448c546e3b0341ed2bb6",
+        "size_bytes": 11554
+      },
+      "halluciguard_detector/evidence_alignment.py": {
+        "sha256": "2dd293a2af6f7602632269162ab1611d4be1e1cc9fad9a5d737767c2b02b0783",
+        "size_bytes": 11958
+      },
+      "halluciguard_detector/evidence_report.py": {
+        "sha256": "78e3d70762c98f6f06478341504ca107da1b6859174dfc2df21eb9d553bbdd6f",
+        "size_bytes": 10275
+      },
+      "halluciguard_detector/evidence_shapes.py": {
+        "sha256": "9f24e98975a6e811c99382ad6495fcd0c3da8fb93244f03572005a26d8f6cb0f",
+        "size_bytes": 18114
+      },
+      "halluciguard_detector/experiments.py": {
+        "sha256": "02058267099cebc8e167cb471a8a7c04ce014cb37c2bb4d21ac3ed5f81bbb807",
+        "size_bytes": 33026
+      },
+      "halluciguard_detector/hard_negatives.py": {
+        "sha256": "5540199b923e7afb9f8a55d40d02e73a9bd4a26ac9483dfc9ee8a6e47879bc02",
+        "size_bytes": 13231
+      },
+      "halluciguard_detector/local_generation.py": {
+        "sha256": "fc263682d64a9ac2fb9bbafe813066936e882ca266bf21329e7570072b04bab9",
+        "size_bytes": 6527
+      },
+      "halluciguard_detector/model_card.py": {
+        "sha256": "1feaf42b88c361c8cc92bf80e0029507ddf0bc8179e3f328fbde8b96e379877b",
+        "size_bytes": 6085
+      },
+      "halluciguard_detector/nli_input.py": {
+        "sha256": "ef3c49d6274623741e76df9a7c55ea28cba55cf5ff90ba73a9df3d7fee9bd745",
+        "size_bytes": 11322
+      },
+      "halluciguard_detector/paired_evaluation.py": {
+        "sha256": "c62abe1f12da7f108255133c8e453db9bcb964b4ced403e473e68f10f4a311be",
+        "size_bytes": 13774
+      },
+      "halluciguard_detector/phase1.py": {
+        "sha256": "dd7a41a5e078db9941b3a4a268ca06cbaa9c105e37dda1cf8c36db03b2dd90a7",
+        "size_bytes": 11738
+      },
+      "halluciguard_detector/phase1_cli.py": {
+        "sha256": "224e6e9c2cc1f765b86ab65ef0ec68f1894c0a2f4c8ea44784726adc693be968",
+        "size_bytes": 3894
+      },
+      "halluciguard_detector/phase1_collect.py": {
+        "sha256": "b986c3d48206aece8b9ae317cac67763dfc1e6c5ef730f3ce79d6d619ac664ff",
+        "size_bytes": 4993
+      },
+      "halluciguard_detector/phase1_data.py": {
+        "sha256": "74c03557b8451e6e6b0cbeab380e94cdafcfbff69e5ad7a68ac283a570a6f84c",
+        "size_bytes": 10210
+      },
+      "halluciguard_detector/phase1_train.py": {
+        "sha256": "9b86e7476a887dd426f78b3c1684c322c1d5fe2623737691ac97bf78bb7fd5fe",
+        "size_bytes": 16834
+      },
+      "halluciguard_detector/schemas.py": {
+        "sha256": "9d2c75ae9f25a28255eed9827cf3f29c5c825894edbb946f5539205785cfbf09",
+        "size_bytes": 5022
+      },
+      "halluciguard_detector/structured_evidence.py": {
+        "sha256": "fbba2bd74986dc13b03c5fe7d15aed3d369ee1bdd1715cf00fe68baa01908c19",
+        "size_bytes": 5273
+      },
+      "halluciguard_detector/tests/helpers.py": {
+        "sha256": "d593ebc954a32887d72af30216f340f0e3a1c7c4ca2a9e458cf8f7645ede35ee",
+        "size_bytes": 3012
+      },
+      "halluciguard_detector/tests/test_agent.py": {
+        "sha256": "59ac696a9d7f8ad2bc798e3a40ddca6ad08bfc430bf67398c38ee548aaf627b3",
+        "size_bytes": 8642
+      },
+      "halluciguard_detector/tests/test_benchmark_harness.py": {
+        "sha256": "81df7b1a3b9eb1fb802864d9b9e7e1bef286d5a7c63504a404b25633ebc85eda",
+        "size_bytes": 7072
+      },
+      "halluciguard_detector/tests/test_claim_decomposition.py": {
+        "sha256": "f5e500e8cc8fea6b80a8c9cd87cd97e1a675881a3695b24a2d109fe3882b884c",
+        "size_bytes": 3099
+      },
+      "halluciguard_detector/tests/test_claim_evidence.py": {
+        "sha256": "a20d02804e95a8b01a78a5c8579b78235c953880b83dcc0317011f459edb7d64",
+        "size_bytes": 9904
+      },
+      "halluciguard_detector/tests/test_context_preserving_selection.py": {
+        "sha256": "67905cf395cf5e3f5121daa09743bf3d31ef9538bb9362e322edb3416bf8c604",
+        "size_bytes": 3332
+      },
+      "halluciguard_detector/tests/test_data_conversion.py": {
+        "sha256": "d34b8e4b1ea0c9e22e83f6a31119d3c683935a0cd126b5c9c02e205d6c1931c7",
+        "size_bytes": 13981
+      },
+      "halluciguard_detector/tests/test_detector_semantics.py": {
+        "sha256": "0217b8987608e8a72a8e4fd0550bd9613ee3156593d56de55aad307762ef5e7e",
+        "size_bytes": 26173
+      },
+      "halluciguard_detector/tests/test_evidence_alignment.py": {
+        "sha256": "44c12e9efcf8cab607eea42a9edb851d6ff0580413f708e32431ae2605a11f0b",
+        "size_bytes": 10398
+      },
+      "halluciguard_detector/tests/test_guard_comparability.py": {
+        "sha256": "ea673fb667fc75d51968760fda70fe3f2befed2e326b8e2afa8f00268d6db17b",
+        "size_bytes": 5420
+      },
+      "halluciguard_detector/tests/test_model_card.py": {
+        "sha256": "0fe1531995cce677c0494aac3e205962534980bea2a32b5db491c5192a4b0105",
+        "size_bytes": 4212
+      },
+      "halluciguard_detector/tests/test_multiple_evidence_wrappers.py": {
+        "sha256": "e32be3d4ec3ba438e33cc8ac5fc274c41367ac8c1f278e12957a5eb03db7e1cf",
+        "size_bytes": 923
+      },
+      "halluciguard_detector/tests/test_nli_input_contract.py": {
+        "sha256": "7378c8b8d03adc3a237722db504d6dc0b149aaea640ccba7bea0e3970ad6c32c",
+        "size_bytes": 5126
+      },
+      "halluciguard_detector/tests/test_paired_evaluation.py": {
+        "sha256": "bf7339a72ce8195bd3163cd8a8b1cb5a88a434059eb9ea6d3efd241e0ffbba09",
+        "size_bytes": 3312
+      },
+      "halluciguard_detector/tests/test_phase1.py": {
+        "sha256": "3d2a52e3caa64a88f89a09a7f19bdbc3452db10aace8be643480914f1f4f0f73",
+        "size_bytes": 10389
+      },
+      "halluciguard_detector/tests/test_port_data_integrity.py": {
+        "sha256": "d82fb82d5e0637b726cae01b18b2b5dfd5499be2853e9b64cc8689dcb1d7711e",
+        "size_bytes": 4369
+      },
+      "halluciguard_detector/tests/test_port_safety.py": {
+        "sha256": "986f8c1cd7f196f760ae17722a01694e1772e2aeaedb6fed56e25c13acf9ad3f",
+        "size_bytes": 3841
+      },
+      "halluciguard_detector/tests/test_schemas.py": {
+        "sha256": "86de5f834e176c7f978ff0b342c66101ac1202f6f22f1b22f331ee5442d97d39",
+        "size_bytes": 240
+      },
+      "halluciguard_detector/tests/test_selection_error_privacy.py": {
+        "sha256": "1fded269f78a90751797b0075bae69a72161b66c1b171325d946febe10f9de73",
+        "size_bytes": 979
+      },
+      "halluciguard_detector/tests/test_task_metrics.py": {
+        "sha256": "a9689560efd9691687e4bc37e2fa137c7f580c357f7611382bdaef1f7ce83e8a",
+        "size_bytes": 9789
+      },
+      "halluciguard_detector/tests/test_text.py": {
+        "sha256": "6372d37117be898726cb187c6f8db7a45f5f077dfccfaf9a6f169989d63a8cb4",
+        "size_bytes": 2200
+      },
+      "halluciguard_detector/text.py": {
+        "sha256": "9bd8bf9b090ff1ff2e09651ba203409626519daaa0ab4feb910b09703d3f80ec",
+        "size_bytes": 9309
+      },
+      "halluciguard_detector/training.py": {
+        "sha256": "4dc2e78cebf341aad505b2fa9651599b34e4b546ad2296700229eafbf59d8359",
+        "size_bytes": 25631
+      },
+      "halluciguard_judge/detector.py": {
+        "sha256": "ea47d1c31c0725dc90b0a6fe44aa7e348126a3475bb7a4f9c1c7572468797253",
+        "size_bytes": 13976
+      },
+      "halluciguard_judge/tests/test_detector.py": {
+        "sha256": "88901a6c7a6e6ca4fe73cad092145e4b3dc9cdd37f404fefdd7e69ee02497172",
+        "size_bytes": 5373
+      },
+      "orchestration/detector_bridge.py": {
+        "sha256": "57c2203d7a8d0b543d523f46ebf17e9aa3c06f72eefeef5f7d03542cf30d09ba",
+        "size_bytes": 8694
+      },
+      "orchestration/tests/test_detector_bridge.py": {
+        "sha256": "35552f3b47c8727cf2ba1c2996e438e9b76175cf821ef8b1f2fe964c49e4efdf",
+        "size_bytes": 9654
+      },
+      "orchestration/tests/test_grounded_detector_node.py": {
+        "sha256": "464dc3d6909b90d2216e49a6032302241e7d7e3a484648740f95b4a6acdc5fbd",
+        "size_bytes": 1880
+      },
+      "orchestration/tests/test_llm_detector_slice.py": {
+        "sha256": "41a0f9a42bec1cb82ed0b2aeb54bc7fc3bac98e3afd30164998d4a7f11f52ea3",
+        "size_bytes": 9084
+      },
+      "orchestration/tests/test_llm_detector_verifier_slice.py": {
+        "sha256": "236bddbb05b8c5bae7170ebd6f0a74f3de85adeae5f8683a49f6f362ec2adac1",
+        "size_bytes": 15147
+      },
+      "reports/detector_v2_baseline_subsample.json": {
+        "sha256": "8348811d93584514580310ec03cafa106908a398c8462181bf137cd520f64708",
+        "size_bytes": 10751
+      },
+      "reports/detector_v2_error_analysis.json": {
+        "sha256": "580a8e87ef490a9e58db41cffe0bc17ed19b3e1027410ff5c6b0449504084d1d",
+        "size_bytes": 41990
+      },
+      "reports/detector_v2_hard_negatives.json": {
+        "sha256": "96e5eb704323d9819e19ea4d9858e514e9fdb768c3d6533646e6a633c2f461c9",
+        "size_bytes": 6308
+      },
+      "reports/detector_v2_report.md": {
+        "sha256": "3c16bd35cb7cc3ee0008ca02b274b97964137b397263724926bcef2d6a824523",
+        "size_bytes": 25572
+      },
+      "reports/detector_v2_shape_sensitivity_prelim.json": {
+        "sha256": "45c736a8e6b94ec7d41d4a18c8bd9ab2206460fe199506d2527fa8f4579384b2",
+        "size_bytes": 18466
+      },
+      "reports/detector_v2_train_comparison.json": {
+        "sha256": "93e80a57138a8b5f294b482ab4c59b5d6f2a38082b32be9c160934c260599d54",
+        "size_bytes": 92422
+      },
+      "scripts/audit_detector_measurements.py": {
+        "sha256": "b3727e31945254c1afda9af6d29ffc14f54b65fc39c67ab655d54357f69f23db",
+        "size_bytes": 8004
+      },
+      "scripts/benchmark_eval.py": {
+        "sha256": "2b6226144c27d40b0fec53ebaee9670a06a91f7ab2320c9315888fc4c1d1b439",
+        "size_bytes": 17108
+      },
+      "scripts/evaluate_existing_detector.py": {
+        "sha256": "b20336312b6289c4d04965b631e68342255c6adb7acdad78b2ea7898830d3cd4",
+        "size_bytes": 2680
+      },
+      "scripts/evaluate_paired_detector.py": {
+        "sha256": "a4f0f3889b05a9745f462ee6acfe1477456c5fae983cb742f17e06442af77971",
+        "size_bytes": 852
+      },
+      "scripts/smoke_retrieval_execution.py": {
+        "sha256": "e71773a70d24957a56257d8bab90495c2d55e9d109351357a9fcc817cea73611",
+        "size_bytes": 2156
+      },
+      "scripts/test_llm_detector_slice.py": {
+        "sha256": "185f5fa48661ff23917da41a026c69453befdbf410bb950a4be3bb87afc547fd",
+        "size_bytes": 1824
+      },
+      "scripts/test_llm_detector_verifier_slice.py": {
+        "sha256": "22c75874eaf7e36720dd899438b1ced9c7cbc8476b351af5ecd9f7dd4dbce6ac",
+        "size_bytes": 15663
+      },
+      "scripts/trace_pipeline_execution.py": {
+        "sha256": "4639ae6891320d8592d1787a555c5b1bc6e744f027bf3d7743e20fc80a7cd6e9",
+        "size_bytes": 6493
+      },
+      "scripts/verify_certification_sandbox.py": {
+        "sha256": "39f6f2f79bdf5ec9370d2e261679b6cb9d7fd08e891daf63edd4d71bbebaf7a6",
+        "size_bytes": 9018
+      },
+      "services/llm_detector_service.py": {
+        "sha256": "b227ba7f058538386d035de039b9ed278e157f5db2bbc3697389551fa3ff2a4d",
+        "size_bytes": 5312
+      },
+      "services/llm_detector_verifier_service.py": {
+        "sha256": "ec888c5f7ca32a76dae6a0f424ccdaba455f83bffe7bf9691d1a40e43222ccb6",
+        "size_bytes": 22160
+      }
+    },
+    "preexisting_manifest_paths": [],
+    "evaluation_references": [
+      "halluciguard_detector/MODEL_CARD.md",
+      "halluciguard_detector/README.md",
+      "docs/detector.md",
+      "docs/research.md",
+      "docs/reports/detector-audit-report.md",
+      "docs/reports/detector-release-validation-20261002.md",
+      "reports/detector_v2_report.md",
+      "scripts/evaluate_existing_detector.py",
+      "scripts/evaluate_paired_detector.py",
+      "scripts/audit_detector_measurements.py",
+      "halluciguard_detector/paired_evaluation.py",
+      "halluciguard_detector/phase1.py"
+    ],
+    "unavailable_evaluation_inputs": [
+      {
+        "path": "artifacts/paired-evaluation-20261002-context-preservation",
+        "status": "NOT_PRESENT_IN_FRESH_CHECKOUT",
+        "sha256": null
+      },
+      {
+        "path": "<prepared-RAGTruth>",
+        "status": "UNAVAILABLE; historical local dataset not supplied",
+        "sha256": null
+      },
+      {
+        "path": "<RAGTruth-response.jsonl>",
+        "status": "UNAVAILABLE; historical raw responses not supplied",
+        "sha256": null
+      }
+    ],
+    "paired_evaluation_command": "python -m scripts.evaluate_paired_detector --data <prepared-RAGTruth> --checkpoint <existing-detector-best> --raw-responses <RAGTruth-response.jsonl> --output artifacts/paired-evaluation-20261002-context-preservation --batch-size 32 --exclude-cross-split-duplicates",
+    "paired_evaluation_status": "BLOCKED/UNVERIFIED; not rerun; historical results only"
+  },
+  "model_checkpoint_artifact_inventory": {
+    "artifacts/detector-best/calibration.json": {
+      "sha256": "3ce4724edd70d41cbf5975cf65643ddf1a8f3479bb983e324fb19789a27a3f32",
+      "size_bytes": 185
+    },
+    "artifacts/detector-best/config.json": {
+      "sha256": "3b672544504a85b7568c5205539c9ae83054ef96faf6debfed38b2b0a0d60653",
+      "size_bytes": 1105
+    },
+    "artifacts/detector-best/dev_predictions.npz": {
+      "sha256": "236f5f327a1086b05cc49466ed75be96b08c4a754e31828209dd3a38dd053b02",
+      "size_bytes": 117175
+    },
+    "artifacts/detector-best/model.safetensors": {
+      "sha256": "470261f81870f5c4f97fe85918d02aa08673ac08744b5cae4d4621ee9d631bf9",
+      "size_bytes": 283348948
+    },
+    "artifacts/detector-best/model_metadata.json": {
+      "sha256": "9a5343f2bf1b32042d7cf94dbaa53341211f8af1662b476e0f5b0ee7778c1281",
+      "size_bytes": 841
+    },
+    "artifacts/detector-best/test_metrics.json": {
+      "sha256": "75a8638f1571bc2708662ad34631a6bdb35f5bd6052acaa9d8dd760a53cec1be",
+      "size_bytes": 6814
+    },
+    "artifacts/detector-best/test_predictions.npz": {
+      "sha256": "3afe8a328e5810063527b1f0bad6836ef378bfb766c550de37cf8b8a056592d7",
+      "size_bytes": 201151
+    },
+    "artifacts/detector-best/tokenizer.json": {
+      "sha256": "51fc0b18375ded8eb40b79af35803047f43d539c8397be682878beeddf38c151",
+      "size_bytes": 8339346
+    },
+    "artifacts/detector-best/tokenizer_config.json": {
+      "sha256": "68e2cfacb31d997f50c96acbef68bee7db9ece9b7d1303ed44346a34131683a8",
+      "size_bytes": 410
+    },
+    "artifacts/detector-best/training_report.json": {
+      "sha256": "e20471c2cb3fd30aa9be67678a8977430eba5d0d164db43e391c6f4b873e8fd6",
+      "size_bytes": 475
+    }
+  },
+  "public_runtime_model_cache": {
+    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "resolved_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "downloaded_for": "real Memory embedding tests; no new weights committed",
+    "reproduction": "snapshot_download(\"sentence-transformers/all-MiniLM-L6-v2\", revision=\"1110a243fdf4706b3f48f1d95db1a4f5529b4d41\", allow_patterns=[\"*.json\",\"*.safetensors\",\"*.txt\",\"1_Pooling/*\"])",
+    "files": {
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/model.safetensors": {
+        "sha256": "53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db",
+        "size_bytes": 90868376
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/data_config.json": {
+        "sha256": "32edcb108fc2516b920734a862ae0692bcae1c5d45d5f8d972cb0d53434a4c54",
+        "size_bytes": 39265
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/vocab.txt": {
+        "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+        "size_bytes": 231508
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/tokenizer_config.json": {
+        "sha256": "acb92769e8195aabd29b7b2137a9e6d6e25c476a4f15aa4355c233426c61576b",
+        "size_bytes": 350
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/special_tokens_map.json": {
+        "sha256": "303df45a03609e4ead04bc3dc1536d0ab19b5358db685b6f3da123d05ec200e3",
+        "size_bytes": 112
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/config.json": {
+        "sha256": "953f9c0d463486b10a6871cc2fd59f223b2c70184f49815e7efbcab5d8908b41",
+        "size_bytes": 612
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/sentence_bert_config.json": {
+        "sha256": "fc1993fde0a95c24ec6c022539d41cf6e2f7c9721e5415d6fb6897472a9cd4b7",
+        "size_bytes": 53
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/config_sentence_transformers.json": {
+        "sha256": "061ca9d39661d6c6d6de5ba27f79a1cd5770ea247f8d46412a68a498dc5ac9f3",
+        "size_bytes": 116
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/modules.json": {
+        "sha256": "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf",
+        "size_bytes": 349
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/tokenizer.json": {
+        "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037",
+        "size_bytes": 466247
+      },
+      "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/1_Pooling/config.json": {
+        "sha256": "4be450dde3b0273bb9787637cfbd28fe04a7ba6ab9d36ac48e92b11e350ffc23",
+        "size_bytes": 190
+      }
+    }
+  },
+  "validation": {
+    "initial_attempts": [
+      {
+        "counts": {
+          "passed": 1196,
+          "failed": 24,
+          "errors": 59,
+          "skipped": 14
+        },
+        "collected": 1293,
+        "nonpassing_tests": [
+          {
+            "nodeid": "orchestration/tests/test_verifier_stabilization.py::TestVerifierStabilization::test_single_claim_end_to_end_verification",
+            "duration_seconds": 1.58,
+            "status": "failure",
+            "reason": "AssertionError: 0 not greater than or equal to 1 : Should retrieve at least 1 evidence source",
+            "resolution": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_stabilization.py::TestVerifierStabilization::test_wikipedia_adapter_retrieval",
+            "duration_seconds": 0.008,
+            "status": "failure",
+            "reason": "ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.",
+            "resolution": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_1_paris_capital_of_france",
+            "duration_seconds": 0.028,
+            "status": "failure",
+            "reason": "AssertionError: <VerdictLabel.UNVERIFIED: 'unverified'> != <VerdictLabel.VERIFIED: 'verified'>",
+            "resolution": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_2_eiffel_tower_in_london",
+            "duration_seconds": 0.024,
+            "status": "failure",
+            "reason": "AssertionError: <VerdictLabel.UNVERIFIED: 'unverified'> != <VerdictLabel.CONTRADICTED: 'contradicted'>",
+            "resolution": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_adapters.py::test_stub_adapter[asyncio]",
+            "duration_seconds": 0.008,
+            "status": "failure",
+            "reason": "ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_domain_adapters.py::test_cybersecurity_source_mode",
+            "duration_seconds": 0.009,
+            "status": "failure",
+            "reason": "AssertionError: assert False\n +  where False = <AsyncMock id='140341773038464'>.called\n +    where <AsyncMock id='140341773038464'> = <adapters.cybersecurity.CybersecurityAdapter object at 0x7fa3e46e8ce0>._search_cisa",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_domain_adapters.py::test_finance_source_mode",
+            "duration_seconds": 0.007,
+            "status": "failure",
+            "reason": "AssertionError: assert False\n +  where False = <AsyncMock id='140341888132704'>.called\n +    where <AsyncMock id='140341888132704'> = <adapters.finance.FinanceAdapter object at 0x7fa3fbb32bd0>._search_sec",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_domain_adapters.py::test_ai_research_source_mode",
+            "duration_seconds": 0.007,
+            "status": "failure",
+            "reason": "AssertionError: assert False\n +  where False = <AsyncMock id='140341888666608'>.called\n +    where <AsyncMock id='140341888666608'> = <adapters.ai_research.AiResearchAdapter object at 0x7fa3e46bc620>._search_arxiv",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_domain_adapters.py::test_legal_source_mode",
+            "duration_seconds": 0.007,
+            "status": "failure",
+            "reason": "AssertionError: assert False\n +  where False = <AsyncMock id='140341888679136'>.called\n +    where <AsyncMock id='140341888679136'> = <adapters.legal_general.LegalGeneralAdapter object at 0x7fa3e46bfaa0>._search_courtlistener",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_exact_v2_response_schema",
+            "duration_seconds": 0.005,
+            "status": "failure",
+            "reason": "AssertionError: assert False is True\n +  where False = N8NRetrievalResult(success=False, passages=[], trace=N8NTrace(called=True, workflow_version='2.0.0', request_id='req-v..., legacy_n8n_output=None), raw_response=None, error='n8n retrieval communication error: ImportError', http_status=None).success",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_http_403_auth_error_handling",
+            "duration_seconds": 0.004,
+            "status": "failure",
+            "reason": "AssertionError: assert None == 403\n +  where None = N8NRetrievalResult(success=False, passages=[], trace=N8NTrace(called=True, workflow_version='2.0.0', request_id='eb433..., legacy_n8n_output=None), raw_response=None, error='n8n retrieval communication error: ImportError', http_status=None).http_status",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_request_payload_serialization",
+            "duration_seconds": 0.006,
+            "status": "failure",
+            "reason": "AssertionError: Expected 'post' to have been called once. Called 0 times.",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_request_payload_includes_deduplicated_search_queries",
+            "duration_seconds": 0.004,
+            "status": "failure",
+            "reason": "AttributeError: 'NoneType' object has no attribute 'kwargs'",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_timeout_handling",
+            "duration_seconds": 0.004,
+            "status": "failure",
+            "reason": "AssertionError: assert 'timed out' in 'n8n retrieval communication error: importerror'\n +  where 'n8n retrieval communication error: importerror' = <built-in method lower of str object at 0x7fa3ebd037b0>()\n +    where <built-in method lower of str object at 0x7fa3ebd037b0> = 'n8n retrieval communication error: ImportError'.lower\n +      where 'n8n retrieval communication error: ImportError' = N8NRetrievalResult(success=False, passages=[], trace=N8NTrace(called=True, workflow_version='2.0.0', request_id='timeo..., legacy_n8n_output=None), raw_response=None, error='n8n retrieval communication error: ImportError', http_status=None).error",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_http_500_handling",
+            "duration_seconds": 0.004,
+            "status": "failure",
+            "reason": "AssertionError: assert None == 500\n +  where None = N8NRetrievalResult(success=False, passages=[], trace=N8NTrace(called=True, workflow_version='2.0.0', request_id='eb71f..., legacy_n8n_output=None), raw_response=None, error='n8n retrieval communication error: ImportError', http_status=None).http_status",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_invalid_json_handling",
+            "duration_seconds": 0.004,
+            "status": "failure",
+            "reason": "AssertionError: assert 'not valid json' in 'n8n retrieval communication error: importerror'\n +  where 'n8n retrieval communication error: importerror' = <built-in method lower of str object at 0x7fa3ebd03e70>()\n +    where <built-in method lower of str object at 0x7fa3ebd03e70> = 'n8n retrieval communication error: ImportError'.lower\n +      where 'n8n retrieval communication error: ImportError' = N8NRetrievalResult(success=False, passages=[], trace=N8NTrace(called=True, workflow_version='2.0.0', request_id='fc2fe..., legacy_n8n_output=None), raw_response=None, error='n8n retrieval communication error: ImportError', http_status=None).error",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_missing_evidence_field",
+            "duration_seconds": 0.004,
+            "status": "failure",
+            "reason": "AssertionError: assert False is True\n +  where False = N8NRetrievalResult(success=False, passages=[], trace=N8NTrace(called=True, workflow_version='2.0.0', request_id='c3d14..., legacy_n8n_output=None), raw_response=None, error='n8n retrieval communication error: ImportError', http_status=None).success",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_malformed_evidence_items",
+            "duration_seconds": 0.004,
+            "status": "failure",
+            "reason": "AssertionError: assert False is True\n +  where False = N8NRetrievalResult(success=False, passages=[], trace=N8NTrace(called=True, workflow_version='2.0.0', request_id='0dc9b..., legacy_n8n_output=None), raw_response=None, error='n8n retrieval communication error: ImportError', http_status=None).success",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_health_check_endpoint",
+            "duration_seconds": 0.004,
+            "status": "failure",
+            "reason": "assert False is True",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_pipeline_uses_n8n_evidence_and_runs_python_bge_nli",
+            "duration_seconds": 1.025,
+            "status": "failure",
+            "reason": "AssertionError: assert 'unverified' == 'verified'\n  \n  - verified\n  + unverified\n  ? ++",
+            "resolution": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_pipeline_fallback_to_python_adapters_on_n8n_failure",
+            "duration_seconds": 1.025,
+            "status": "failure",
+            "reason": "AssertionError: assert 'unverified' == 'verified'\n  \n  - verified\n  + unverified\n  ? ++",
+            "resolution": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_no_duplicate_retrieval_when_n8n_succeeds",
+            "duration_seconds": 1.016,
+            "status": "failure",
+            "reason": "AssertionError: assert 'unverified' == 'verified'\n  \n  - verified\n  + unverified\n  ? ++",
+            "resolution": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_live_n8n_health_endpoint",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live n8n tests require RUN_LIVE_N8N_TESTS=true environment variable"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_live_n8n_retrieval_webhook",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live n8n tests require RUN_LIVE_N8N_TESTS=true environment variable"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_pipeline_hardening.py::TestDirectModelDiagnostics::test_direct_deberta_nli_execution",
+            "duration_seconds": 0.338,
+            "status": "failure",
+            "reason": "AssertionError: assert <EntailmentLa...AL: 'neutral'> == <EntailmentLa... 'entailment'>\n  \n  - entailment\n  + neutral",
+            "resolution": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_pipeline_hardening.py::TestDirectModelDiagnostics::test_direct_bge_reranker_execution",
+            "duration_seconds": 0.338,
+            "status": "failure",
+            "reason": "AssertionError: assert 0.5 > 0.5\n +  where 0.5 = Passage(title='Paris city', source='s1', url='u1', publication_date='2024-01-01', snippet='Paris is the capital and largest city of France.', source_id='', relevance_score=0.5, source_confidence_hint=0.0, claim_id='', relation_check=None).relevance_score\n +  and   0.5 = Passage(title='Man United', source='s2', url='u2', publication_date='2024-01-01', snippet='Manchester United is an Eng...sed in Old Trafford.', source_id='', relevance_score=0.5, source_confidence_hint=0.0, claim_id='', relation_check=None).relevance_score",
+            "resolution": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_baseline_fallback_is_flagged_degraded",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_real_inference_is_flagged_executed",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_default_result_edge_case_is_degraded",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_diagnostic_fields_default_safe_on_bare_construction",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_web_retriever.py::TestLiveIntegration::test_live_tavily_search",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live web tests disabled (set RUN_LIVE_WEB_TESTS=true)"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_web_retriever.py::TestLiveIntegration::test_live_full_chain",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live web tests disabled (set RUN_LIVE_WEB_TESTS=true)"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestHealthEndpoint::test_health",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestDomainsEndpoint::test_list_domains",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestStoreEndpoint::test_store_fact",
+            "duration_seconds": 0.017,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestStoreEndpoint::test_store_with_evidence",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestRecallEndpoint::test_recall",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestCacheEndpoints::test_check_cache_miss",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestCacheEndpoints::test_check_cache_hit",
+            "duration_seconds": 0.014,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestCacheEndpoints::test_invalidate_cache",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestTrustEndpoints::test_update_trust",
+            "duration_seconds": 0.015,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestTrustEndpoints::test_get_trust",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestTrustEndpoints::test_get_trust_not_found",
+            "duration_seconds": 0.032,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestPatternEndpoints::test_query_patterns",
+            "duration_seconds": 0.015,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestPatternEndpoints::test_domain_patterns",
+            "duration_seconds": 0.018,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestKgEndpoints::test_kg_stats",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestKgEndpoints::test_entity_not_found",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestVectorEndpoints::test_vector_search",
+            "duration_seconds": 0.015,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestStatsEndpoint::test_stats",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestBatchEndpoint::test_store_batch",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestAnalyticsEndpoint::test_kg_analytics",
+            "duration_seconds": 0.015,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestMetricsEndpoint::test_metrics",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestDuplicateEndpoint::test_duplicate_store_via_api",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestApiKeyAuth::test_requires_api_key_when_configured",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestApiKeyAuth::test_allows_valid_api_key",
+            "duration_seconds": 0.015,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestApiKeyAuth::test_metrics_requires_auth_when_configured",
+            "duration_seconds": 0.016,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestApiKeyAuth::test_no_key_configured_allows_access",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestDeleteFactEndpoint::test_delete_fact",
+            "duration_seconds": 0.016,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestDeleteFactEndpoint::test_delete_nonexistent",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestUpdateFactEndpoint::test_update_fact",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestUpdateFactEndpoint::test_update_nonexistent",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStoreFact::test_store_basic_fact",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStoreFact::test_store_fact_with_evidence",
+            "duration_seconds": 0.014,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStoreFact::test_store_updates_cache",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStoreFact::test_store_hallucination_updates_patterns",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestRecall::test_recall_returns_similar_facts",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestRecall::test_recall_includes_cache",
+            "duration_seconds": 0.018,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestRecall::test_recall_includes_patterns",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStats::test_get_stats",
+            "duration_seconds": 0.016,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_first_fact_is_durable_before_close",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_failed_or_silent_save_never_reports_stored[kg]",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_failed_or_silent_save_never_reports_stored[vectors]",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_write_failure_is_classified_without_disclosing_provider_text",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_partial_store_cannot_be_reused_as_a_successful_duplicate",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_duplicate_reuses_existing_confidence_without_promoting_it",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_verified_legacy_duplicate_can_reuse_real_top_level_confidence",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestDuplicateDetection::test_identical_claim_is_duplicate",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestDuplicateDetection::test_near_duplicate_flagged",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestContradictionDetection::test_conflicting_verdict_raises_alert",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestContradictionDetection::test_same_verdict_no_contradiction",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestBatchStore::test_batch_stores_multiple",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestBatchStore::test_batch_tracks_duplicates",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestGraphAnalytics::test_analyze_empty_graph",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestGraphAnalytics::test_analyze_populated_graph",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestReranking::test_recall_reranks",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestReranking::test_min_similarity_filters",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFuzzyCache::test_fuzzy_cache_returns_similar_hits",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFactDeletion::test_delete_existing_fact",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFactDeletion::test_delete_nonexistent_fact",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFactUpdate::test_update_verdict",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFactUpdate::test_update_nonexistent_fact",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_dataset_files_exist_and_non_empty",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_all_training_targets_are_strict_json",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_sentence_id_authorization_in_training_data",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_prompt_fencing_integrity",
+            "duration_seconds": 0.002,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_zero_data_leakage_between_train_and_test",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_edge_case_coverage",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          }
+        ],
+        "junit_sha256": "066378ae0b758c18f44266a7d4319ea3cf5d08799b1b9930f5eb719686927732",
+        "name": "full",
+        "phase": "initial",
+        "exit_code": 1,
+        "environment": "same fresh venv before socksio installation; no execution-only blocker plugin",
+        "log_sha256": "d96363ff7a64e47cd205412ec6740fe47b5bca18885e2e5a1e6633599f0efbc1",
+        "command": [
+          "python",
+          "-m",
+          "pytest",
+          "-q",
+          "--tb=short",
+          "--disable-warnings",
+          "--show-capture=no",
+          "-rs",
+          "--junitxml=<scratch>/baseline-full.xml"
+        ],
+        "duration_seconds": 49.374,
+        "environment_flags": {
+          "HF_HUB_OFFLINE": "1",
+          "TRANSFORMERS_OFFLINE": "1",
+          "CUDA_VISIBLE_DEVICES": "-1",
+          "OMP_NUM_THREADS": "2",
+          "MKL_NUM_THREADS": "2",
+          "ALLOW_DETECTOR_FAST_PATH": "false",
+          "RUN_LIVE_N8N_TESTS": "false",
+          "RUN_LIVE_WEB_TESTS": "false",
+          "HF_HOME": "<scratch>/baseline-hf-cache"
+        }
+      },
+      {
+        "counts": {
+          "passed": 429,
+          "failed": 0,
+          "errors": 7,
+          "skipped": 4
+        },
+        "collected": 440,
+        "nonpassing_tests": [
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_baseline_fallback_is_flagged_degraded",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_real_inference_is_flagged_executed",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_default_result_edge_case_is_degraded",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_diagnostic_fields_default_safe_on_bare_construction",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_first_fact_is_durable_before_close",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_failed_or_silent_save_never_reports_stored[kg]",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_failed_or_silent_save_never_reports_stored[vectors]",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_write_failure_is_classified_without_disclosing_provider_text",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_partial_store_cannot_be_reused_as_a_successful_duplicate",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_duplicate_reuses_existing_confidence_without_promoting_it",
+            "duration_seconds": 0.016,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_verified_legacy_duplicate_can_reuse_real_top_level_confidence",
+            "duration_seconds": 0.016,
+            "status": "error",
+            "reason": "failed on setup with \"ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.\"",
+            "resolution": "RESOLVED_BY_INSTALLING_SOCKSIO"
+          }
+        ],
+        "junit_sha256": "958ee496736a9337669047bcc6878bd680cf28195b86b19846bbaa2c17fc3076",
+        "name": "focused",
+        "phase": "initial",
+        "exit_code": 1,
+        "environment": "same fresh venv before socksio installation; no execution-only blocker plugin",
+        "log_sha256": "f39393834adbee108778bbc1d052c6b3d5e843ad323fdb666a4b9627ffd4dc89",
+        "command": [
+          "python",
+          "-m",
+          "pytest",
+          "-q",
+          "halluciguard_detector/tests",
+          "orchestration/tests/test_grounded_certification.py",
+          "orchestration/tests/test_diagnostic_store_isolation.py",
+          "orchestration/tests/test_final_integration_safety.py",
+          "orchestration/tests/test_llm_detector_verifier_slice.py",
+          "agents/verifier_agent/tests/test_retrieval_execution_status.py",
+          "agents/verifier_agent/tests/test_execution_trace_repair.py",
+          "agents/verifier_agent/tests/test_token_survival.py",
+          "agents/verifier_agent/tests/test_relation_query_priority.py",
+          "agents/verifier_agent/tests/test_incorporation_event_scope.py",
+          "agents/verifier_agent/tests/test_port_backend_trace.py",
+          "agents/verifier_agent/tests/test_verifier_hardening_regression.py",
+          "agents/memory_agent/tests/test_update_consistency.py",
+          "agents/memory_agent/tests/test_store_durability.py",
+          "--tb=short",
+          "--disable-warnings",
+          "--show-capture=no",
+          "-rs",
+          "--junitxml=<scratch>/baseline-focused.xml"
+        ],
+        "duration_seconds": 17.129,
+        "environment_flags": {
+          "HF_HUB_OFFLINE": "1",
+          "TRANSFORMERS_OFFLINE": "1",
+          "CUDA_VISIBLE_DEVICES": "-1",
+          "OMP_NUM_THREADS": "2",
+          "MKL_NUM_THREADS": "2",
+          "ALLOW_DETECTOR_FAST_PATH": "false",
+          "RUN_LIVE_N8N_TESTS": "false",
+          "RUN_LIVE_WEB_TESTS": "false",
+          "HF_HOME": "<scratch>/baseline-hf-cache"
+        }
+      },
+      {
+        "counts": {
+          "passed": 1209,
+          "failed": 0,
+          "errors": 59,
+          "skipped": 25
+        },
+        "collected": 1293,
+        "nonpassing_tests": [
+          {
+            "nodeid": "orchestration/tests/test_verifier_stabilization.py::TestVerifierStabilization::test_single_claim_end_to_end_verification",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_stabilization.py::TestVerifierStabilization::test_wikipedia_adapter_retrieval",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_1_paris_capital_of_france",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_2_eiffel_tower_in_london",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_3_moon_made_of_green_cheese",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_4_aspirin_mild_pain_healthcare",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_pipeline_uses_n8n_evidence_and_runs_python_bge_nli",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_pipeline_fallback_to_python_adapters_on_n8n_failure",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_no_duplicate_retrieval_when_n8n_succeeds",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_live_n8n_health_endpoint",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live n8n tests require RUN_LIVE_N8N_TESTS=true environment variable"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_live_n8n_retrieval_webhook",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live n8n tests require RUN_LIVE_N8N_TESTS=true environment variable"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_pipeline_hardening.py::TestDirectModelDiagnostics::test_direct_deberta_nli_execution",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_pipeline_hardening.py::TestDirectModelDiagnostics::test_direct_bge_reranker_execution",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_baseline_fallback_is_flagged_degraded",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_real_inference_is_flagged_executed",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_default_result_edge_case_is_degraded",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_diagnostic_fields_default_safe_on_bare_construction",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_web_retriever.py::TestLiveIntegration::test_live_tavily_search",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live web tests disabled (set RUN_LIVE_WEB_TESTS=true)"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_web_retriever.py::TestLiveIntegration::test_live_full_chain",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live web tests disabled (set RUN_LIVE_WEB_TESTS=true)"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestHealthEndpoint::test_health",
+            "duration_seconds": 0.014,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestDomainsEndpoint::test_list_domains",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestStoreEndpoint::test_store_fact",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestStoreEndpoint::test_store_with_evidence",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestRecallEndpoint::test_recall",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestCacheEndpoints::test_check_cache_miss",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestCacheEndpoints::test_check_cache_hit",
+            "duration_seconds": 0.009,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestCacheEndpoints::test_invalidate_cache",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestTrustEndpoints::test_update_trust",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestTrustEndpoints::test_get_trust",
+            "duration_seconds": 0.03,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestTrustEndpoints::test_get_trust_not_found",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestPatternEndpoints::test_query_patterns",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestPatternEndpoints::test_domain_patterns",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestKgEndpoints::test_kg_stats",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestKgEndpoints::test_entity_not_found",
+            "duration_seconds": 0.014,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestVectorEndpoints::test_vector_search",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api.py::TestStatsEndpoint::test_stats",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestBatchEndpoint::test_store_batch",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestAnalyticsEndpoint::test_kg_analytics",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestMetricsEndpoint::test_metrics",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestDuplicateEndpoint::test_duplicate_store_via_api",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestApiKeyAuth::test_requires_api_key_when_configured",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestApiKeyAuth::test_allows_valid_api_key",
+            "duration_seconds": 0.023,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestApiKeyAuth::test_metrics_requires_auth_when_configured",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestApiKeyAuth::test_no_key_configured_allows_access",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestDeleteFactEndpoint::test_delete_fact",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestDeleteFactEndpoint::test_delete_nonexistent",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestUpdateFactEndpoint::test_update_fact",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_api_v11.py::TestUpdateFactEndpoint::test_update_nonexistent",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStoreFact::test_store_basic_fact",
+            "duration_seconds": 0.009,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStoreFact::test_store_fact_with_evidence",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStoreFact::test_store_updates_cache",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStoreFact::test_store_hallucination_updates_patterns",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestRecall::test_recall_returns_similar_facts",
+            "duration_seconds": 0.015,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestRecall::test_recall_includes_cache",
+            "duration_seconds": 0.014,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestRecall::test_recall_includes_patterns",
+            "duration_seconds": 0.009,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_memory_agent.py::TestStats::test_get_stats",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_first_fact_is_durable_before_close",
+            "duration_seconds": 0.009,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_failed_or_silent_save_never_reports_stored[kg]",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_failed_or_silent_save_never_reports_stored[vectors]",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_write_failure_is_classified_without_disclosing_provider_text",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_partial_store_cannot_be_reused_as_a_successful_duplicate",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_duplicate_reuses_existing_confidence_without_promoting_it",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_verified_legacy_duplicate_can_reuse_real_top_level_confidence",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestDuplicateDetection::test_identical_claim_is_duplicate",
+            "duration_seconds": 0.015,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestDuplicateDetection::test_near_duplicate_flagged",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestContradictionDetection::test_conflicting_verdict_raises_alert",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestContradictionDetection::test_same_verdict_no_contradiction",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestBatchStore::test_batch_stores_multiple",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestBatchStore::test_batch_tracks_duplicates",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestGraphAnalytics::test_analyze_empty_graph",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestGraphAnalytics::test_analyze_populated_graph",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestReranking::test_recall_reranks",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestReranking::test_min_similarity_filters",
+            "duration_seconds": 0.009,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFuzzyCache::test_fuzzy_cache_returns_similar_hits",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFactDeletion::test_delete_existing_fact",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFactDeletion::test_delete_nonexistent_fact",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFactUpdate::test_update_verdict",
+            "duration_seconds": 0.015,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_v11_features.py::TestFactUpdate::test_update_nonexistent_fact",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_dataset_files_exist_and_non_empty",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_all_training_targets_are_strict_json",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_sentence_id_authorization_in_training_data",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_prompt_fencing_integrity",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_zero_data_leakage_between_train_and_test",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_edge_case_coverage",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks"
+          }
+        ],
+        "junit_sha256": "ffb0c20d17eb16237e627e2e64dd24c570d553ff500db7d8583dffd40bdcf6d7",
+        "name": "full",
+        "phase": "intermediate",
+        "exit_code": 1,
+        "environment": "after socksio and Verifier blocker plugin; before public Memory model cache and Trio installation",
+        "log_sha256": "d263fa57dc5d17cbb1ba2d9af6ed02ef6cf8ccd2ace2122b27a5beeec5957966",
+        "command": [
+          "python",
+          "-m",
+          "pytest",
+          "-q",
+          "--tb=short",
+          "--disable-warnings",
+          "--show-capture=no",
+          "-rs",
+          "-p",
+          "baseline_blocked",
+          "--junitxml=<scratch>/baseline-full.xml"
+        ],
+        "duration_seconds": 250.333,
+        "environment_flags": {
+          "HF_HUB_OFFLINE": "1",
+          "TRANSFORMERS_OFFLINE": "1",
+          "CUDA_VISIBLE_DEVICES": "-1",
+          "OMP_NUM_THREADS": "2",
+          "MKL_NUM_THREADS": "2",
+          "ALLOW_DETECTOR_FAST_PATH": "false",
+          "RUN_LIVE_N8N_TESTS": "false",
+          "RUN_LIVE_WEB_TESTS": "false",
+          "HF_HOME": "<scratch>/baseline-hf-cache",
+          "PYTHONPATH": "<scratch>"
+        }
+      },
+      {
+        "counts": {
+          "passed": 429,
+          "failed": 0,
+          "errors": 7,
+          "skipped": 4
+        },
+        "collected": 440,
+        "nonpassing_tests": [
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_baseline_fallback_is_flagged_degraded",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_real_inference_is_flagged_executed",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_default_result_edge_case_is_degraded",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_diagnostic_fields_default_safe_on_bare_construction",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_first_fact_is_durable_before_close",
+            "duration_seconds": 0.012,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_failed_or_silent_save_never_reports_stored[kg]",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_failed_or_silent_save_never_reports_stored[vectors]",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_write_failure_is_classified_without_disclosing_provider_text",
+            "duration_seconds": 0.01,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_partial_store_cannot_be_reused_as_a_successful_duplicate",
+            "duration_seconds": 0.009,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_duplicate_reuses_existing_confidence_without_promoting_it",
+            "duration_seconds": 0.013,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          },
+          {
+            "nodeid": "agents/memory_agent/tests/test_store_durability.py::test_verified_legacy_duplicate_can_reuse_real_top_level_confidence",
+            "duration_seconds": 0.011,
+            "status": "error",
+            "reason": "failed on setup with \"OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.\nCheck your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.\"",
+            "resolution": "RESOLVED_BY_CACHING_PUBLIC_MEMORY_EMBEDDING_MODEL"
+          }
+        ],
+        "junit_sha256": "7ae32c4b82ed0f8f60caf0ee733b63a3d3b83707cd91841e5acbd167d4ca6ac0",
+        "name": "focused",
+        "phase": "intermediate",
+        "exit_code": 1,
+        "environment": "after socksio and Verifier blocker plugin; before public Memory model cache and Trio installation",
+        "log_sha256": "e2aa61261f2a3c2f7ef62220805e5e47214c806ee2c49bbaaa7ab6cd53aef424",
+        "command": [
+          "python",
+          "-m",
+          "pytest",
+          "-q",
+          "halluciguard_detector/tests",
+          "orchestration/tests/test_grounded_certification.py",
+          "orchestration/tests/test_diagnostic_store_isolation.py",
+          "orchestration/tests/test_final_integration_safety.py",
+          "orchestration/tests/test_llm_detector_verifier_slice.py",
+          "agents/verifier_agent/tests/test_retrieval_execution_status.py",
+          "agents/verifier_agent/tests/test_execution_trace_repair.py",
+          "agents/verifier_agent/tests/test_token_survival.py",
+          "agents/verifier_agent/tests/test_relation_query_priority.py",
+          "agents/verifier_agent/tests/test_incorporation_event_scope.py",
+          "agents/verifier_agent/tests/test_port_backend_trace.py",
+          "agents/verifier_agent/tests/test_verifier_hardening_regression.py",
+          "agents/memory_agent/tests/test_update_consistency.py",
+          "agents/memory_agent/tests/test_store_durability.py",
+          "--tb=short",
+          "--disable-warnings",
+          "--show-capture=no",
+          "-rs",
+          "-p",
+          "baseline_blocked",
+          "--junitxml=<scratch>/baseline-focused.xml"
+        ],
+        "duration_seconds": 16.994,
+        "environment_flags": {
+          "HF_HUB_OFFLINE": "1",
+          "TRANSFORMERS_OFFLINE": "1",
+          "CUDA_VISIBLE_DEVICES": "-1",
+          "OMP_NUM_THREADS": "2",
+          "MKL_NUM_THREADS": "2",
+          "ALLOW_DETECTOR_FAST_PATH": "false",
+          "RUN_LIVE_N8N_TESTS": "false",
+          "RUN_LIVE_WEB_TESTS": "false",
+          "HF_HOME": "<scratch>/baseline-hf-cache",
+          "PYTHONPATH": "<scratch>"
+        }
+      }
+    ],
+    "final_runs": [
+      {
+        "name": "full",
+        "command": [
+          "python",
+          "-m",
+          "pytest",
+          "-q",
+          "--tb=short",
+          "--disable-warnings",
+          "--show-capture=no",
+          "-rs",
+          "-p",
+          "baseline_blocked",
+          "--junitxml=<scratch>/baseline-full.xml"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 379.125,
+        "counts": {
+          "passed": 1282,
+          "failed": 0,
+          "errors": 0,
+          "skipped": 25
+        },
+        "collected": 1307,
+        "nonpassing_tests": [
+          {
+            "nodeid": "orchestration/tests/test_verifier_stabilization.py::TestVerifierStabilization::test_single_claim_end_to_end_verification",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited",
+            "classification": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_stabilization.py::TestVerifierStabilization::test_wikipedia_adapter_retrieval",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited",
+            "classification": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_1_paris_capital_of_france",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited",
+            "classification": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_2_eiffel_tower_in_london",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited",
+            "classification": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_3_moon_made_of_green_cheese",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited",
+            "classification": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_4_aspirin_mild_pain_healthcare",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited",
+            "classification": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_pipeline_uses_n8n_evidence_and_runs_python_bge_nli",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success",
+            "classification": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_pipeline_fallback_to_python_adapters_on_n8n_failure",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success",
+            "classification": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_no_duplicate_retrieval_when_n8n_succeeds",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success",
+            "classification": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_live_n8n_health_endpoint",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live n8n tests require RUN_LIVE_N8N_TESTS=true environment variable",
+            "classification": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_n8n_retrieval.py::test_live_n8n_retrieval_webhook",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "Live n8n tests require RUN_LIVE_N8N_TESTS=true environment variable",
+            "classification": "BLOCKED_LIVE_VERIFIER"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_pipeline_hardening.py::TestDirectModelDiagnostics::test_direct_deberta_nli_execution",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success",
+            "classification": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_pipeline_hardening.py::TestDirectModelDiagnostics::test_direct_bge_reranker_execution",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success",
+            "classification": "BLOCKED_REAL_VERIFIER_MODELS"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_baseline_fallback_is_flagged_degraded",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")",
+            "classification": "OBSOLETE_HALUEVAL_IMPORT"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_real_inference_is_flagged_executed",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")",
+            "classification": "OBSOLETE_HALUEVAL_IMPORT"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_default_result_edge_case_is_degraded",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")",
+            "classification": "OBSOLETE_HALUEVAL_IMPORT"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_diagnostic_fields_default_safe_on_bare_construction",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")",
+            "classification": "OBSOLETE_HALUEVAL_IMPORT"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_web_retriever.py::TestLiveIntegration::test_live_tavily_search",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "Live web tests disabled (set RUN_LIVE_WEB_TESTS=true)",
+            "classification": "UNVERIFIED_OPT_IN_WEB"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_web_retriever.py::TestLiveIntegration::test_live_full_chain",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "Live web tests disabled (set RUN_LIVE_WEB_TESTS=true)",
+            "classification": "UNVERIFIED_OPT_IN_WEB"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_dataset_files_exist_and_non_empty",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks",
+            "classification": "UNRESOLVED_CORRECTOR_CURRICULUM"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_all_training_targets_are_strict_json",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks",
+            "classification": "UNRESOLVED_CORRECTOR_CURRICULUM"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_sentence_id_authorization_in_training_data",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks",
+            "classification": "UNRESOLVED_CORRECTOR_CURRICULUM"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_prompt_fencing_integrity",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks",
+            "classification": "UNRESOLVED_CORRECTOR_CURRICULUM"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_zero_data_leakage_between_train_and_test",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks",
+            "classification": "UNRESOLVED_CORRECTOR_CURRICULUM"
+          },
+          {
+            "nodeid": "agents/corrector_agent/tests/test_step4a_contract_alignment.py::test_edge_case_coverage",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "contract_v4 curriculum dataset not present; build it via the training pipeline before enabling these checks",
+            "classification": "UNRESOLVED_CORRECTOR_CURRICULUM"
+          }
+        ],
+        "junit_sha256": "f6a3c50712e87453925a613e938268b8d8a9421f23f19559eff9fe168445d4a2",
+        "log_sha256": "2fa5aa4d2ac98653adc5769374e16fcc64b3fb50cbf473d6c055728a5e105fab"
+      },
+      {
+        "name": "focused",
+        "command": [
+          "python",
+          "-m",
+          "pytest",
+          "-q",
+          "halluciguard_detector/tests",
+          "orchestration/tests/test_grounded_certification.py",
+          "orchestration/tests/test_diagnostic_store_isolation.py",
+          "orchestration/tests/test_final_integration_safety.py",
+          "orchestration/tests/test_llm_detector_verifier_slice.py",
+          "agents/verifier_agent/tests/test_retrieval_execution_status.py",
+          "agents/verifier_agent/tests/test_execution_trace_repair.py",
+          "agents/verifier_agent/tests/test_token_survival.py",
+          "agents/verifier_agent/tests/test_relation_query_priority.py",
+          "agents/verifier_agent/tests/test_incorporation_event_scope.py",
+          "agents/verifier_agent/tests/test_port_backend_trace.py",
+          "agents/verifier_agent/tests/test_verifier_hardening_regression.py",
+          "agents/memory_agent/tests/test_update_consistency.py",
+          "agents/memory_agent/tests/test_store_durability.py",
+          "--tb=short",
+          "--disable-warnings",
+          "--show-capture=no",
+          "-rs",
+          "-p",
+          "baseline_blocked",
+          "--junitxml=<scratch>/baseline-focused.xml"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 16.299,
+        "counts": {
+          "passed": 436,
+          "failed": 0,
+          "errors": 0,
+          "skipped": 4
+        },
+        "collected": 440,
+        "nonpassing_tests": [
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_baseline_fallback_is_flagged_degraded",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")",
+            "classification": "OBSOLETE_HALUEVAL_IMPORT"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_real_inference_is_flagged_executed",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")",
+            "classification": "OBSOLETE_HALUEVAL_IMPORT"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_default_result_edge_case_is_degraded",
+            "duration_seconds": 0.001,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")",
+            "classification": "OBSOLETE_HALUEVAL_IMPORT"
+          },
+          {
+            "nodeid": "agents/verifier_agent/tests/test_verifier_hardening_regression.py::TestDetectorDiagnostics::test_diagnostic_fields_default_safe_on_bare_construction",
+            "duration_seconds": 0.0,
+            "status": "skipped",
+            "reason": "detector deps unavailable: ModuleNotFoundError(\"No module named 'agents.detector_agent'\")",
+            "classification": "OBSOLETE_HALUEVAL_IMPORT"
+          }
+        ],
+        "junit_sha256": "ac31ce68715ad793a0ee6d68a824da4229713a1c80d5c8313fdb548e6908e058",
+        "log_sha256": "4a4b254a9616a7db841d56ef5d66164b72729922fb0673c88ad123106a6289f2"
+      },
+      {
+        "name": "schema",
+        "command": [
+          "python",
+          "-m",
+          "pytest",
+          "-q",
+          "agents/verifier_agent/tests/test_nli_canonicalization.py",
+          "agents/verifier_agent/tests/test_token_survival.py",
+          "--tb=short",
+          "--disable-warnings",
+          "--show-capture=no",
+          "-p",
+          "baseline_blocked",
+          "--junitxml=<scratch>/baseline-schema.xml"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 7.879,
+        "counts": {
+          "passed": 6,
+          "failed": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "collected": 6,
+        "nonpassing_tests": [],
+        "junit_sha256": "95844182adadefe951c3176d6b2304dd33e4f78d0d0a1e30ce473cfe2ccee9f6",
+        "log_sha256": "89e67f5f1f6b3e61ee61477716e27253e4f30f3b3d9ebc2f1b893753e046d30d"
+      },
+      {
+        "name": "compileall",
+        "command": [
+          "python",
+          "-m",
+          "compileall",
+          "-q",
+          "halluciguard_detector",
+          "agents/verifier_agent",
+          "agents/memory_agent",
+          "orchestration",
+          "services",
+          "scripts/evaluate_paired_detector.py",
+          "scripts/smoke_retrieval_execution.py",
+          "scripts/trace_pipeline_execution.py"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 0.044,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "execution_only_blocker_plugin": {
+      "source": "\"\"\"Execution-only exclusions for unavailable live/model prerequisites; no test substitution.\"\"\"\nimport pytest\n\nLIVE = {\n    'orchestration/tests/test_verifier_stabilization.py::TestVerifierStabilization::test_wikipedia_adapter_retrieval',\n    'orchestration/tests/test_verifier_stabilization.py::TestVerifierStabilization::test_single_claim_end_to_end_verification',\n    'orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_1_paris_capital_of_france',\n    'orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_2_eiffel_tower_in_london',\n    'orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_3_moon_made_of_green_cheese',\n    'orchestration/tests/test_verifier_v1_stabilization.py::TestVerifierV1Stabilization::test_4_aspirin_mild_pain_healthcare',\n}\nMODELS = {\n    'agents/verifier_agent/tests/test_n8n_retrieval.py::test_pipeline_uses_n8n_evidence_and_runs_python_bge_nli',\n    'agents/verifier_agent/tests/test_n8n_retrieval.py::test_pipeline_fallback_to_python_adapters_on_n8n_failure',\n    'agents/verifier_agent/tests/test_n8n_retrieval.py::test_no_duplicate_retrieval_when_n8n_succeeds',\n    'agents/verifier_agent/tests/test_pipeline_hardening.py::TestDirectModelDiagnostics::test_direct_deberta_nli_execution',\n    'agents/verifier_agent/tests/test_pipeline_hardening.py::TestDirectModelDiagnostics::test_direct_bge_reranker_execution',\n}\n\ndef pytest_collection_modifyitems(items):\n    for item in items:\n        if item.nodeid in LIVE:\n            item.add_marker(pytest.mark.skip(reason='BLOCKED/UNVERIFIED: live Verifier retrieval requires unavailable owner laptop n8n or external network; no live check is credited'))\n        elif item.nodeid in MODELS:\n            item.add_marker(pytest.mark.skip(reason='BLOCKED/UNVERIFIED: real Verifier BGE/DeBERTa weights are absent from the fresh offline cache; mock contract checks do not establish real-model success'))\n",
+      "sha256": "8a21ee534c074d0e9c3131861dbc6650fbd3f2fd31855a3522ba0c88f3509e47",
+      "scope": "11 exact test nodeids, only for unavailable live/model prerequisites; no repository test/source changes; source embedded for reproducible replay"
+    },
+    "prior_full_suite": {
+      "passed": 1293,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 14
+    },
+    "protected_tracked_files_checked": 732,
+    "protected_tracked_file_hash_mismatches": [],
+    "production_code_changed": false,
+    "diff_check_exit_code": 0,
+    "deviation_from_prior_full_suite": {
+      "passed": -11,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 11
+    }
+  },
+  "publication": {
+    "planned_files": [
+      "docs/reports/production-readiness-baseline-20261003.md",
+      "docs/reports/production-readiness-baseline-20261003.manifest.json"
+    ],
+    "excluded": "No new weights, datasets, credentials, Memory stores, raw traces, backups or raw test logs are committed. Existing artifacts are indexed by path/hash only.",
+    "pull_request_requested": false
+  }
+}
