@@ -230,18 +230,28 @@ def test_pipeline_relevance_gate_filters_before_nli():
     assert [passage.snippet for passage in relevant] == ["Relevant support"]
 
 
-def test_pipeline_relevance_gate_keeps_only_strongest_passage_per_source():
+def test_pipeline_relevance_gate_keeps_strongest_duplicate_and_distinct_source_facts():
+    # A single page can contain conflicting or complementary factual excerpts.
+    # Source identity alone must not erase one before NLI can evaluate it.
+    statement = "Aurora Circuit was founded in 1998."
+    distinct = "Aurora Circuit was founded in 1999."
     passages = [
-        _passage("general", "Direct statement").model_copy(update={"relevance_score": 0.9}),
-        _passage("general", "Tangential page").model_copy(update={"relevance_score": 0.7}),
+        _passage("general", statement).model_copy(update={"relevance_score": 0.7}),
+        _passage("general", statement).model_copy(update={"relevance_score": 0.9}),
+        _passage("general", distinct).model_copy(update={"relevance_score": 0.8}),
         _passage("second_source", "Independent statement").model_copy(update={"relevance_score": 0.8}),
+        _passage("general", "Low-relevance excerpt").model_copy(update={"relevance_score": 0.1}),
     ]
 
     relevant = VerificationPipeline._select_relevant_passages(passages)
 
     assert [passage.snippet for passage in relevant] == [
-        "Direct statement", "Independent statement"
+        statement, distinct, "Independent statement"
     ]
+    assert relevant[0] is passages[1]
+    assert sum(passage.snippet == statement for passage in relevant) == 1
+    assert relevant[0].url == relevant[1].url
+    assert passages[-1] not in relevant
 
 
 def test_aspirin_like_authoritative_evidence_reaches_verified_aggregation():

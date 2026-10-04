@@ -254,8 +254,8 @@ async def test_hybrid_primary_then_fallback(enhanced, mock_primary):
     assert trace.tavily.called is True
 
 
-# Test 12: DuplicateRemover canonical URL deduplication
-def test_duplicate_remover_canonical_url_dedup():
+# Test 12: Canonical document identity must not erase different excerpts.
+def test_duplicate_remover_canonical_url_preserves_distinct_excerpts():
     from aggregation.duplicate_remover import DuplicateRemover
 
     remover = DuplicateRemover()
@@ -266,13 +266,14 @@ def test_duplicate_remover_canonical_url_dedup():
     ]
 
     deduped = remover.remove_duplicates(passages)
-    assert len(deduped) == 2
+    assert len(deduped) == 3
     assert deduped[0].url.startswith("https://example.com/article")
-    assert deduped[1].url == "https://example.com/different-article"
+    assert deduped[1].snippet == passages[1].snippet
+    assert deduped[2].url == "https://example.com/different-article"
 
 
-# Test 13: DuplicateRemover Jaccard overlap > 85% deduplication
-def test_duplicate_remover_jaccard_overlap():
+# Test 13: High overlap is not proof of equality; "today" adds a qualifier.
+def test_duplicate_remover_jaccard_overlap_preserves_temporal_qualifier():
     from aggregation.duplicate_remover import DuplicateRemover
 
     remover = DuplicateRemover(overlap_threshold=0.85)
@@ -287,9 +288,10 @@ def test_duplicate_remover_jaccard_overlap():
     ]
 
     deduped = remover.remove_duplicates(passages)
-    assert len(deduped) == 2
+    assert len(deduped) == 3
     assert deduped[0].snippet == base_text
-    assert deduped[1].snippet == different_text
+    assert deduped[1].snippet == similar_text
+    assert deduped[2].snippet == different_text
 
 
 # Test 14: RetrievalContext request-local contextvars isolation
@@ -344,8 +346,8 @@ def test_query_expander_relations():
     assert any(q.lower() == "microsoft founded by" for q in queries_markdown)
 
 
-# Test 16: DuplicateRemover URL-less title + source deduplication
-def test_duplicate_remover_title_source_fallback():
+# Test 16: A title/source identifies a document, not its individual passages.
+def test_duplicate_remover_title_source_preserves_distinct_excerpts():
     from aggregation.duplicate_remover import DuplicateRemover
 
     remover = DuplicateRemover()
@@ -356,8 +358,9 @@ def test_duplicate_remover_title_source_fallback():
     ]
 
     deduped = remover.remove_duplicates(passages)
-    assert len(deduped) == 2
+    assert len(deduped) == 3
     assert deduped[0].title == "WHO Report"
-    assert deduped[1].title == "CDC Guidance"
+    assert deduped[1].snippet == passages[1].snippet
+    assert deduped[2].title == "CDC Guidance"
 
 

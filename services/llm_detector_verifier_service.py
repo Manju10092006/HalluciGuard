@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import sys
 import uuid
@@ -12,6 +13,68 @@ from halluciguard_detector import DetectorAgent
 from services.base_llm_service import BaseLLMConfig, BaseLLMService, GenerationResult
 
 logger = logging.getLogger(__name__)
+
+
+def _detector_record(result: Any) -> dict[str, Any]:
+    """Normalize triage diagnostics without treating missing output as success."""
+    if not isinstance(result, dict):
+        raise ValueError("Detector output must be a dictionary")
+    for field in ("hallucination_probability", "confidence_score"):
+        raw = result.get(field)
+        if raw is not None and (
+            isinstance(raw, bool) or not math.isfinite(float(raw))
+            or not 0.0 <= float(raw) <= 1.0
+        ):
+            raise ValueError("Invalid detector numeric output")
+    status = str(result.get("status", "unavailable")).lower()
+    degraded = bool(result.get("detector_degraded")) or status != "completed"
+    risk_tier = str(result.get("risk_level", "UNKNOWN")).upper()
+    next_action = str(result.get("next_action", "Verify")).upper()
+    decision = "ACCEPT" if (
+        not degraded and risk_tier == "LOW" and next_action == "ACCEPT"
+    ) else "VERIFY"
+    model_source = str(result.get("model_source", "halluciguard_detector"))
+    claims = result.get("claims") or []
+    if not isinstance(claims, list) or any(not isinstance(c, dict) for c in claims):
+        raise ValueError("Invalid detector claims")
+    return {
+        "status": status,
+        "confidence_score": result.get("confidence_score"),
+        "hallucination_probability": result.get("hallucination_probability"),
+        "risk_tier": risk_tier,
+        "decision": decision,
+        "model_source": model_source,
+        "detector_model_loaded": result.get("model_loaded") is True,
+        "detector_inference_executed": result.get("inference_executed") is True,
+        "detector_degraded": degraded,
+        "detector_model_source": model_source,
+        "probability_available": result.get("hallucination_probability") is not None,
+        "grounded": result.get("grounded") is True,
+        "claims": claims,
+        "phase1": result.get("phase1"),
+        "verification_reason": result.get("verification_reason"),
+    }
+
+
+def _valid_phase1_bypass(record: Any, claims: list[dict[str, Any]]) -> bool:
+    """Only the calibrated Phase 1 fast path can authorize evidence-free bypass."""
+    if not claims or any(not str(c.get("text") or "").strip() for c in claims):
+        return False
+    if not isinstance(record, dict) or not (
+        record.get("bypass_eligible") is True and record.get("status") == "scored"
+        and record.get("mode") == "fast_path"
+        and isinstance(record.get("head_id"), str) and record["head_id"].strip()
+        and isinstance(record.get("calibration_id"), str) and record["calibration_id"].strip()
+    ):
+        return False
+    risks = record.get("calibrated_risks")
+    if not isinstance(risks, (list, tuple)) or not risks or len(risks) != len(claims):
+        return False
+    values = [*risks, record.get("response_risk")]
+    if any(isinstance(v, bool) or not isinstance(v, (int, float))
+           or not math.isfinite(v) or not 0.0 <= v <= 1.0 for v in values):
+        return False
+    return math.isclose(max(risks), record["response_risk"], rel_tol=0.0, abs_tol=1e-9)
 
 
 def _load_verifier_imports():
@@ -59,17 +122,11 @@ class LLMDetectorVerifierSliceResult:
 
 
 class BaseLLMDetectorVerifierService:
-    """Orchestrates Step 3 vertical slice: Base LLM -> Detector -> conditional Verifier.
-    
-    Data Flow:
-        user_query -> BaseLLMService -> draft_response -> DetectorAgent -> Risk Level
-                                                               │
-                                                     ┌─────────┴─────────┐
-                                                     │                   │
-                                                   LOW              MEDIUM/HIGH
-                                                     │                   │
-                                                     ▼                   ▼
-                                                  ACCEPT             Verifier -> Evidence & NLI
+    """Generate, triage, and verify a draft before returning evidence and NLI.
+
+    Verification is the default, including when initial triage is unavailable.
+    Bypass requires an explicitly enabled, validated Phase 1 calibrated fast
+    path. Optional detector certification describes actual execution only.
     """
 
     def __init__(
@@ -98,7 +155,7 @@ class BaseLLMDetectorVerifierService:
         Args:
             user_query: The user's question or prompt.
             domain: The verification domain (e.g., general, biomedical).
-            force_verifier: If True, skip detector gating and always run the verifier.
+            force_verifier: If True, always run the verifier for a valid draft.
             conversation_history: Optional conversation context.
             generation_mode: Either "normal" or "stress_test".
             temperature: Optional temperature override.
@@ -151,67 +208,50 @@ class BaseLLMDetectorVerifierService:
                 llm_response=draft_response,
             )
 
-            status = str(detection_result.get("status", "completed")).lower()
-            completed = status == "completed"
-            risk_tier = str(detection_result.get("risk_level", "HIGH")).upper()
-            next_act_str = str(detection_result.get("next_action", "Verify")).upper()
-            decision = "VERIFY" if next_act_str == "VERIFY" else "ACCEPT"
-            model_source = str(detection_result.get("model_source", "halluciguard_detector"))
-            # Prefer the explicit degraded flag and preserve execution diagnostics.
-            degraded = bool(detection_result.get("detector_degraded", not completed))
-
-            detector_dict: dict[str, Any] = {
-                "confidence_score": detection_result.get("confidence_score"),
-                "hallucination_probability": detection_result.get("hallucination_probability"),
-                "risk_tier": risk_tier,
-                "decision": decision,
-                "model_source": model_source,
-                # §6 execution diagnostics — prove real inference vs. degraded fallback.
-                "detector_model_loaded": bool(detection_result.get("model_loaded", False)),
-                "detector_inference_executed": bool(detection_result.get("inference_executed", False)),
-                "detector_degraded": degraded,
-                "detector_model_source": model_source,
-                "probability_available": detection_result.get("hallucination_probability") is not None,
-                "grounded": bool(detection_result.get("grounded", False)),
-                "claims": detection_result.get("claims", []),
-                "verification_reason": detection_result.get("verification_reason"),
-            }
+            detector_dict = _detector_record(detection_result)
         except Exception as exc:
-            logger.error(
-                f"[LLMDetectorVerifierService] Detector execution failed: {exc}",
-                exc_info=True,
-            )
-            detector_dict = {
+            logger.warning("Detector unavailable (%s); continuing with evidence verification.",
+                           type(exc).__name__)
+            detector_dict = _detector_record({
                 "status": "failed",
-                "error": f"Detector error: {type(exc).__name__} — {str(exc)[:200]}",
-                "risk_tier": "UNKNOWN",
-                "decision": "VERIFY",
-            }
-            # Detector failure prevents Verifier execution
-            return LLMDetectorVerifierSliceResult(
-                user_query=user_query,
-                draft_response=draft_response,
-                generation=gen_dict,
-                detector=detector_dict,
-                verifier=None,
+                "risk_level": "HIGH",
+                "next_action": "Verify",
+                "detector_degraded": True,
+                "model_source": "halluciguard_detector_unavailable",
+                "verification_reason": "detector_failure",
+            })
+            detector_dict["error"] = (
+                f"Detector error: {type(exc).__name__}; continuing with evidence verification."
             )
 
-        # §28 certification: a degraded detector (baseline heuristic) must not be
-        # silently certified. Fail-closed BEFORE routing to the verifier. Import is
-        # guarded so normal (non-certification) runs are never affected.
+        # Certification needs retrieved evidence. Initial triage cannot satisfy
+        # the grounded-inference proof, but must not prevent the Verifier running.
+        certification_enabled = os.getenv("CERTIFICATION_MODE", "").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
         try:
             _enforce_detector, _cert_from_env, _CertErr = _load_certification()
+            certification_enabled = _cert_from_env()
         except Exception as _imp_exc:  # pragma: no cover - defensive
             _enforce_detector = None
-            logger.debug("Certification helpers unavailable: %s", _imp_exc)
-        if _enforce_detector is not None:
-            _enforce_detector(detector_dict, _cert_from_env())
+            logger.debug("Certification helpers unavailable (%s).", type(_imp_exc).__name__)
 
         # Step 3: Conditional Verifier Routing
+        risk_tier = detector_dict["risk_tier"]
+        decision = detector_dict["decision"]
+        always_verify = os.getenv("ALWAYS_VERIFY", "true").lower() in {"true", "1"}
+        allow_fast_path = os.getenv("ALLOW_DETECTOR_FAST_PATH", "false").lower() in {"true", "1"}
         should_verify = (
             force_verifier
-            or decision == "VERIFY"
-            or risk_tier in {"MEDIUM", "HIGH"}
+            or always_verify
+            or not allow_fast_path
+            or certification_enabled
+            or generation_mode == "stress_test"
+            or detector_dict["detector_degraded"]
+            or detector_dict["status"] != "completed"
+            or decision != "ACCEPT"
+            or risk_tier != "LOW"
+            or not _valid_phase1_bypass(detector_dict["phase1"], detector_dict["claims"])
         )
         if not should_verify:
             logger.info(
@@ -363,16 +403,35 @@ class BaseLLMDetectorVerifierService:
                 "claim_evidence": claims_data,
             }
         except Exception as exc:
-            logger.error(
-                f"[LLMDetectorVerifierService] Verifier execution failed cleanly: {exc}",
-                exc_info=True,
-            )
+            logger.error("Verifier execution failed (%s).", type(exc).__name__)
             verifier_dict = {
                 "executed": True,
                 "status": "failed",
-                "error": f"Verifier error: {type(exc).__name__} — {str(exc)[:200]}",
+                "error": f"Verifier error: {type(exc).__name__}",
                 "claim_evidence": [],
             }
+
+        if certification_enabled:
+            certificate = {"status": "not_certified", "stage": "detector"}
+            detector_dict["certification"] = certificate
+            if _enforce_detector is None:
+                certificate["reason"] = "Certification helpers unavailable."
+            elif verifier_dict.get("status") == "failed":
+                certificate["reason"] = "Verifier execution failed; no grounded detector proof."
+            else:
+                try:
+                    # This slice has no post-retrieval detector stage. Report
+                    # certification of its actual execution, without inventing
+                    # an additional model call or certifying skipped inference.
+                    _enforce_detector(detector_dict, True)
+                    if not (detector_dict["detector_model_loaded"] and detector_dict["grounded"]):
+                        raise _CertErr("detector", "Grounded model execution proof is incomplete.")
+                    certificate["status"] = "certified"
+                except Exception as exc:
+                    certificate["reason"] = (
+                        "This slice did not demonstrate grounded detector inference "
+                        f"({type(exc).__name__}); pre-retrieval triage is not a truth verdict."
+                    )
 
         return LLMDetectorVerifierSliceResult(
             user_query=user_query,

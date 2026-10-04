@@ -67,7 +67,7 @@ Retrieval may use the n8n webhook broker when configured. The Python Verifier ow
 |---|---|---|---|
 | Base LLM | User query and optional history | Candidate response and provider trace | Generates text; assigns no factual trust |
 | Claim Analyzer | Candidate response | Atomic factual claims and search queries | Removes opinion, discourse, instructions, and other non-checkable text; does not decide truth |
-| Detector | Query, answer, then retrieved evidence | Calibrated risk, per-sentence labels, routing signal | Triage only; cannot replace verification |
+| Detector | Query, answer, then retrieved evidence | Evidence-conditioned risk, per-sentence labels, availability and routing diagnostics | Triage only; cannot replace verification or establish calibrated open-world correctness |
 | Verifier | Factual claims | Evidence, NLI labels, four-state claim verdicts | Establishes evidence-grounded support, contradiction, conflict, or uncertainty |
 | Judge | Detector and Verifier contracts | `ACCEPT`, `CORRECT`, `VERIFY_AGAIN`, `REJECT`, or `ABSTAIN` | Owns release policy; does not retrieve or rewrite facts |
 | Corrector | Judge-authorized claims and bound evidence | Minimal corrected candidate or explicit failure | May edit only authorized spans and may not invent unsupported facts |
@@ -84,7 +84,7 @@ The production artifact at `artifacts/detector-best/` is a fine-tuned `microsoft
 |---|---:|
 | Train examples | 29,832 |
 | Development examples | 10,873 |
-| Untouched test examples | 18,777 |
+| Recorded test examples | 18,777 |
 | Training run | 1 epoch, batch size 16, seed 42 |
 | Calibration | Temperature scaling, `T = 0.7586` |
 | Decision threshold | `0.6216` |
@@ -94,6 +94,8 @@ The production artifact at `artifacts/detector-best/` is a fine-tuned `microsoft
 | Held-out ECE | `0.1296` |
 
 These are checkpoint metrics from [`test_metrics.json`](artifacts/detector-best/test_metrics.json), not claims of open-world production accuracy. See the [model card](halluciguard_detector/MODEL_CARD.md) and [detector guide](halluciguard_detector/README.md).
+
+No model was retrained or replaced for the October 4 execution repairs. Historical split provenance and prepared-data overlaps limit stronger independence/calibration claims; passing engineering tests does not demonstrate improved contradiction precision or recall.
 
 ## Verification pipeline
 
@@ -134,6 +136,32 @@ This is a live demonstration, not a benchmark. Re-run it with the query-only CLI
 ```powershell
 python demo_7_agents.py "Who founded Microsoft?"
 ```
+
+### Current narrated seven-agent tester
+
+For the readable, source-linked walkthrough of this checkout, use the new tester from the repository root:
+
+```powershell
+python test_walkthrough.py "Who founded Microsoft?" --checkpoint artifacts/detector-best
+```
+
+It makes a real Base LLM call and follows production routing. It prints claim IDs, source URLs, retrieval backend execution/fallback, BGE ranking, observed raw NLI scores, Judge decisions, conditional repair and Memory results. It creates a fresh timestamped directory in your Downloads folder with separate TXT reports for all seven downstream agents and the actual execution JSON. Corrector/ReVerifier are `NOT_REQUIRED` when the Judge does not request repair; they are not forced or counted as passing.
+
+To test a deliberately incorrect initial answer, **only for this diagnostic**, run:
+
+```powershell
+python test_walkthrough.py "Who founded Microsoft?" --draft "Snehith is the founder of Microsoft." --checkpoint artifacts/detector-best
+```
+
+The October 4 recordings observed a normal Microsoft answer accepted after verification (48.7 seconds) and a supplied incorrect founder claim corrected, re-verified and accepted (116 seconds). Those individual observations are not accuracy or latency benchmarks. A separate LinkedIn year claim was marked verified from a weak fragment, so successful execution is not proof of complete factual grounding.
+
+The runner uses fresh diagnostic Memory under `<report-directory>/runtime/`, not existing production Memory. Inspect it without starting an API or loading models:
+
+```powershell
+python scripts/inspect_memory.py --runtime-dir "<report-directory>/runtime" --show-text
+```
+
+See [running and inspecting all seven agents](docs/seven-agent-validation.md), [Memory storage and inspection](agents/memory_agent/README.md), and the [execution repair change log](docs/reports/execution-repair-review-20261004.md). Missing scores remain unavailable, genuine zero values remain genuine, and insufficient evidence can still withhold an answer.
 
 ## Quick start
 
@@ -212,6 +240,8 @@ Some integration tests require network access, provider credentials, n8n, or mod
 |---|---|
 | System and control flow | [Architecture](docs/architecture.md) |
 | Every agent and contract | [Agents](docs/agents.md) |
+| Seven-agent commands, TXT reports and Memory inspection | [Validation walkthrough](docs/seven-agent-validation.md) |
+| Execution fixes and known remaining issues | [October 4 review](docs/reports/execution-repair-review-20261004.md) |
 | Frontend, backend, `src`, and APIs | [Project structure](docs/project-structure.md) |
 | REST endpoints | [API reference](docs/api.md) |
 | Retrieval and n8n | [Retrieval](docs/retrieval.md) · [n8n](n8n/README.md) |

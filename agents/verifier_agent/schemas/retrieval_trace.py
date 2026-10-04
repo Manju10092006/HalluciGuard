@@ -62,6 +62,10 @@ class ModelExecutionTrace(BaseModel):
     component: str = ""            # "bge_reranker" | "deberta_nli"
     model: str = ""
     loaded: bool = False
+    available: Optional[bool] = None
+    load_attempted: Optional[bool] = None
+    inference_attempted: Optional[bool] = None
+    inference_completed: Optional[bool] = None
     inference_executed: bool = False
     degraded: bool = False
     status: str = "not_run"        # executed | degraded | unavailable | not_run
@@ -69,6 +73,10 @@ class ModelExecutionTrace(BaseModel):
     latency_ms: int = 0
     scored_count: int = 0          # reranker: passages scored
     batch_size: int = 0            # nli: pairs classified
+    returned_count: Optional[int] = None
+    failure_stage: Optional[str] = None
+    error_type: Optional[str] = None
+    fallback_reason: Optional[str] = None
 
 
 class EvidencePassageTrace(BaseModel):
@@ -116,6 +124,7 @@ class GateRelevanceAuditTrace(BaseModel):
     source_confidence_hint: float = 0.0
     gate_time_relevance_signal: float = 0.0
     final_bge_relevance_score: float = 0.0
+    final_bge_inference_executed: bool = False
     signals_agree: bool = True
 
 
@@ -153,6 +162,7 @@ class RetrievalTrace(BaseModel):
     relation_check: Optional[RelationCheckTrace] = None
     gate_relevance_audit: Optional[GateRelevanceAuditTrace] = None
     n8n_trace: Optional[N8NTrace] = None
+    backend_execution: Optional[Dict[str, Any]] = None
     # §26 model-execution proof (populated from reranker/nli .diagnostics()):
     reranker_execution: Optional[ModelExecutionTrace] = None
     nli_execution: Optional[ModelExecutionTrace] = None

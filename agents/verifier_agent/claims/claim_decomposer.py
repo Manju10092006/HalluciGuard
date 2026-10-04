@@ -123,8 +123,9 @@ _PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Coarse segmentation on semicolons, newlines, and numbered-list markers.
-_COARSE_SPLIT_RE = re.compile(r"[;\n]+|(?:^|\s)\d+\.\s+")
+# Numbered-list markers occur at line starts; inline numbers (including years
+# before sentence-ending periods) belong to the claim and must be preserved.
+_COARSE_SPLIT_RE = re.compile(r"[;\n]+|^[ \t]*\d+\.[ \t]+", re.MULTILINE)
 
 _MAX_CLAIMS = 5
 

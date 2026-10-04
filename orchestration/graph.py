@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import sys
 import uuid
@@ -41,6 +42,9 @@ _QUERY_STOPWORDS = frozenset({
     "those", "it", "its", "as", "by", "from", "with", "about", "into", "do",
     "does", "did", "can", "could", "will", "would", "should", "has", "have",
     "had", "there", "their", "his", "her", "you", "your", "i", "me", "my",
+    # Request/discourse verbs are not answer topics. Counting "tell" in
+    # "Tell me about LinkedIn" rejected even an entirely LinkedIn correction.
+    "tell", "explain", "describe", "please", "give", "show",
 })
 
 
@@ -91,7 +95,35 @@ def _answer_addresses_query(query: str, answer: str, threshold: float = 0.6) -> 
     a_tokens = _salient_tokens(answer)
     if not a_tokens:
         return False
-    covered = sum(1 for qt in q_tokens if any(_tokens_match(qt, at) for at in a_tokens))
+    # "Gates and Allen established Microsoft" answers "Who founded
+    # Microsoft?". Literal stemming missed that synonym even after independent
+    # evidence verified the complete candidate. Bind this topicality alias to
+    # the exact queried organization as the establishment object; a mention of
+    # Microsoft AI/headquarters, or an executive job at Microsoft, is not enough.
+    # This never creates support: the Verifier must already have verified it.
+    import re
+    clean_query = re.sub(r"[*_`]", "", query).strip()
+    clean_answer = re.sub(r"[*_`]", "", answer)
+    founding_question = re.fullmatch(
+        r"(?:who\s+(?:co-)?founded|who\s+(?:is|was)\s+(?:the\s+)?(?:co-)?founder\s+of)\s+(.+?)[?.!]*",
+        clean_query, re.IGNORECASE,
+    )
+    founding_alias = False
+    if founding_question:
+        organization = founding_question.group(1).strip()
+        exact_org = re.escape(organization)
+        ending = r"(?=\s*(?:[.,;!?]|$)|\s+(?:on|in|by|with|as)\b)"
+        founding_alias = bool(re.search(
+            r"\bestablished\s+" + exact_org + ending,
+            clean_answer, re.IGNORECASE,
+        ) or re.search(
+            r"\b" + exact_org + r"\s+(?:was|is)\s+established\s+by\b",
+            clean_answer, re.IGNORECASE,
+        ))
+    covered = sum(1 for qt in q_tokens if (
+        any(_tokens_match(qt, at) for at in a_tokens)
+        or (qt == "found" and founding_alias)
+    ))
     return (covered / len(q_tokens)) >= threshold
 
 
@@ -146,6 +178,23 @@ def _failure_update(
     }
 
 
+_ANSWER_SCOPE_INSTRUCTION = (
+    "Answer the user's actual question directly. Include the facts needed to "
+    "answer it, but avoid unsolicited biographies, marketing claims and unrelated "
+    "history. Honor any depth or explanation explicitly requested by the user. "
+    "For a simple question asking who holds a role, give the relevant names and "
+    "role directly; do not add a timeline or repeat the answer in a summary unless "
+    "requested. For a simple factual lookup, use one complete sentence if it "
+    "fully answers the question; do not append another restatement. "
+    "Do not add unsupported exclusivity or rank qualifiers such as "
+    "'sole' or 'primary'. "
+    "Express separate factual assertions as separate complete sentences with "
+    "explicit subjects where possible, so each assertion can be checked. "
+    "Do not claim access to current prices or live evidence you have not seen. "
+    "If a fact is unknown or ambiguous, state that uncertainty rather than inventing it."
+)
+
+
 async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
     """Base LLM node: Generate initial draft using OpenRouter if not pre-supplied."""
     node_start = start_timer()
@@ -181,9 +230,16 @@ async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
 
     try:
         service = BaseLLMService()
+        history = list(state.get("conversation_history") or [])
+        # Keep ordinary answers focused on the requested facts. This does not
+        # supply an answer, suppress requested detail or bypass fact checking.
+        # Extraction/repair consumers use their own prompts; stress mode is
+        # intentionally left unchanged for diagnostics.
+        if state.get("generation_mode", "normal") == "normal":
+            history.insert(0, {"role": "system", "content": _ANSWER_SCOPE_INSTRUCTION})
         result = await service.generate(
             user_query=user_query,
-            conversation_history=state.get("conversation_history", []),
+            conversation_history=history,
             generation_mode=state.get("generation_mode", "normal"),
         )
         gen_result = _dump(result)
@@ -225,7 +281,7 @@ async def _generate_node(state: HalluciGuardState) -> dict[str, Any]:
                 "completed",
                 latency_ms=latency,
                 model=gen_result.get("model"),
-                provider="openrouter",
+                provider=gen_result.get("provider_used") or gen_result.get("provider"),
             ),
         }
     except Exception as exc:
@@ -267,7 +323,13 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
 
         detector = _dump(await asyncio.to_thread(_run_detect))
         next_action = str(detector.get("next_action", ""))
-        risk_level = str(detector.get("risk_level", "LOW")).upper()
+        risk_level = str(detector.get("risk_level", "HIGH")).upper()
+        for field in ("hallucination_probability", "confidence_score"):
+            raw = detector.get(field)
+            if raw is not None and (
+                isinstance(raw, bool) or not math.isfinite(float(raw)) or not 0.0 <= float(raw) <= 1.0
+            ):
+                raise ValueError("Invalid detector numeric output")
         per_claim_results = list(detector.get("per_claim_results") or [])
         atomic_claims = [
             {
@@ -300,15 +362,17 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         allow_fast_path = os.environ.get("ALLOW_DETECTOR_FAST_PATH", "false").lower() in ("true", "1")
         always_verify = os.environ.get("ALWAYS_VERIFY", "true").lower() in ("true", "1")
         is_stress = state.get("generation_mode") == "stress_test"
-        detector_degraded = bool(detector.get("detector_degraded")) or str(detector.get("status", "")).lower() in {"failed", "degraded", "fallback", "unavailable"}
+        detector_degraded = bool(detector.get("detector_degraded")) or str(detector.get("status", "")).lower() != "completed"
+        phase1 = detector.get("phase1") or {}
+        phase1_valid = _valid_phase1_bypass(phase1, len(atomic_claims))
         should_verify = (
             always_verify
             or not allow_fast_path
             or is_stress
             or detector_degraded
-            or not bool((detector.get("phase1") or {}).get("bypass_eligible"))
-            or risk_level in {"MEDIUM", "HIGH"}
-            or next_action.lower().endswith("verify")
+            or not phase1_valid
+            or risk_level != "LOW"
+            or next_action.lower() != "accept"
         )
         route = "verify" if should_verify else "accept"
 
@@ -364,13 +428,48 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
             ),
         }
     except Exception as exc:
+        if str(state.get("llm_response") or "").strip():
+            from .detector_bridge import _failclosed
+            safe_error = RuntimeError(
+                f"Detector unavailable ({type(exc).__name__}); continuing with evidence verification."
+            )
+            update = _failure_update(state, "detector", safe_error,
+                                     retryable=True, error_type=type(exc).__name__)
+            update.pop("terminal_status", None)
+            fallback = _failclosed(type(exc).__name__)
+            update.update({"route": "verify", "verification_status": "verification_required",
+                           "detector": fallback, "detector_result": fallback,
+                           "detected_claims": [{"claim_id": "c1", "text": state["llm_response"],
+                                                "risk_level": "HIGH", "requires_verification": True}]})
+            return update
         return _failure_update(state, "detector", exc)
 
 
+def _valid_phase1_bypass(phase1: Any, claim_count: int) -> bool:
+    """Validate the existing head's record; low grounded NLI risk is not a bypass."""
+    if not isinstance(phase1, dict) or not (
+        phase1.get("bypass_eligible") is True and phase1.get("status") == "scored"
+        and phase1.get("mode") == "fast_path"
+        and isinstance(phase1.get("head_id"), str) and phase1["head_id"]
+        and isinstance(phase1.get("calibration_id"), str) and phase1["calibration_id"]
+    ):
+        return False
+    risks = phase1.get("calibrated_risks")
+    if not isinstance(risks, (list, tuple)) or not risks or len(risks) != claim_count:
+        return False
+    values = [*risks, phase1.get("response_risk")]
+    if any(isinstance(v, bool) or not isinstance(v, (int, float))
+           or not math.isfinite(v) or not 0.0 <= v <= 1.0 for v in values):
+        return False
+    return math.isclose(max(risks), phase1["response_risk"], rel_tol=0.0, abs_tol=1e-9)
+
+
 def _detector_route(state: HalluciGuardState) -> str:
-    if state.get("route") == "error":
-        return "human_escalation"
-    return "verifier" if state.get("route") == "verify" else "accept"
+    if state.get("route") == "accept":
+        return "accept"
+    if state.get("route") == "verify" or str(state.get("llm_response") or "").strip():
+        return "verifier"
+    return "human_escalation"
 
 
 def _get_verifier_imports():
@@ -1139,22 +1238,20 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             or str(uuid.uuid4())
         )
 
-        # BUG-004/013 FIX: Use consistent claim decomposition with fallback.
-        # If decomposition fails, use deterministic sentence-level splitting
-        # instead of creating one giant claim.
-        claim_texts: list[str] = []
+        # Re-extract the corrected answer with the same whole-answer analyzer
+        # used before initial verification. The legacy spaCy decomposer capped
+        # this step at five fragments and could mistake "2003." for a list
+        # marker, so a correction was not checked with equivalent coverage.
+        from services.claim_analyzer import ClaimAnalyzer, fallback_analyze
         try:
-            from agents.verifier_agent.claims.claim_decomposer import ClaimDecomposer
-            claim_texts = ClaimDecomposer().decompose(candidate_text)
+            analysis = await ClaimAnalyzer().analyze(
+                candidate_text, state.get("user_query", ""), domain
+            )
         except Exception:
-            claim_texts = []
-
-        # BUG-004 FIX: Deterministic fallback to sentence-level splitting.
-        # Never create a single giant claim from the entire response.
-        if not claim_texts:
-            import re
-            # Split on sentence boundaries
-            claim_texts = [s.strip() for s in re.split(r'(?<=[.!?])\s+', candidate_text) if s.strip()]
+            analysis = fallback_analyze(
+                candidate_text, state.get("user_query", ""), domain
+            )
+        claim_texts = [c.claim_text for c in analysis.factual_claims if c.claim_text.strip()]
 
         # If still empty or single giant claim, prefer HUMAN_REVIEW
         if not claim_texts:
@@ -1171,6 +1268,21 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
                 "updated_at": utc_now(),
                 "trace": add_trace(state, "reverifier", "failed", reason="claim_decomposition_failed"),
             }
+
+        # A nonempty hosted extraction can still omit a sentence or an adjunct.
+        # Report coverage alone cannot detect that omission. Retain checkable
+        # assertions from the network-free, source-preserving whole-answer
+        # segmentation too. This is a coverage backstop, never a truth verdict;
+        # every added assertion must pass the same authoritative Verifier.
+        backstop = fallback_analyze(candidate_text, state.get("user_query", ""), domain)
+        submitted_texts = {" ".join(text.split()) for text in claim_texts}
+        backstop_claims = []
+        for candidate in backstop.factual_claims:
+            normalized = " ".join(candidate.claim_text.split())
+            if normalized and normalized not in submitted_texts:
+                claim_texts.append(candidate.claim_text)
+                submitted_texts.add(normalized)
+                backstop_claims.append(candidate.to_dict())
 
         suspicious_claims = [
             SuspiciousClaim(claim_id=f"rev-{idx+1}", text=txt)
@@ -1216,6 +1328,19 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             1 for r in canonical_v_res.claim_reports
             if str(getattr(r, "verdict", "")).lower() in ("contradicted", "verdictlabel.contradicted")
         )
+        requested_claims = {c.claim_id: " ".join(c.text.split()) for c in suspicious_claims}
+        returned_ids = [r.claim_id for r in canonical_v_res.claim_reports]
+        missing_claim_ids = sorted(set(requested_claims) - set(returned_ids))
+        unexpected_claim_ids = sorted(set(returned_ids) - set(requested_claims))
+        duplicate_claim_ids = sorted({c_id for c_id in returned_ids if returned_ids.count(c_id) > 1})
+        mismatched_claim_ids = sorted({
+            r.claim_id for r in canonical_v_res.claim_reports
+            if r.claim_id in requested_claims
+            and " ".join(r.claim_text.split()) != requested_claims[r.claim_id]
+        })
+        complete_claim_coverage = not (
+            missing_claim_ids or unexpected_claim_ids or duplicate_claim_ids or mismatched_claim_ids
+        )
         positively_verified = bool(canonical_v_res.claim_reports) and all(
             str(getattr(r, "verdict", "")).lower()
             in ("verified", "supported", "verdictlabel.verified")
@@ -1228,6 +1353,7 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
         passed = (
             canonical_v_res.status == ExecutionStatus.COMPLETED
             and remaining_contradictions == 0
+            and complete_claim_coverage
             and positively_verified
         )
 
@@ -1257,6 +1383,8 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
                 failure_category = "REMAINING_CONTRADICTION"
             elif canonical_v_res.status == ExecutionStatus.FAILED:
                 failure_category = "VERIFIER_FAILURE"
+            elif not complete_claim_coverage:
+                failure_category = "INCOMPLETE_CLAIM_COVERAGE"
             else:
                 failure_category = "DEGRADED_REVERIFICATION"
 
@@ -1268,6 +1396,24 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             failure_category=failure_category,
         )
         dumped_rev = _dump(rev_result)
+        # Additive diagnostics: these describe extraction and report coverage,
+        # not successful model consumption or support for omitted assertions.
+        dumped_rev["claim_analysis"] = analysis.to_dict()
+        dumped_rev["source_coverage_backstop"] = {
+            "method": "deterministic_source_assertions",
+            "added_claims": backstop_claims,
+            "added_count": len(backstop_claims),
+            "limitation": "segmentation and checkability are not a semantic completeness proof",
+        }
+        dumped_rev["claim_coverage"] = {
+            "requested_count": len(suspicious_claims),
+            "reported_count": len(canonical_v_res.claim_reports),
+            "complete": complete_claim_coverage,
+            "missing_claim_ids": missing_claim_ids,
+            "unexpected_claim_ids": unexpected_claim_ids,
+            "duplicate_claim_ids": duplicate_claim_ids,
+            "mismatched_claim_ids": mismatched_claim_ids,
+        }
         rev_attempts = int(state.get("reverification_attempt_count", 0)) + 1
 
         bus = add_bus_message(
@@ -1300,6 +1446,9 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
                 passed=passed,
                 remaining_contradictions=remaining_contradictions,
                 attempt_count=rev_attempts,
+                extracted_claim_count=len(suspicious_claims),
+                claim_analysis_source=analysis.source,
+                complete_claim_coverage=complete_claim_coverage,
             ),
         }
     except Exception as exc:

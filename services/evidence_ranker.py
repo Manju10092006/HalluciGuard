@@ -399,33 +399,29 @@ def _canonical_url(passage: Any) -> str:
 
 
 def _dedup(passages: list[Any]) -> tuple[list[Any], list[tuple[Any, str]]]:
-    """Drop URL / canonical-URL / near-duplicate content passages.
+    """Drop only identical excerpts from the same identifiable source.
 
-    Returns (kept, dropped_with_reason).
+    A URL identifies a document, not a factual passage. Distinct excerpts from
+    one page can contain different dates, relationships, or negation, so URL
+    equality and bag-of-words similarity must not erase them. Independent
+    sources also retain their provenance even when quoting the same text.
     """
     kept: list[Any] = []
     dropped: list[tuple[Any, str]] = []
-    seen_urls: set[str] = set()
-    seen_canon: set[str] = set()
-    kept_termsets: list[set[str]] = []
+    seen: set[tuple[str, str]] = set()
     for p in passages:
-        url = str(_field(p, "url", "") or "").strip().lower()
         canon = _canonical_url(p)
-        if url and url in seen_urls:
-            dropped.append((p, "duplicate_url"))
+        source_id = str(_field(p, "source_id", "") or "").strip()
+        source = str(_field(p, "source", "") or "").strip()
+        identity = canon or (f"{source}:{source_id}" if source_id else "")
+        snippet = str(_field(p, "snippet", "") or _field(p, "text", "") or "")
+        text = " ".join(snippet.split())
+        key = (identity, text)
+        if identity and text and key in seen:
+            dropped.append((p, "duplicate_source_excerpt"))
             continue
-        if canon and canon in seen_canon:
-            dropped.append((p, "duplicate_canonical_url"))
-            continue
-        terms = _stems(_content_terms(_passage_text(p)))
-        if any(_jaccard(terms, t) >= 0.9 for t in kept_termsets if t):
-            dropped.append((p, "duplicate_content"))
-            continue
-        if url:
-            seen_urls.add(url)
-        if canon:
-            seen_canon.add(canon)
-        kept_termsets.append(terms)
+        if identity and text:
+            seen.add(key)
         kept.append(p)
     return kept, dropped
 
@@ -517,12 +513,13 @@ def rank_and_select(
     search_queries: Iterable[str] = (),
     domain: str = "general",
     top_k: int = TOP_K,
+    max_per_family: int = MAX_PER_FAMILY,
 ) -> tuple[list[RankedEvidence], list[RankedEvidence]]:
     """Convenience: rank then select. Returns (selected, all_ranked)."""
     ranked = rank_evidence(
         passages, claim_text=claim_text, search_queries=search_queries, domain=domain
     )
-    selected = select_evidence(ranked, top_k=top_k)
+    selected = select_evidence(ranked, top_k=top_k, max_per_family=max_per_family)
     return selected, ranked
 
 

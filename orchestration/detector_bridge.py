@@ -8,6 +8,7 @@ Any runtime failure fails closed to verification.
 from __future__ import annotations
 
 import threading
+import math
 from typing import Any
 
 
@@ -55,6 +56,10 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
     probability = float(raw_probability) if probability_available else 0.0
     raw_confidence = result.get("confidence_score")
     confidence = float(raw_confidence) if raw_confidence is not None else 0.0
+    for raw, converted in ((raw_probability, probability), (raw_confidence, confidence)):
+        if raw is not None and (isinstance(raw, bool) or not math.isfinite(converted)
+                                or not 0.0 <= converted <= 1.0):
+            raise ValueError("Invalid detector numeric output")
     status = str(result.get("status", "completed")).lower()
     degraded = bool(result.get("detector_degraded", status != "completed"))
     next_action = str(result.get("next_action", "Verify"))
@@ -71,6 +76,9 @@ def _map_result(result: dict[str, Any]) -> dict[str, Any]:
             continue
         raw_risk = claim.get("claim_risk")
         claim_probability = float(raw_risk) if raw_risk is not None else 0.0
+        if raw_risk is not None and (isinstance(raw_risk, bool) or not math.isfinite(claim_probability)
+                                    or not 0.0 <= claim_probability <= 1.0):
+            raise ValueError("Invalid claim risk output")
         claim_level = str(
             claim.get("risk_level") or ("HIGH" if overall_verify else "LOW")
         ).upper()
@@ -130,7 +138,7 @@ def run_detection(user_query: str, llm_response: str, generation_trace: dict[str
             result = _get_agent().detect(user_query, llm_response, generation_trace=generation_trace, domain=domain)
         return _map_result(result)
     except Exception as exc:  # fail closed; the graph must still reach Verifier
-        return _failclosed(f"detector_failed: {type(exc).__name__}: {str(exc)[:160]}")
+        return _failclosed(f"detector_failed: {type(exc).__name__}")
 
 
 def run_grounded_detection(
@@ -148,5 +156,5 @@ def run_grounded_detection(
         return _map_result(result)
     except Exception as exc:  # fail closed; Judge still receives verifier truth
         return _failclosed(
-            f"grounded_detector_failed: {type(exc).__name__}: {str(exc)[:160]}"
+            f"grounded_detector_failed: {type(exc).__name__}"
         )

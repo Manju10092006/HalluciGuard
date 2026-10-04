@@ -3,13 +3,20 @@ from __future__ import annotations
 import logging
 import re
 import urllib.parse
-from typing import List
+from typing import List, Tuple
 from bs4 import BeautifulSoup
 
 from schemas.models import Passage, AdapterMetadata
 from utils.http_client import get_client
 
 logger = logging.getLogger(__name__)
+
+_FOUNDING_QUERY = re.compile(
+    r"\b(?:co[-\s]?)?found(?:er(?:s)?|ed|ing)\b|"
+    r"\bestablish(?:ed|ment|ing)\b|\bincorporat(?:ed|ion)\b",
+    re.IGNORECASE,
+)
+_FOUNDING_TEXT = _FOUNDING_QUERY
 
 class GeneralAdapter:
     def __init__(self) -> None:
@@ -39,6 +46,32 @@ class GeneralAdapter:
         if len(words) > 25:
             clean = " ".join(words[:25])
         return clean[:200]
+
+    @staticmethod
+    def _source_excerpt(text: str, query: str, limit: int = 400) -> str:
+        """Keep a founding sentence visible without rewriting source wording."""
+        if not _FOUNDING_QUERY.search(query):
+            return text[:limit]
+
+        # Record source offsets so the excerpt is a contiguous source span,
+        # including negation and qualifiers in the selected complete sentence.
+        boundaries = list(re.finditer(r"(?<=[.!?])\s+", text))
+        starts = [0, *(match.end() for match in boundaries)]
+        ends = [*(match.start() for match in boundaries), len(text)]
+        for index, (start, end) in enumerate(zip(starts, ends)):
+            sentence = text[start:end]
+            if not _FOUNDING_TEXT.search(sentence) or len(sentence) > limit:
+                continue
+            # Retain adjacent context when it fits, rather than selecting just
+            # the predicate/name and losing a source's qualifications.
+            if index and end - starts[index - 1] <= limit:
+                start = starts[index - 1]
+            for next_end in ends[index + 1:]:
+                if next_end - start > limit:
+                    break
+                end = next_end
+            return text[start:end]
+        return text[:limit]
 
     async def _fetch_page_summary(self, client: object, title: str) -> str:
         """Fetch the clean lead extract from Wikipedia REST summary API."""
@@ -145,13 +178,25 @@ class GeneralAdapter:
                         if chunk and len(chunk) > 30:
                             sections.append((current_heading, chunk))
 
-                # Sort sections: high-overlap / family / early life first
-                def _section_priority(sec: Tuple[str, str]) -> int:
+                # Rank the actual emitted chunk, not another part of its section.
+                # Founding queries need founded/founder variants and historical
+                # context before modern acquisition/executive overlap.
+                founding_query = bool(_FOUNDING_QUERY.search(claim))
+
+                def _section_priority(sec: Tuple[str, str]) -> Tuple[int, int, int]:
                     h, c = sec
                     score = sum(1 for t in claim_tokens if t in c.lower()) * 2
                     if any(k in h.lower() for k in ("early life", "family", "personal life", "parent")):
                         score += 3
-                    return -score
+                    if founding_query:
+                        excerpt = self._source_excerpt(c, claim)
+                        relation_match = bool(_FOUNDING_TEXT.search(excerpt))
+                        historical_heading = any(
+                            k in h.lower() for k in
+                            ("history", "founding", "creation", "origin", "background", "early years")
+                        )
+                        return -int(relation_match), -int(relation_match and historical_heading), -score
+                    return 0, 0, -score
 
                 sections.sort(key=_section_priority)
                 return sections
@@ -269,12 +314,13 @@ class GeneralAdapter:
                 continue
 
             title_url = urllib.parse.quote(title.replace(' ', '_'), safe='')
+            lead_excerpt = self._source_excerpt(final_snippet, query)
             lead_passage = Passage(
                 title=f"Wikipedia: {title}",
                 source="wikipedia",
                 url=f"https://en.wikipedia.org/wiki/{title_url}",
                 publication_date="unknown",
-                snippet=f"Article [{title}]: {final_snippet[:400]}",
+                snippet=f"Article [{title}]: {lead_excerpt}",
                 source_id=f"wiki_{title_url.lower()}",
                 relevance_score=0.0,
                 source_confidence_hint=0.85 if summary_extract else 0.70,
@@ -282,7 +328,9 @@ class GeneralAdapter:
             passages.append(lead_passage)
 
             # Check if lead summary misses key claim relation terms (e.g. father, parent, born, location, capital)
-            lead_lower = final_snippet.lower()
+            lead_lower = (
+                lead_excerpt if _FOUNDING_QUERY.search(query) else final_snippet
+            ).lower()
             missing_terms = [t for t in claim_terms if t not in lead_lower]
             if missing_terms:
                 # Deep retrieval: fetch relevant sections
@@ -293,7 +341,7 @@ class GeneralAdapter:
                         source="wikipedia",
                         url=f"https://en.wikipedia.org/wiki/{title_url}#{urllib.parse.quote(section_name.replace(' ', '_'))}",
                         publication_date="unknown",
-                        snippet=f"Section [{title} - {section_name}]: {section_text[:400]}",
+                        snippet=f"Section [{title} - {section_name}]: {self._source_excerpt(section_text, query)}",
                         source_id=f"wiki_{title_url.lower()}_{section_name.lower().replace(' ', '_')}",
                         relevance_score=0.0,
                         source_confidence_hint=0.80,

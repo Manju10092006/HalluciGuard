@@ -1,8 +1,61 @@
 # 🧠 Memory Agent — HalluciGuard
 
-## Status: ✅ Implemented (v1.1.0)
+## Status: implemented research component, not production-certified
 
 The Memory Agent is the **knowledge persistence layer** in the HalluciGuard pipeline. It stores verified facts, learns from hallucination patterns, tracks source reliability, and provides historical context to all other agents.
+
+In the production graph, the Judge must accept and eligible claims must be verified; after a repair, ReVerifier must pass. The direct Memory HTTP API does not itself enforce that Judge policy. Stored confidence is an operational field, not a calibrated probability that a fact is true.
+
+## Open Memory safely
+
+From the repository root, inspect existing saved records without initializing models or writing stores:
+
+```powershell
+python scripts/inspect_memory.py --data-dir data
+python scripts/inspect_memory.py --data-dir data --show-text --limit 10
+python scripts/inspect_memory.py --runtime-dir "<seven-agent-report-directory>/runtime" --show-text
+```
+
+The inspector uses saved JSON and SQLite read-only connections. Missing files, malformed stores and inconsistent graph/vector/cache records are reported, not repaired. Claim text is hidden by default; `--show-text` is explicit because saved claims may be private. The inspector does not load `.env`; choose the actual directory if your service uses custom path overrides. It does not create a missing data directory or treat missing records as successful consistency.
+
+Default production files are relative to the process working directory:
+
+| File | Stored content |
+|---|---|
+| `data/knowledge_graph.json` | Claim/fact/source nodes, IDs, verification properties and graph edges |
+| `data/vector_store/entries.json` | Fact ID, full claim text, domain/verdict/confidence/timestamp metadata |
+| `data/vector_store/index.faiss` | Binary similarity index; do not open it as text |
+| `data/verification_cache.db` | Claim-keyed verdict/confidence, source counts, summary, creation/expiry/hit fields |
+| `data/patterns.db` | Eligible negative-verdict pattern observations |
+| `data/source_trust.db` | Source trust counters and history |
+
+The seven-agent test runners redirect all these stores to `<report-directory>/runtime/`, including `memory-cache.db`. Starting the API with production defaults does **not** display a previous diagnostic run's Memory.
+
+For the actual API/Swagger UI:
+
+```powershell
+python -m uvicorn agents.memory_agent.api.main:app --host 127.0.0.1 --port 8005
+# Open http://127.0.0.1:8005/docs
+Invoke-RestMethod http://127.0.0.1:8005/stats
+```
+
+When `MEMORY_AGENT_API_KEY` is configured, provide `X-API-Key` without publishing its value. Keep the server on loopback for local review. API startup can create databases/load embeddings, shutdown saves stores, and recall/cache queries can change hit counts or delete expired rows. Use the inspector, not the API, when strict read-only behavior is required.
+
+## What a stored fact contains
+
+`MemoryAgent.store_fact()` creates a UUID fact, a linked claim node and source-ID nodes. Claim text, domain, verdict, confidence and timestamps are copied into the graph, vector metadata and cache according to each contract. The graph claim name is limited to 120 characters; full claim text is retained on the fact/vector/cache representations. The readable vector JSON deliberately omits embedding arrays; FAISS holds the binary index.
+
+Full citation snippets, URLs and request/execution metadata from the input are **not** durably preserved in every Memory representation. The cache has a generic evidence-count summary, not the evidence itself. Keep the validation execution JSON when you need the original sources and handoffs, and never commit private runtime data.
+
+## Current limitations
+
+- `update_fact()` in this checkout does not synchronize the linked claim or the fact's top-level confidence. The separate quarantine repair has not been merged here.
+- `delete_fact()` can leave the linked claim node; vector index rebuild after loading saved metadata also requires validation.
+- Multi-store updates are not one distributed transaction. Concurrent inspection is not an atomic snapshot; stop writers or inspect a consistent backup for an audit.
+- Successful fresh-fact read-back does not validate quarantine/update failure recovery, distributed consistency or factual accuracy.
+- The graph gate applies to graph-driven storage; do not use `/store` to bypass it in a demonstration.
+
+See [seven-agent commands and reports](../../docs/seven-agent-validation.md) and [the current execution review](../../docs/reports/execution-repair-review-20261004.md).
 
 ---
 
@@ -55,7 +108,7 @@ The Memory Agent is the **knowledge persistence layer** in the HalluciGuard pipe
 | **Schemas** | `schemas/models.py` | 16 Pydantic V2 models, 4 enums. Full request/response contracts. |
 | **Entry Point** | `__main__.py` | `python -m agents.memory_agent` starts uvicorn. |
 
-### Tests (94 passing)
+### Historical test inventory (not the current validation total)
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -101,7 +154,7 @@ The Memory Agent is the **knowledge persistence layer** in the HalluciGuard pipe
 
 ```bash
 # 1. Clone
-git clone https://github.com/KushalMadhan3/HalluciGuard.git
+git clone https://github.com/Manju10092006/HalluciGuard.git
 cd HalluciGuard
 
 # 2. Install dependencies
@@ -126,7 +179,7 @@ curl http://127.0.0.1:8005/health
 
 ## Example Usage
 
-### Store a hallucinated claim
+### Direct API storage example (not the production release policy)
 ```bash
 curl -X POST http://127.0.0.1:8005/store \
   -H "Content-Type: application/json" \
@@ -228,7 +281,7 @@ agents/memory_agent/
 - [x] DI Container and singleton patterns
 - [x] Pydantic V2 schemas for all data contracts
 - [x] pydantic-settings configuration with .env
-- [x] 94 passing tests (unit + integration + API)
+- [x] Unit, integration and API test coverage (run the current suite; historical counts above are not a release certification)
 - [x] JSON persistence for knowledge graph
 
 ### 🆕 v1.1 Advancements
@@ -246,13 +299,13 @@ agents/memory_agent/
 - [ ] **Wire into Judge Agent** — Feed Memory Agent's pattern data into the Judge's decision engine
 - [ ] **Neo4j migration** — Replace NetworkX with Neo4j for production-scale graph queries
 - [ ] **ChromaDB migration** — Replace FAISS with ChromaDB for managed vector storage
-- [ ] **Authentication** — Add API key auth for inter-agent communication
+- [ ] **Authentication review** — Validate configured API-key enforcement and deployment exposure
 - [ ] **Rate limiting** — Protect endpoints from abuse
-- [ ] **Monitoring** — Add Prometheus metrics endpoint
+- [ ] **Monitoring validation** — Validate existing metrics against operational failures
 - [ ] **Docker** — Containerize with docker-compose for all 5 agents
 - [ ] **CI/CD** — GitHub Actions for automated testing and deployment
-- [ ] **Batch operations** — `/store/batch` endpoint for bulk fact ingestion
-- [ ] **Graph analytics** — PageRank for entity importance, community detection for topic clustering
+- [ ] **Batch consistency** — Validate partial-write recovery and concurrent bulk ingestion
+- [ ] **Graph analytics validation** — Check existing analytics against realistic workloads
 - [ ] **Temporal reasoning** — Track how facts change over time (versioned facts)
 - [ ] **Cross-domain inference** — Detect when a fact in one domain contradicts another
 
@@ -303,4 +356,4 @@ agents/memory_agent/
 
 ## Branch
 
-This code lives on the `memory-agent` branch. Create a PR to merge into `main`.
+Documentation describes the code in the current checkout. Do not infer that a separate Memory repair branch is integrated merely because it exists remotely. See the execution review for tested scope and remaining integration work.

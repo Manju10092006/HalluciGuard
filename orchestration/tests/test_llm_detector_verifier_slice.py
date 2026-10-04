@@ -102,7 +102,9 @@ def make_mock_verifier_output(retrieved=5, verified=2, confidence=0.85):
 
 
 @pytest.mark.asyncio
-async def test_low_detector_result_skips_verifier():
+async def test_low_detector_result_invokes_verifier_by_default(monkeypatch):
+    monkeypatch.delenv("ALWAYS_VERIFY", raising=False)
+    monkeypatch.delenv("ALLOW_DETECTOR_FAST_PATH", raising=False)
     gen_result = GenerationResult(
         user_query="Low risk question",
         draft_response="Standard low risk text.",
@@ -138,9 +140,8 @@ async def test_low_detector_result_skips_verifier():
 
     assert result.detector["risk_tier"] == "LOW"
     assert result.detector["decision"] == "ACCEPT"
-    assert result.verifier["executed"] is False
-    assert "skipped" in result.verifier["reason"].lower()
-    mock_verifier_pipeline.verify.assert_not_called()
+    assert result.verifier["executed"] is True
+    mock_verifier_pipeline.verify.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -227,7 +228,7 @@ async def test_high_detector_result_invokes_verifier():
 
 
 @pytest.mark.asyncio
-async def test_detector_failure_does_not_invoke_verifier():
+async def test_detector_failure_still_invokes_verifier_for_valid_draft(caplog):
     gen_result = GenerationResult(
         user_query="Detector error test",
         draft_response="Valid draft response.",
@@ -243,6 +244,7 @@ async def test_detector_failure_does_not_invoke_verifier():
     )
 
     mock_verifier_pipeline = AsyncMock()
+    mock_verifier_pipeline.verify.return_value = make_mock_verifier_output()
 
     llm_stub = StubBaseLLMService(gen_result)
     det_stub = DummyDetectorAgent(RuntimeError("Detector model crash"))
@@ -255,9 +257,14 @@ async def test_detector_failure_does_not_invoke_verifier():
     result = await service.execute_slice("Detector error test")
 
     assert result.detector["status"] == "failed"
-    assert "Detector model crash" in result.detector["error"]
-    assert result.verifier is None
-    mock_verifier_pipeline.verify.assert_not_called()
+    assert result.detector["decision"] == "VERIFY"
+    assert result.detector["detector_degraded"] is True
+    assert result.detector["probability_available"] is False
+    assert "RuntimeError" in result.detector["error"]
+    assert "Detector model crash" not in json.dumps(result.model_dump())
+    assert "Detector model crash" not in caplog.text
+    assert result.verifier["executed"] is True
+    mock_verifier_pipeline.verify.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -301,7 +308,7 @@ async def test_empty_draft_does_not_invoke_verifier():
 
 
 @pytest.mark.asyncio
-async def test_verifier_failure_handled_cleanly():
+async def test_verifier_failure_handled_cleanly(caplog):
     gen_result = GenerationResult(
         user_query="Verifier error test",
         draft_response="High risk draft.",
@@ -337,7 +344,9 @@ async def test_verifier_failure_handled_cleanly():
 
     assert result.verifier["executed"] is True
     assert result.verifier["status"] == "failed"
-    assert "Retrieval API timed out" in result.verifier["error"]
+    assert "TimeoutError" in result.verifier["error"]
+    assert "Retrieval API timed out" not in json.dumps(result.model_dump())
+    assert "Retrieval API timed out" not in caplog.text
     assert result.verifier["claim_evidence"] == []
 
 

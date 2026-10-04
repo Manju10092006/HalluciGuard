@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 import time
 import logging
+import copy
 from typing import List, Dict, Any, Tuple
 
 from schemas.models import (
@@ -260,7 +261,14 @@ class VerificationPipeline:
             from services.evidence_ranker import rank_and_select
 
             selected, _ranked = rank_and_select(
-                passages, claim_text=claim_text, search_queries=search_queries, domain=domain
+                passages, claim_text=claim_text, search_queries=search_queries, domain=domain,
+                # This is a pre-model relevance filter, not the final citation
+                # selector. A source-family cap here can remove every actual
+                # relation passage before dense retrieval/BGE sees it (e.g.
+                # an earlier subsidiary crowding out the parent's founders).
+                # Preserve eligible candidates; downstream top-k and evidence
+                # decision gates still bound and independently assess them.
+                top_k=len(passages), max_per_family=len(passages),
             )
             if not selected:
                 # Every candidate was irrelevant. Returning [] routes the claim to
@@ -288,14 +296,52 @@ class VerificationPipeline:
         if not relevant:
             relevant = passages[:5]
 
-        # Deduplicate multiple chunks from the same specific source URL/domain
-        strongest_by_source: Dict[str, Passage] = {}
-        for passage in relevant:
-            source_key = (passage.url or passage.source_id or f"{passage.source}:{passage.title}").strip().lower()
+        # A URL is not a passage identity. Complementary/contradictory chunks
+        # from the same section must both reach NLI; deduplicate only identical
+        # source excerpts, keeping the strongest copy of that excerpt.
+        strongest_by_source: Dict[tuple, Passage] = {}
+        for index, passage in enumerate(relevant):
+            identity = (passage.url or passage.source_id or f"{passage.source}:{passage.title}").strip()
+            source_key = (identity, " ".join(passage.snippet.split())) if identity and passage.snippet.strip() else (index,)
             current = strongest_by_source.get(source_key)
             if current is None or (passage.relevance_score or 0.0) > (current.relevance_score or 0.0):
                 strongest_by_source[source_key] = passage
         return list(strongest_by_source.values())
+
+    @staticmethod
+    def _deduplicate_retrieved_passages(passages: List[Passage]) -> List[Passage]:
+        """A document identifier alone must not discard distinct excerpts."""
+        seen = set()
+        selected = []
+        for passage in passages:
+            identity = (passage.url or passage.source_id or passage.title or "").strip()
+            key = (identity, " ".join(passage.snippet.split()))
+            if key not in seen:
+                seen.add(key)
+                selected.append(passage)
+        return selected
+
+    @staticmethod
+    def _bind_cached_claim_report(cached: Any, claim: SuspiciousClaim) -> ClaimReport:
+        """Reuse evidence, not a previous request's ID or execution proof."""
+        report = ClaimReport(**cached) if isinstance(cached, dict) else cached
+        origin = copy.deepcopy(report.retrieval_trace)
+        trace = {
+            "cache_hit": True,
+            "trace_scope": "cache_reuse",
+            "origin": origin,
+            "historical_retrieved_documents": report.retrieved_documents,
+            "historical_reranked_documents": report.reranked_documents,
+            "backend_execution": {"route": "cache", "sparse_attempted": False,
+                                  "dense_attempted": False, "fusion_executed": False},
+            "reranker_execution": {"status": "not_run", "inference_executed": False},
+            "nli_execution": {"status": "not_run", "inference_executed": False},
+        }
+        return report.model_copy(deep=True, update={
+            "claim_id": claim.claim_id, "claim_text": claim.text,
+            "retrieved_documents": 0, "reranked_documents": 0,
+            "retrieval_trace": trace,
+        })
 
     @staticmethod
     def _select_decision_grade_evidence(
@@ -318,13 +364,11 @@ class VerificationPipeline:
         # anywhere, so we can suppress that spurious per-passage contradiction.
         aggregate_rel_status = "NO_TRIPLE_EXTRACTED"
         aggregate_claim_rel = ""
-        aggregate_claim_subject = ""
         if relation_verifier and claim:
             aggregate_rel_check = relation_verifier.verify_relation(claim, passages)
             aggregate_rel_status = aggregate_rel_check.status
             if aggregate_rel_check.claim_triple:
                 aggregate_claim_rel = aggregate_rel_check.claim_triple.relation
-                aggregate_claim_subject = aggregate_rel_check.claim_triple.subject
 
         selected = []
         for passage, result in pairs:
@@ -340,10 +384,30 @@ class VerificationPipeline:
             contradiction = float(result.get("contradiction_score", 0.0))
 
             rel_status = "NO_TRIPLE_EXTRACTED"
+            relation_addressed = False
             if relation_verifier and claim:
                 rel_check = relation_verifier.verify_relation(claim, [passage])
                 rel_status = rel_check.status
                 claim_rel = rel_check.claim_triple.relation if rel_check.claim_triple else ""
+                if rel_check.claim_triple:
+                    claim_triple = rel_check.claim_triple
+                    relation_addressed = relation_verifier.evidence_addresses_relation(
+                        claim_triple, passage, rel_check.evidence_triples,
+                    )
+                # Reject unsupported pair scores as an admissibility decision,
+                # preserving the raw NLI probabilities for diagnosis. Qualified
+                # roles identify the topic but cannot force semantic MATCH or a
+                # score floor; a shared founder of another org is insufficient.
+                if (
+                    claim_rel in ("created_by", "leads", "location_of")
+                    and rel_status == "NO_TRIPLE_EXTRACTED"
+                    and not relation_addressed
+                    # Retain the existing location-contradiction suppression
+                    # contract below; new role and entailment rejections do not
+                    # rewrite the raw pair's scores.
+                    and not (claim_rel == "location_of" and contradiction > entailment)
+                ):
+                    continue
                 # Multi-valued creation/leadership: if the whole evidence set
                 # confirms the claimed holder, a single passage naming a DIFFERENT
                 # valid holder (co-founder) must not manufacture a contradiction.
@@ -395,29 +459,17 @@ class VerificationPipeline:
                         max(0.0, 1.0 - entailment),
                     )
 
-            # A raw NLI contradiction is not decision-grade evidence for a
-            # structured relation when the passage never mentions the claim's
-            # subject. Example: an Albuquerque city page can lexically match
-            # "Microsoft was started in Albuquerque" but says nothing about
-            # Microsoft. Treating it as a refutation caused a false correction
-            # request. Genuine structured mismatches and explicit refutations
-            # remain untouched.
-            subject_mentioned = True
-            if aggregate_claim_subject and relation_verifier:
-                normalized_context = relation_verifier._normalize_name(
-                    f"{passage.title} {passage.snippet}"
-                )
-                context_tokens = set(normalized_context.split())
-                subject_tokens = set(aggregate_claim_subject.split())
-                subject_mentioned = bool(subject_tokens) and subject_tokens.issubset(
-                    context_tokens
-                )
+            # A pairwise NLI contradiction cannot establish a structured
+            # relation that the passage never states. Shared subject alone is
+            # insufficient: a Rust memory-safety passage can receive a high
+            # contradiction score against a Rust-creator claim while saying
+            # nothing about who created Rust. A parsed relation mismatch or
+            # match remains decision-grade; otherwise abstain on this pair.
             if (
                 aggregate_claim_rel
                 and rel_status == "NO_TRIPLE_EXTRACTED"
                 and contradiction > entailment
-                and not subject_mentioned
-                and not has_explicit_refutation
+                and not relation_addressed
             ):
                 contradiction = 0.0
                 result["contradiction_score"] = 0.0
@@ -427,7 +479,8 @@ class VerificationPipeline:
                     max(0.0, 1.0 - entailment),
                 )
 
-            if has_explicit_refutation and not claim_is_negative:
+            if (has_explicit_refutation and not claim_is_negative and
+                    (not aggregate_claim_rel or relation_addressed)):
                 contradiction = max(contradiction, 0.95)
                 result["contradiction_score"] = contradiction
                 result["entailment_score"] = 0.0
@@ -539,11 +592,7 @@ class VerificationPipeline:
                 if cached_data:
                     self.metrics.record_cache_hit()
                     self.logger.info("Cache hit for claim: %s", claim.claim_id)
-                    report = (
-                        ClaimReport(**cached_data)
-                        if isinstance(cached_data, dict)
-                        else cached_data
-                    )
+                    report = self._bind_cached_claim_report(cached_data, claim)
                     claim_reports.append(report)
                     any_cache_hit = True
                     continue
@@ -562,6 +611,7 @@ class VerificationPipeline:
                 sub_reports: List[Dict[str, Any]] = []
                 claim_retrieved = 0
                 claim_reranked = 0
+                subclaim_execution = []
 
                 for sub_claim in sub_claims:
                     with tracker.track(PipelineStage.QUERY_EXPANSION):
@@ -575,6 +625,7 @@ class VerificationPipeline:
                         retrieval_start = time.time()
                         all_raw: List[Passage] = []
                         n8n_trace_obj = None
+                        supplementary_retrieval = []
 
                         # Object-anchored factual queries for this sub-claim. For
                         # relational claims ("X is the founder of Y") these anchor
@@ -643,6 +694,31 @@ class VerificationPipeline:
                                     f"{validated_domain}:{str(e)[:100]}"
                                 )
 
+                        # Company/creator history is not an arXiv proposition
+                        # merely because the analyzer called its subject technical.
+                        # Keep the specialized search, but also check the explicit
+                        # object-anchored creation relation in general sources.
+                        # All returned text still passes the same relevance/NLI gates.
+                        relation_triples = self.evidence_scorer.relation_verifier.extract_triples(sub_claim)
+                        if (validated_domain == "computer_science" and anchored_queries
+                                and any(t.relation == "created_by" for t in relation_triples)):
+                            general_adapter = get_registry().get_adapter("general")
+                            for query in anchored_queries[:2]:
+                                observation = {"adapter": getattr(general_adapter, "name", "general"),
+                                               "query": query, "status": "attempted", "returned_count": 0,
+                                               "reason": "object_anchored_creation_general_sources"}
+                                try:
+                                    kwargs = {"retrieval_mode": payload.retrieval_mode}
+                                    if getattr(payload, "source_mode", None):
+                                        kwargs["source_mode"] = payload.source_mode
+                                    passages = await general_adapter.search(query, **kwargs)
+                                    all_raw.extend(passages)
+                                    observation.update(status="completed", returned_count=len(passages))
+                                except Exception as exc:
+                                    observation.update(status="failed", error_type=type(exc).__name__)
+                                    adapter_failures.append(f"general_creation:{type(exc).__name__}")
+                                supplementary_retrieval.append(observation)
+
                         # Attach n8n trace to adapter trace or initialize retrieval trace
                         if n8n_trace_obj:
                             if getattr(adapter, "last_retrieval_trace", None):
@@ -656,14 +732,8 @@ class VerificationPipeline:
                                     n8n_trace=n8n_trace_obj,
                                 )
 
-                        # Deduplicate raw passages by unique URL/ID/title
-                        seen_doc_keys = set()
-                        raw_passages = []
-                        for p in all_raw:
-                            doc_k = (p.url or p.source_id or p.title or "").strip().lower()
-                            if doc_k and doc_k not in seen_doc_keys:
-                                seen_doc_keys.add(doc_k)
-                                raw_passages.append(p)
+                        raw_passages = self._deduplicate_retrieved_passages(all_raw)
+                        retrieved_passage_count = len(raw_passages)
 
                         retrieval_duration = int((time.time() - retrieval_start) * 1000)
                         self.metrics.record_retrieval(
@@ -709,6 +779,13 @@ class VerificationPipeline:
                             k=8,
                             dense_model=route.dense_model,
                         )
+                        backend_execution = (
+                            self.hybrid_retriever.diagnostics()
+                            if hasattr(self.hybrid_retriever, "diagnostics") else {}
+                        )
+                        if not isinstance(backend_execution, dict):
+                            backend_execution = {}
+                        backend_execution = copy.deepcopy(backend_execution)
 
                     with tracker.track(PipelineStage.RERANKING):
                         reranked_passages = self.reranker.rerank(
@@ -719,11 +796,21 @@ class VerificationPipeline:
                         )
                         claim_reranked += len(reranked_passages)
 
-                        # Update retrieval audit trace with real BGE score
-                        if reranked_passages and getattr(adapter, "last_retrieval_trace", None):
+                        self._last_reranker_diag = self.reranker.diagnostics()
+                        audit_trace = getattr(adapter, "last_retrieval_trace", None)
+                        if audit_trace is not None and audit_trace.gate_relevance_audit:
+                            audit = audit_trace.gate_relevance_audit
+                            audit.final_bge_inference_executed = False
+                            audit.final_bge_relevance_score = 0.0  # Legacy unavailable sentinel, not a measured BGE score.
+                            audit.signals_agree = False
+                        # A fallback keeps retrieval relevance scores; those are
+                        # not neural BGE scores and must not populate this audit.
+                        if (reranked_passages and self._last_reranker_diag.get("inference_executed")
+                                and getattr(adapter, "last_retrieval_trace", None)):
                             trace_obj = getattr(adapter, "last_retrieval_trace")
                             top_bge = max([p.relevance_score for p in reranked_passages], default=0.0)
                             if trace_obj.gate_relevance_audit:
+                                trace_obj.gate_relevance_audit.final_bge_inference_executed = True
                                 trace_obj.gate_relevance_audit.final_bge_relevance_score = round(top_bge, 4)
                                 trace_obj.gate_relevance_audit.signals_agree = (
                                     (trace_obj.gate_relevance_audit.gate_time_relevance_signal >= 0.25 and top_bge >= 0.25)
@@ -731,13 +818,13 @@ class VerificationPipeline:
                                 )
 
                         # §13/§26 BGE execution proof — record real-inference vs. fallback.
-                        self._last_reranker_diag = self.reranker.diagnostics()
                         _rr_trace = getattr(adapter, "last_retrieval_trace", None)
                         if _rr_trace is not None:
                             from schemas.retrieval_trace import ModelExecutionTrace
                             _rr_trace.reranker_execution = ModelExecutionTrace(
                                 **self._last_reranker_diag
                             )
+                            _rr_trace.backend_execution = backend_execution
                         # §28 certification: a fallback BGE score must never be certified.
                         self._enforce_certification_reranker(self._last_reranker_diag)
 
@@ -761,6 +848,13 @@ class VerificationPipeline:
 
                         # §15/§26 DeBERTa execution proof — record real-inference vs. fallback.
                         self._last_nli_diag = self.nli_engine.diagnostics()
+                        if not relevant_passages:
+                            # No batch ran; do not replay the preceding claim's
+                            # inference proof when this claim has no NLI input.
+                            self._last_nli_diag = {**self._last_nli_diag,
+                                "status": "not_run", "inference_executed": False,
+                                "degraded": False, "latency_ms": 0,
+                                "batch_size": 0, "scored_count": 0}
                         _nli_trace = getattr(adapter, "last_retrieval_trace", None)
                         if _nli_trace is not None:
                             from schemas.retrieval_trace import ModelExecutionTrace
@@ -802,6 +896,32 @@ class VerificationPipeline:
                             relation_verifier=self.evidence_scorer.relation_verifier,
                         )
                     )
+                    subclaim_execution.append({
+                        "parent_claim_id": claim.claim_id,
+                        "claim_text": sub_claim,
+                        "retrieval_query": relevance_query,
+                        "supplementary_retrieval": supplementary_retrieval,
+                        "backend_execution": backend_execution,
+                        "reranker_execution": copy.deepcopy(self._last_reranker_diag),
+                        "nli_execution": copy.deepcopy(self._last_nli_diag),
+                        "counts": {"retrieved": retrieved_passage_count,
+                                   "relevance_selected": len(raw_passages),
+                                   "aggregated": len(aggregated_passages),
+                                   "hybrid_selected": len(hybrid_passages),
+                                   "reranker_selected": len(reranked_passages),
+                                   "nli_selected": len(relevant_passages),
+                                   "decision_grade_selected": len(decision_passages)},
+                        # Preserve actual ranked passages under the parent claim,
+                        # even when an object-anchored ranking query differs from
+                        # the NLI claim. Query similarity cannot bind these safely.
+                        "reranked_passages": [p.model_dump() for p in reranked_passages],
+                        # These exact snippets reached batch_classify, not
+                        # necessarily the neural model after token truncation.
+                        "nli_selected_passages": [{"source_id": p.source_id,
+                            "url": p.url, "title": p.title, "snippet": p.snippet}
+                            for p in relevant_passages],
+                        "tokenizer_survival": "not_exposed",
+                    })
 
                     with tracker.track(PipelineStage.SCORING):
                         scores_dict = self.evidence_scorer.score_evidence(
@@ -873,6 +993,12 @@ class VerificationPipeline:
                 )
 
                 with tracker.track(PipelineStage.FORMATTING):
+                    retrieval_trace = (
+                        getattr(adapter, "last_retrieval_trace", None).model_dump()
+                        if getattr(adapter, "last_retrieval_trace", None) else {}
+                    )
+                    retrieval_trace["trace_scope"] = "last_subclaim_with_all_subclaim_snapshots"
+                    retrieval_trace["subclaim_execution"] = subclaim_execution
                     explanation = self.explanation_generator.generate(
                         claim_text=claim.text,
                         evidence_items=claim_evidence_items,
@@ -898,10 +1024,7 @@ class VerificationPipeline:
                         retrieved_documents=claim_retrieved,
                         reranked_documents=claim_reranked,
                         verified_evidence=len(claim_evidence_items),
-                        retrieval_trace=(
-                            getattr(adapter, "last_retrieval_trace", None).model_dump()
-                            if getattr(adapter, "last_retrieval_trace", None) else None
-                        ),
+                        retrieval_trace=retrieval_trace,
                     )
 
                 if claim_evidence_items and self.cache_enabled:

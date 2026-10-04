@@ -60,8 +60,30 @@ class RelationVerifier:
         re.IGNORECASE,
     )
 
+    # These modifiers change the role claim's meaning. They can identify its
+    # evidence scope, but a bare founder/co-founder fact cannot prove them.
+    _ROLE_QUALIFIERS = {"primary", "main", "principal", "sole", "only", "attributed_role"}
+    _MONTH_NAMES = {
+        "january", "february", "march", "april", "may", "june",
+        "july", "august", "september", "october", "november", "december",
+    }
+    _GENERIC_SUBJECT_TERMS = {
+        "the", "a", "an", "this", "that", "it", "its", "their", "company",
+        "organization", "organisation", "firm", "corporation", "business",
+    }
+
+    @staticmethod
+    def _normalize_typography(text: str) -> str:
+        """Normalize presentation spaces/hyphens, not missing entity tokens."""
+        text = str(text or "").replace("\u202f", " ").replace("\u00a0", " ")
+        text = text.replace("\u2010", "-").replace("\u2011", "-")
+        # Wikipedia can render a hyphenated name as "Jean - Luc" and a
+        # hyphenated verb as "co- founded". Do not join unhyphenated names.
+        return re.sub(r"(?<=[A-Za-z])\s*-\s*(?=[A-Za-z])", "-", text)
+
     @staticmethod
     def _clean_str(s: str) -> str:
+        s = RelationVerifier._normalize_typography(s)
         s = re.sub(r"[^\w\s\-]", " ", s)
         return " ".join(s.lower().split())
 
@@ -77,12 +99,34 @@ class RelationVerifier:
         words = [w for w in clean.split() if w not in stopwords]
         return " ".join(words) if words else clean
 
+    @staticmethod
+    def _creator_names(raw: str) -> List[str]:
+        """Preserve every explicitly written name, never expand an initial/surname.
+
+        Generic descriptions in a list are not people. A truncated name can be
+        retained literally, but cannot become a different person's full name.
+        """
+        raw = RelationVerifier._normalize_typography(raw)
+        core = re.split(r"\b(?:in|at|with|which|for|as|on|who|whose|while|from|to)\b",
+                        raw, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,")
+        proper_token = r"[A-Z][A-Za-z]*(?:['-][A-Za-z]+)*"
+        proper_name = proper_token + r"(?:\s+(?:" + proper_token + r"|van|von|de|da|del|du|le|la))*"
+        names = []
+        for part in re.split(r",|\band\b|&", core):
+            part = part.strip(" ,")
+            if (re.fullmatch(proper_name, part) and part not in names
+                    and part.lower() not in {"he", "she", "they", "it", "we", "you", "i",
+                                             "this", "that", "these", "those", "the", "team", "company"}):
+                names.append(part)
+        return names
+
     def extract_triples(self, text: str) -> List[Triple]:
         """Extract all candidate (subject, relation, object) triples from a text."""
         triples: List[Triple] = []
         if not text or len(text.strip()) < 5:
             return triples
 
+        text = self._normalize_typography(text)
         # Normalize sentence breaks
         sentences = re.split(r"[.!?\n]+", text)
         for sent in sentences:
@@ -245,15 +289,11 @@ class RelationVerifier:
                     obj, flags=re.IGNORECASE,
                 )[0].strip(" ,")
                 normalized_obj = self._normalize_name(obj)
-                month_names = {
-                    "january", "february", "march", "april", "may", "june",
-                    "july", "august", "september", "october", "november", "december",
-                }
                 # "founded by X in April 1975" expresses a date, not an
                 # organization location. Without this guard the claim's first
                 # triple becomes (org, location_of, april), hiding the actual
                 # created_by relation from verification.
-                if subj and len(obj) > 2 and normalized_obj not in month_names:
+                if subj and len(obj) > 2 and normalized_obj not in self._MONTH_NAMES:
                     triples.append(
                         Triple(
                             subject=self._normalize_name(subj),
@@ -322,28 +362,27 @@ class RelationVerifier:
             # e.g., "Amazon company was built by Sundar Pichai"
             # e.g., "Python was created by Guido van Rossum"
             create_match = re.search(
-                r"([A-Za-z0-9\s\-]+?)\s+(?:was|is|were)?\s*(?:originally\s+)?(created|developed|invented|built|designed|founded|introduced)\s+by\s+([A-Za-z0-9\s\-]+)",
+                r"([A-Za-z0-9\s\-]+?)\s+(?:was|is|were)?\s*(?:originally\s+)?(created|developed|invented|built|designed|founded|introduced)\s+by\s+([^.;:]+)",
                 sent_clean,
                 re.IGNORECASE,
             )
             if create_match:
                 subj = create_match.group(1).strip()
                 verb = create_match.group(2).lower()
-                obj = create_match.group(3).strip()
-                obj = re.split(r"\b(in|at|and|with|which|for|as|on)\b", obj, flags=re.IGNORECASE)[0].strip()
-                triples.append(
-                    Triple(
-                        subject=self._normalize_name(subj),
-                        relation="created_by",
-                        object=self._normalize_name(obj),
-                        qualifiers=[verb],
-                        raw_text=sent_clean,
+                for obj in self._creator_names(create_match.group(3)):
+                    triples.append(
+                        Triple(
+                            subject=self._normalize_name(subj),
+                            relation="created_by",
+                            object=self._normalize_name(obj),
+                            qualifiers=[verb],
+                            raw_text=sent_clean,
+                        )
                     )
-                )
 
             # Direct subject-verb-object: "James Gosling created Java"
             svo_match = re.search(
-                r"([A-Za-z\s\-]+?)\s+(created|developed|invented|founded|built)\s+([A-Za-z0-9\s\-]+)",
+                r"([A-Za-z\s\-]+?)\s+(?:co-)?(created|developed|invented|founded|built)\s+([A-Za-z0-9\s\-]+)",
                 sent_clean,
                 re.IGNORECASE,
             )
@@ -352,15 +391,33 @@ class RelationVerifier:
                 verb = svo_match.group(2).lower()
                 creation = svo_match.group(3).strip()
                 creation = re.split(r"\b(in|at|and|with|which|for|as|on)\b", creation, flags=re.IGNORECASE)[0].strip()
-                triples.append(
-                    Triple(
-                        subject=self._normalize_name(creation),
-                        relation="created_by",
-                        object=self._normalize_name(creator),
-                        qualifiers=[verb],
-                        raw_text=sent_clean,
+                for named_creator in self._creator_names(creator):
+                    triples.append(
+                        Triple(
+                            subject=self._normalize_name(creation),
+                            relation="created_by",
+                            object=self._normalize_name(named_creator),
+                            qualifiers=[verb],
+                            raw_text=sent_clean,
+                        )
                     )
-                )
+
+            # "Ly co-founded LinkedIn with Reid Hoffman ... including ..."
+            # Only the names actually present are added. A title "Eric Ly"
+            # cannot silently expand the snippet's surname "Ly".
+            cohort = re.search(r"\b(?:co-)?founded\s+([A-Za-z0-9&\s\-]+?)\s+with\s+(.+)$",
+                               sent_clean, re.IGNORECASE)
+            if cohort:
+                named_creators = self._creator_names(cohort.group(2))
+                including = re.search(r"\bincluding\s+(.+)$", cohort.group(2), re.IGNORECASE)
+                if including:
+                    named_creators.extend(self._creator_names(including.group(1)))
+                for named_creator in dict.fromkeys(named_creators):
+                    triples.append(Triple(
+                        subject=self._normalize_name(cohort.group(1)), relation="created_by",
+                        object=self._normalize_name(named_creator),
+                        qualifiers=["founded", "non_exhaustive"], raw_text=sent_clean,
+                    ))
 
             # ── 4b. Predicate-noun role: "X is the ROLE of Y" ─────────
             # The dominant hallucination shape. The verb patterns above only
@@ -373,18 +430,22 @@ class RelationVerifier:
             #   leadership roles -> leads, subject=ORG, object=PERSON
             #     "Tim Cook is the CEO of Apple"        -> (apple, leads, tim cook)
             role_np = re.search(
-                r"([A-Za-z0-9\s\.\-]+?)\s+(?:is|was)\s+(?:the\s+|a\s+|an\s+|one\s+of\s+the\s+)?"
-                r"(?:co[\s-]?)?(founder|cofounder|creator|inventor|author|developer|"
+                r"(?P<person>[A-Za-z0-9\s\.\-]+?)\s+(?:is|was)\s+(?:(?:not|never)\s+)?"
+                r"(?:(?P<attribution>recognized|recognised|credited|acknowledged|described)\s+as\s+)?"
+                r"(?:the\s+|a\s+|an\s+|one\s+of\s+the\s+)?"
+                r"(?:(?P<qualifier>primary|main|principal|sole|only)\s+)?"
+                r"(?:co[\s-]?)?(?P<role>founder|cofounder|creator|inventor|author|developer|"
                 r"designer|maker|discoverer|architect|writer|builder|"
                 r"ceo|c\.e\.o|president|chairman|chairwoman|owner|director|head|"
-                r"chief\s+executive)s?\s+of\s+([A-Za-z0-9\s\.\-]+)",
+                r"chief\s+executive)s?\s+of\s+(?P<org>[A-Za-z0-9\s\.\-]+)",
                 sent_clean,
                 re.IGNORECASE,
             )
             if role_np:
-                person = role_np.group(1).strip()
-                role_word = re.sub(r"\s+", " ", role_np.group(2).strip().lower())
-                org = role_np.group(3).strip()
+                person = role_np.group("person").strip()
+                role_qualifier = (role_np.group("qualifier") or "").lower()
+                role_word = re.sub(r"\s+", " ", role_np.group("role").strip().lower())
+                org = role_np.group("org").strip()
                 org = re.split(
                     r"\b(and|which|who|in|since|from|located|headquartered|based)\b",
                     org,
@@ -401,10 +462,30 @@ class RelationVerifier:
                             subject=self._normalize_name(org),
                             relation="created_by" if role_word in creation_roles else "leads",
                             object=self._normalize_name(person),
-                            qualifiers=[role_word, "predicate_noun"],
+                            qualifiers=[role_word, "predicate_noun"] + ([role_qualifier] if role_qualifier else [])
+                            + (["attributed_role"] if role_np.group("attribution") else []),
                             raw_text=sent_clean,
                         )
                     )
+
+            # Inverted role lists retain their explicit organization. A generic
+            # "the company's" subject remains unresolved, never title/query-bound.
+            role_list = re.search(
+                r"^([A-Za-z0-9\s.\-]+?)['’]s\s+"
+                r"(?:(primary|main|principal|sole|only)\s+)?"
+                r"(?:co[\s-]?)?(founder|cofounder|creator|inventor|developer)s?\s+"
+                r"(?:include|includes|are|is)\s+([^.;:]+)",
+                sent_clean, re.IGNORECASE,
+            )
+            if role_list:
+                org, role_qualifier, role_word, person = role_list.groups()
+                for named_creator in self._creator_names(person):
+                    triples.append(Triple(
+                        subject=self._normalize_name(org), relation="created_by",
+                        object=self._normalize_name(named_creator),
+                        qualifiers=[role_word.lower(), "predicate_noun", "non_exhaustive"]
+                        + ([role_qualifier.lower()] if role_qualifier else []), raw_text=sent_clean,
+                    ))
 
             # ── 5. Cybersecurity Vulnerability / Association ──────────
             # e.g., "CVE-2021-44228 is associated with Log4Shell"
@@ -453,8 +534,77 @@ class RelationVerifier:
             if sent_negated:
                 for _t in triples[_triple_base:]:
                     _t.negated = True
+            if re.search(r"\b(?:co-founded|co-founder|cofounder|including|among)\b", sent_clean, re.IGNORECASE):
+                for _t in triples[_triple_base:]:
+                    if _t.relation == "created_by" and "non_exhaustive" not in _t.qualifiers:
+                        _t.qualifiers.append("non_exhaustive")
+            for _t in triples[_triple_base:]:
+                if (_t.relation == "created_by" and len(_t.object.split()) < 2
+                        and "non_exhaustive" not in _t.qualifiers):
+                    _t.qualifiers.append("non_exhaustive")
 
         return triples
+
+    def has_unresolved_subject(self, triple: Triple) -> bool:
+        """A generic organization/pronoun cannot ground a named organization."""
+        terms = set(self._clean_str(triple.subject).split())
+        return bool(terms) and terms.issubset(self._GENERIC_SUBJECT_TERMS)
+
+    def evidence_addresses_relation(
+        self, claim_triple: Triple, passage: Any, evidence_triples: List[Triple],
+    ) -> bool:
+        """Check admissibility scope only; this never proves a qualified role.
+
+        Creation, leadership and organization-location evidence must name the
+        same organization, not merely a person shared by two organizations.
+        Bounded relation phrasings admit useful prose the triple templates miss.
+        A trailing "since LinkedIn sale" in a reference title cannot make a
+        different company's founding claim evidence about LinkedIn's founders.
+        """
+        organization_relations = {"created_by", "leads", "location_of"}
+        if claim_triple.relation in organization_relations and self.has_unresolved_subject(claim_triple):
+            return False
+        for evidence in evidence_triples:
+            if evidence.relation != claim_triple.relation:
+                continue
+            if self._names_match(claim_triple.subject, evidence.subject):
+                return True
+            if claim_triple.relation not in organization_relations and self._names_match(claim_triple.object, evidence.object):
+                return True
+        if claim_triple.relation not in organization_relations:
+            return False
+
+        entity = r"\b" + r"\s+".join(re.escape(t) for t in claim_triple.subject.split()) + r"\b"
+        roles, verbs = {
+            "created_by": (
+                r"(?:co[\s-]?)?(?:founder|creator|inventor|author|developer|designer|maker|discoverer|architect|writer|builder)s?",
+                r"(?:co[\s-]?)?(?:found(?:ed)?|creat(?:e|ed)|develop(?:ed)?|invent(?:ed)?|establish(?:ed)?|launch(?:ed)?|start(?:ed)?|build|built|design(?:ed)?)",
+            ),
+            "leads": (
+                r"(?:ceo|president|chairman|chairwoman|owner|director|head|chief\s+executive)s?",
+                r"(?:leads?|led|runs?|heads?|manages?|owns?)",
+            ),
+            "location_of": (
+                r"(?:headquarters|head\s+office|hq|locations?)",
+                r"(?:based|headquartered|located|situated|stands?)",
+            ),
+        }[claim_triple.relation]
+        # A relation argument must end here: "launch LinkedIn Learning" cannot
+        # address a LinkedIn claim merely because the entity prefix is shared.
+        entity_end = r"(?=\s*(?:$|[.,!?;:)]|\b(?:in|on|at|by|with|to|for|and|since|after|before|during|as|which|while|alongside)\b))"
+        scope_patterns = (
+            entity + r"(?:['’]s)?\s+(?:(?:primary|main|principal|sole|only)\s+)?" + roles + r"\b",
+            r"\b" + roles + r"\s+(?:of|at|for)\s+" + entity + entity_end,
+            r"\b" + verbs + r"\s+" + entity + entity_end,
+            entity + r"\s+(?:was|is|has\s+been|had\s+been)\s+(?:not\s+|never\s+)?"
+            r"(?:(?:originally|initially)\s+)?" + verbs + r"\b",
+            entity + r"\s+(?:lists|names|credits|identifies|recognizes|describes)\b[^.;!?]{0,100}\b" + roles + r"\b",
+        )
+        snippet = self._normalize_typography(str(getattr(passage, "snippet", "") or ""))
+        # Temporal/reference comparisons are separate clauses, not entity
+        # arguments of the earlier founding predicate. Titles remain metadata.
+        clauses = re.split(r"[.!?;\n]+|\b(?:since|after|before|whereas|although)\b", snippet, flags=re.IGNORECASE)
+        return any(re.search(pattern, clause, re.IGNORECASE) for clause in clauses for pattern in scope_patterns)
 
     def _names_match(self, name1: str, name2: str) -> bool:
         """Return True only when two entity names denote the SAME entity.
@@ -544,7 +694,7 @@ class RelationVerifier:
         passive construction; otherwise leave the result to NLI.
         """
         raw_title = str(getattr(passage, "title", "") or "")
-        snippet = str(getattr(passage, "snippet", "") or "")
+        snippet = self._normalize_typography(str(getattr(passage, "snippet", "") or ""))
         if not raw_title or not snippet:
             return []
 
@@ -552,31 +702,58 @@ class RelationVerifier:
         if not title:
             return []
 
+        month = "(?:" + "|".join(sorted(self._MONTH_NAMES)) + ")"
         passive = re.search(
             r"\b(created|developed|invented|built|designed|founded|introduced)"
             r"(?:\s+(?:originally|initially))?"
-            r"(?:\s+(?:in\s+(?:the\s+)?(?:year\s+)?\d{3,4}"
+            r"(?:\s+(?:in\s+(?:the\s+)?(?:year\s+)?(?:" + month + r"\s+)?\d{3,4}"
             r"|on\s+[A-Za-z]+\s+\d{1,2},?\s+\d{4}),?)?"
-            r"\s+by\s+([A-Za-z0-9][A-Za-z0-9 .,'&\-]+?)"
-            r"(?=\s+(?:to|for|at|in|as|who|which|where)\b|[.;:]|$)",
+            r"\s+by\s+([^\n;:]+?)(?=\.(?:\s|$)|$)",
             snippet,
             re.IGNORECASE,
         )
         if not passive:
             return []
 
-        creator = passive.group(2).strip(" ,")
-        if not creator:
+        # A page title can resolve an omitted/generic page subject, never a
+        # different explicit organization or a person mentioned in a reference.
+        prefix = re.split(r"[.!?\n;]|:\s*", snippet[:passive.start()])[-1].strip()
+        generic_prefix = re.fullmatch(
+            r"(?:(?:the|this)\s+(?:company|organization|organisation|firm|business|corporation)\s+)?"
+            r"(?:(?:was|is|were)\s+)?(?:(?:not|never)\s+)?", prefix + " ", re.IGNORECASE,
+        )
+        explicit_prefix = re.fullmatch(
+            r"(?:the\s+)?" + re.escape(title)
+            + r"(?:\s+(?:is|was|were)(?:\s+(?:not|never))?"
+            r"(?:\s+(?:a|an|the)\s+"
+            r"(?:(?:american|multinational|technology|computer|software|internet|social|media|"
+            r"networking|online|professional|business|public|privately|held|publicly|traded)\s+){0,10}"
+            r"(?:company|corporation|organization|organisation|firm|business))?)?", prefix, re.IGNORECASE,
+        )
+        if prefix and not generic_prefix and not explicit_prefix:
             return []
+
+        creators = self._creator_names(passive.group(2))
+        team = re.search(
+            r"\band\s+(?:the\s+)?founding\s+team(?:\s+members)?\b[^()\n;]{0,160}"
+            r"\(([^()]*)\)", passive.group(2), re.IGNORECASE,
+        )
+        if team:
+            creators.extend(self._creator_names(team.group(1)))
+        if not creators:
+            return []
+        non_exhaustive = bool(re.search(r"\b(?:founding\s+team|including|among|co-founder|cofounder)\b",
+                                        passive.group(2), re.IGNORECASE))
         return [
             Triple(
                 subject=self._normalize_name(title),
                 relation="created_by",
                 object=self._normalize_name(creator),
-                qualifiers=[passive.group(1).lower(), "title_anchored"],
-                negated=bool(self._NEGATION_CUE.search(passive.group(0))),
+                qualifiers=[passive.group(1).lower(), "title_anchored"]
+                + (["non_exhaustive"] if non_exhaustive or len(creator.split()) < 2 else []),
+                negated=bool(self._NEGATION_CUE.search(prefix + " " + passive.group(0))),
                 raw_text=passive.group(0),
-            )
+            ) for creator in dict.fromkeys(creators)
         ]
 
     def _contextual_location_triples(self, passage: Any) -> List[Triple]:
@@ -598,7 +775,7 @@ class RelationVerifier:
         second valid location never manufactures a contradiction.
         """
         raw_title = str(getattr(passage, "title", "") or "")
-        snippet = str(getattr(passage, "snippet", "") or "")
+        snippet = self._normalize_typography(str(getattr(passage, "snippet", "") or ""))
         if not raw_title or not snippet:
             return []
         title = self._clean_page_title(raw_title)
@@ -626,6 +803,9 @@ class RelationVerifier:
                     obj, flags=re.IGNORECASE,
                 )[0].strip(" ,")
                 if len(obj) <= 2:
+                    continue
+                # "founded in December 2002" supplies a date, not a place.
+                if self._normalize_name(obj) in self._MONTH_NAMES:
                     continue
                 triples.append(
                     Triple(
@@ -660,8 +840,9 @@ class RelationVerifier:
         snippet = str(getattr(passage, "snippet", "") or "")
         if re.search(r"\b(?:currently|today|now|present-day|no\s+longer)\b", snippet, re.IGNORECASE):
             return False
-        evidence_triples = self.extract_triples(
-            f"{getattr(passage, 'title', '')} {snippet}"
+        evidence_triples = (
+            self.extract_triples(str(getattr(passage, "title", "") or ""))
+            + self.extract_triples(snippet)
         )
         relevant = [e for e in evidence_triples if e.relation == claim_triples[0].relation]
         return bool(relevant) and all("historical_or_traditional" in e.qualifiers for e in relevant)
@@ -684,30 +865,56 @@ class RelationVerifier:
 
         c_triple = claim_triples[0]
 
-        # Polarity gate (fail-safe). The extractor is polarity-blind: it collapses
-        # "X was NOT created by Y" into the positive triple (X, created_by, Y). If a
-        # negated claim runs the structural comparison, a TRUE refutation such as
-        # "Python was not created by Elon Musk" matches truth evidence ("created by
-        # Guido van Rossum"), fires OBJECT_MISMATCH, and manufactures a false 0.95
-        # contradiction over ~0 NLI. When the claim is negated we cannot trust the
-        # (polarity-blind) triple, so we abstain here and defer to the polarity-aware
-        # NLI stage by reporting NO_TRIPLE_EXTRACTED.
-        if c_triple.negated:
-            return RelationCheckResult(
-                claim_triple=c_triple,
-                evidence_triples=[],
-                status="NO_TRIPLE_EXTRACTED",
-                mismatch_detail="Claim is negated; relation comparison is polarity-blind, deferring to NLI",
-            )
-
         all_evidence_triples: List[Triple] = []
 
         for p in evidence_passages:
-            text = f"{getattr(p, 'title', '')} {getattr(p, 'snippet', '')}"
-            e_triples = self.extract_triples(text)
+            # A title is metadata, not a prefix to the first snippet sentence.
+            # Concatenating them used to produce fabricated subjects such as
+            # "25 years of Java Java" and miss real creator mismatches.
+            e_triples = self.extract_triples(str(getattr(p, "snippet", "") or ""))
             e_triples.extend(self._contextual_creation_triples(p))
             e_triples.extend(self._contextual_location_triples(p))
             all_evidence_triples.extend(e_triples)
+
+        # Lists and compound claims cannot be proved by their first member.
+        # Confirm a pure creator list only when each explicit member is present;
+        # otherwise leave its complete semantics to NLI/atomic decomposition.
+        distinct_claims = {
+            (triple.subject, triple.relation, triple.object,
+             tuple(sorted(self._ROLE_QUALIFIERS.intersection(triple.qualifiers))), triple.negated): triple
+            for triple in claim_triples
+        }
+        if len(distinct_claims) > 1:
+            creators_only = all(
+                triple.relation == "created_by" and not triple.negated
+                and not self._ROLE_QUALIFIERS.intersection(triple.qualifiers)
+                and not self.has_unresolved_subject(triple)
+                for triple in claim_triples
+            )
+            every_creator_supported = creators_only and all(any(
+                not evidence.negated and evidence.relation == "created_by"
+                and not self._ROLE_QUALIFIERS.intersection(evidence.qualifiers)
+                and self._names_match(triple.subject, evidence.subject)
+                and self._names_match(triple.object, evidence.object)
+                for evidence in all_evidence_triples
+            ) for triple in distinct_claims.values())
+            return RelationCheckResult(
+                claim_triple=c_triple, evidence_triples=all_evidence_triples,
+                status="MATCH" if every_creator_supported else "NO_TRIPLE_EXTRACTED",
+                combination_rule_applied="CONFIRM_ENTAILMENT" if every_creator_supported else "",
+                mismatch_detail="" if every_creator_supported else "Compound claim is not fully grounded; first-member support is insufficient",
+            )
+
+        # Preserve evidence scope when deterministic proof must abstain, so
+        # direct positive/negative same-organization prose can still reach NLI.
+        qualified_role = bool(self._ROLE_QUALIFIERS.intersection(c_triple.qualifiers))
+        unresolved_subject = c_triple.relation in {"created_by", "leads", "location_of"} and self.has_unresolved_subject(c_triple)
+        if c_triple.negated or qualified_role or unresolved_subject:
+            return RelationCheckResult(
+                claim_triple=c_triple, evidence_triples=all_evidence_triples,
+                status="NO_TRIPLE_EXTRACTED",
+                mismatch_detail="Qualified, negated, or unresolved role requires scoped NLI; no deterministic relation proof",
+            )
 
         if not all_evidence_triples:
             return RelationCheckResult(
@@ -736,7 +943,7 @@ class RelationVerifier:
                 continue
             subj_aligned = [
                 e for e in all_evidence_triples
-                if e.relation == rel and self._names_match(c_triple.subject, e.subject)
+                if not e.negated and e.relation == rel and self._names_match(c_triple.subject, e.subject)
             ]
             if not subj_aligned:
                 continue
@@ -746,6 +953,12 @@ class RelationVerifier:
                     evidence_triples=all_evidence_triples,
                     status="MATCH",
                     combination_rule_applied="CONFIRM_ENTAILMENT",
+                )
+            if rel == "created_by" and any("non_exhaustive" in evidence.qualifiers for evidence in subj_aligned):
+                return RelationCheckResult(
+                    claim_triple=c_triple, evidence_triples=all_evidence_triples,
+                    status="NO_TRIPLE_EXTRACTED",
+                    mismatch_detail="An unlisted creator is not contradicted by non-exhaustive creator evidence",
                 )
             proven = subj_aligned[0].object
             return RelationCheckResult(
@@ -758,6 +971,8 @@ class RelationVerifier:
 
         # Compare claim triple against candidate evidence triples
         for e_triple in all_evidence_triples:
+            if e_triple.negated:
+                continue
             if self._present_tense_claim(claim_text) and "historical_or_traditional" in e_triple.qualifiers:
                 continue
             # Check for subject alignment or reverse alignment

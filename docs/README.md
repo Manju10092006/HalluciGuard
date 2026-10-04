@@ -9,6 +9,7 @@ description of the working system), **detailed agent guides**, and **reports**
 - [Architecture](architecture.md)
 - [Project structure: frontend, backend, src and APIs](project-structure.md)
 - [Agent contracts](agents.md)
+- [Run all seven agents and inspect Memory](seven-agent-validation.md)
 - [Detector](detector.md)
 - [API reference](api.md)
 - [Retrieval and n8n](retrieval.md)
@@ -37,6 +38,8 @@ Per-agent input/output contracts and behavior live in [`docs/agents/`](agents/):
 Versioned baseline audits, change logs, validation runs, and engineering
 reports live under [`docs/reports/`](reports/). See the
 [reports index](reports/README.md).
+
+The [October 4 execution repair review](reports/execution-repair-review-20261004.md) lists the source changes, actual validation scope and known remaining issues. It distinguishes a working console/repair demonstration from measured hallucination-detection accuracy.
 
 > Dates and scope matter: a historical document can describe earlier models,
 > verdict names, or pipeline stages and must **not** override the current

@@ -26,22 +26,26 @@ def _phase1_service():
 class DetectorAgent:
     """Compatibility surface used by HalluciGuard orchestration and services."""
 
-    _detector: Detector | None = None
-    _lock = threading.Lock()
-
     def __init__(self, model_path: str | Path | None = None, device: str | None = None):
         repo_root = Path(__file__).resolve().parent.parent
         configured = os.getenv("HALLUCIGUARD_DETECTOR_MODEL", "").strip()
         selected_path = Path(model_path or configured or repo_root / "artifacts" / "detector-best")
         self.model_path = selected_path if selected_path.is_absolute() else repo_root / selected_path
         self.device = device
+        # Ownership follows this instance's checkpoint/device configuration.
+        # The production bridge intentionally reuses one agent; incompatible
+        # separately constructed agents must not inherit its first-loaded model.
+        self._detector: Detector | None = None
+        self._lock = threading.Lock()
 
     def _get_detector(self) -> Detector:
-        if self.__class__._detector is None:
-            with self.__class__._lock:
-                if self.__class__._detector is None:
-                    self.__class__._detector = Detector(self.model_path, self.device)
-        return self.__class__._detector
+        if self._detector is None:
+            with self._lock:
+                if self._detector is None:
+                    # Assignment occurs only after a complete successful load,
+                    # leaving failed initialization retryable on the next call.
+                    self._detector = Detector(self.model_path, self.device)
+        return self._detector
 
     @staticmethod
     def _evidence_from(value: Any) -> list[str]:
