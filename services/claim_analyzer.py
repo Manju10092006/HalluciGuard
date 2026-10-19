@@ -798,6 +798,20 @@ class ClaimAnalyzer:
                     fb.llm_error = "empty LLM claim list"
                     return fb
                 return ClaimAnalysis(domain=domain or fb.domain, candidates=[], source="llm")
+            # Hosted extraction can return a valid but incomplete nonempty
+            # list. Keep source-preserving factual assertions from the offline
+            # analysis too; each added assertion still requires verification.
+            known = {" ".join(c.claim_text.split()) for c in candidates}
+            used_ids = {c.claim_id for c in candidates}
+            for extra in fallback_analyze(draft, user_query, domain_hint).factual_claims:
+                normalized = " ".join(extra.claim_text.split())
+                if normalized and normalized not in known:
+                    extra.claim_id = f"coverage-{len(candidates) + 1}"
+                    while extra.claim_id in used_ids:
+                        extra.claim_id += "-extra"
+                    candidates.append(extra)
+                    used_ids.add(extra.claim_id)
+                    known.add(normalized)
             return ClaimAnalysis(domain=domain, candidates=candidates, source="llm")
         except Exception as exc:  # never block the pipeline on the analyzer
             logger.warning("Claim Analyzer LLM error (%s); using fallback.", exc)

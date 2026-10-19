@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react'
 import { ShieldCheck } from 'lucide-react'
 
 const STAGES = [
-  'Analyzing claim structure and boundaries...',
-  'Tracing primary evidence records...',
-  'Comparing source citations and entailment...',
-  'Checking contextual consistency and verdict...',
+  'Verification is pending...',
+  'Waiting for the verification service...',
+  'Verification is still pending...',
+  'Waiting for the final verification decision...',
 ]
 
 export function VerificationProgress() {
@@ -35,7 +35,7 @@ export function VerificationProgress() {
       <div className="progress-bar-track">
         <div
           className="progress-bar-fill"
-          style={{ width: `${((currentStep + 1) / STAGES.length) * 100}%` }}
+          style={{ width: '50%' }}
         />
       </div>
 

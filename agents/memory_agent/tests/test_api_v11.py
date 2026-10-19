@@ -55,7 +55,7 @@ class TestBatchEndpoint:
     @pytest.mark.asyncio
     async def test_store_batch(self, client):
         payload = [
-            {
+            {"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
                 "claim_text": "Batch API one",
                 "domain": "test",
                 "verdict": "verified",
@@ -104,7 +104,7 @@ class TestMetricsEndpoint:
 class TestDuplicateEndpoint:
     @pytest.mark.asyncio
     async def test_duplicate_store_via_api(self, client):
-        payload = {
+        payload = {"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             "claim_text": "Duplicate API claim",
             "domain": "test",
             "verdict": "verified",
@@ -126,7 +126,7 @@ class TestApiKeyAuth:
 
         monkeypatch.setattr(api_module.main.settings, "memory_agent_api_key", "secret-key")
 
-        resp = await client.post("/store", json={
+        resp = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             "claim_text": "Unauthorized claim",
             "domain": "test",
             "verdict": "verified",
@@ -142,7 +142,7 @@ class TestApiKeyAuth:
 
         resp = await client.post(
             "/store",
-            json={
+            json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
                 "claim_text": "Authorized claim",
                 "domain": "test",
                 "verdict": "verified",
@@ -163,7 +163,7 @@ class TestApiKeyAuth:
 
     @pytest.mark.asyncio
     async def test_no_key_configured_allows_access(self, client):
-        resp = await client.post("/store", json={
+        resp = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             "claim_text": "Open claim",
             "domain": "test",
             "verdict": "verified",
@@ -175,7 +175,7 @@ class TestApiKeyAuth:
 class TestDeleteFactEndpoint:
     @pytest.mark.asyncio
     async def test_delete_fact(self, client):
-        r = await client.post("/store", json={
+        r = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             "claim_text": "Delete me",
             "domain": "test",
             "verdict": "verified",
@@ -207,7 +207,7 @@ class TestUpdateFactEndpoint:
         fact_id = r.json()["fact_id"]
         resp = await client.put(
             f"/facts/{fact_id}",
-            json={"new_verdict": "verified", "new_confidence": 0.9},
+            json={"new_verdict": "verified", "new_confidence": 0.9, "new_evidence": [{"source_id":"fixture", "snippet":"Independent support for this updated fixture."}]},
         )
         assert resp.status_code == 200
         data = resp.json()

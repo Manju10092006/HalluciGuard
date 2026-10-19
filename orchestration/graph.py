@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import weakref
 import math
 import os
 import sys
@@ -89,7 +90,20 @@ def _answer_addresses_query(query: str, answer: str, threshold: float = 0.6) -> 
     tokens to score against, so it can only ever *withhold* an accept, never
     create one.
     """
-    q_tokens = _salient_tokens(query)
+    import re
+    # Presentation instructions are not answer topics. Keep the coverage
+    # threshold unchanged and preserve proper-name number tokens (Two Sigma).
+    topic_query = re.sub(
+        r"^\s*(?:in|using)\s+(?:one|a single|[0-9]+)\s+(?:sentence|paragraph|word)s?\s*[:,]?\s*",
+        "", query, flags=re.IGNORECASE,
+    )
+    topic_query = re.sub(r"^\s*(?:name|list)\s+", "", topic_query, flags=re.IGNORECASE)
+    topic_query = re.sub(
+        r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+)\s+(?=(?:actual\s+)?[a-z]+s\b)",
+        "", topic_query,
+    )
+    topic_query = re.sub(r"\bactual\s+(?=[a-z]+s\b)", "", topic_query)
+    q_tokens = _salient_tokens(topic_query)
     if not q_tokens:
         return True
     a_tokens = _salient_tokens(answer)
@@ -845,6 +859,18 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
             verifier, payload.query_id, payload.domain
         )
 
+        # Every requested claim must have exactly one matching report. A
+        # supported subset is not verification of the submitted whole answer.
+        if state.get("claims_gated"):
+            requested = {c.claim_id: " ".join(c.text.split()) for c in suspicious_claims}
+            returned = canonical_verifier_result.claim_reports
+            ids = [c.claim_id for c in returned]
+            if (len(requested) != len(suspicious_claims) or len(ids) != len(set(ids))
+                    or set(ids) != set(requested) or any(
+                        " ".join(c.claim_text.split()) != requested.get(c.claim_id)
+                        for c in returned)):
+                raise ValueError("verifier_incomplete_or_mismatched_claim_coverage")
+
         # BUG-003 FIX: Use VerificationStatus enum for answer-level aggregation
         verification_status = _aggregate_verification_status(canonical_verifier_result.claim_reports)
 
@@ -1344,6 +1370,8 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
         positively_verified = bool(canonical_v_res.claim_reports) and all(
             str(getattr(r, "verdict", "")).lower()
             in ("verified", "supported", "verdictlabel.verified")
+            and any(str(e.snippet).strip() and str(e.entailment_label).lower().rsplit(".", 1)[-1] == "entailment"
+                    for e in r.evidence)
             for r in canonical_v_res.claim_reports
         )
         # The ReVerifier is the final safety gate for generated corrections.
@@ -1586,7 +1614,20 @@ def _build_agent_outcomes(
     }
 
 
+# Per-loop serialization covers load/update/save of per-request MemoryAgent
+# instances. Without it concurrent accepted requests can overwrite snapshots.
+# Local serving uses one process/loop; cross-process writers need external locking.
+_MEMORY_LOCKS = weakref.WeakKeyDictionary()
+
+
 async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    lock = _MEMORY_LOCKS.setdefault(loop, asyncio.Lock())
+    async with lock:
+        return await _memory_node_impl(state)
+
+
+async def _memory_node_impl(state: HalluciGuardState) -> dict[str, Any]:
     from agents.memory_agent.memory.memory_agent import MemoryAgent
     from agents.memory_agent.schemas.models import StoreFactRequest
     from orchestration.schemas import MemoryResult, MemoryStatus
@@ -1615,7 +1656,21 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
                     verdict_str = str(cr.get("verdict", "")).lower()
                     if verdict_str in {"verified", "verdictlabel.verified"}:
                         verified_reports.append(cr)
-            if not verified_reports:
+            # A correction without independent reverification must never reach storage.
+    if state.get("correction_result") and not (isinstance(rev_res, dict) and rev_res.get("passed") is True):
+        verified_reports = []
+    # Defense in depth: even a forged ACCEPT cannot persist a partial answer.
+    final_verifier = (rev_res or {}).get("verifier_result") if isinstance(rev_res, dict) else state.get("verifier_result")
+    final_reports = (final_verifier or {}).get("claim_reports", [])
+    if final_reports and any(str(r.get("verdict", "")).lower() not in {"verified", "verdictlabel.verified"} for r in final_reports):
+        verified_reports = []
+    verified_reports = [r for r in verified_reports if any(
+        str(e.get("snippet") or e.get("text") or "").strip()
+        and str(e.get("source") or e.get("source_id") or e.get("url") or "").strip()
+        for e in r.get("evidence", [])
+    )]
+
+    if not verified_reports:
                 claim_evidence = state.get("verifier", {}).get("claim_evidence", [])
                 verified_reports = [
                     r

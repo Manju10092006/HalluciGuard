@@ -21,6 +21,7 @@ from agents.judge_agent.judge_agent import JudgeAgent, _verdict_value
 from orchestration.schemas import (
     VerifierResult,
     ClaimReport,
+    Evidence,
     VerdictLabel,
     ExecutionStatus,
 )
@@ -38,7 +39,9 @@ def _cr(cid, verdict, sup, con, conf):
         support_score=sup,
         contradiction_score=con,
         confidence_score=conf,
-        evidence=[],
+        evidence=[Evidence(evidence_id="fixture",source="fixture",snippet=cid,
+            entailment_label="contradiction" if verdict == VerdictLabel.CONTRADICTED else "entailment")]
+            if verdict in (VerdictLabel.VERIFIED, VerdictLabel.CONTRADICTED) else [],
     )
 
 
@@ -53,15 +56,8 @@ def _vr(domain, claims, confidence=0.9):
     )
 
 
-def test_verified_dominant_with_minor_unverified_accepts_immediately():
-    """Verified CORE claims + one PERIPHERAL unverified detail, general domain.
-    The unverified claim is incidental to the query (an aside about a birth year
-    when the user asked who founded a company), so it must be tolerated and the
-    answer ACCEPTed on the FIRST pass, not thrash through VERIFY_AGAIN.
-
-    Criticality — not a claim count — is what makes this safe: the claims that
-    actually answer the query are grounded.
-    """
+def test_verified_core_with_peripheral_unverified_requires_verification():
+    """Peripheral assertions remain in the answer and cannot be released as verified."""
     vr = _vr(
         "General Knowledge",
         [
@@ -77,8 +73,8 @@ def test_verified_dominant_with_minor_unverified_accepts_immediately():
         original_response="resp",
         domain="General Knowledge", retry_count=0,
     )
-    assert _str(r.decision) == "ACCEPT", f"got {_str(r.decision)} ({r.reason})"
-    assert r.decision_basis == "PERIPHERAL_UNVERIFIED_TOLERATED_ACCEPT"
+    assert _str(r.decision) == "VERIFY_AGAIN", f"got {_str(r.decision)} ({r.reason})"
+    assert r.decision_basis == "CONFLICTED_RETRY"
     # confidence still tracks the verifier, not discounted
     assert abs(r.confidence - 0.9) < 1e-4
 
@@ -161,7 +157,7 @@ def test_reverification_passed_accepts():
     """The passing gate: passed AND remaining==0 -> ACCEPT with the stable basis."""
     r = JudgeAgent().evaluate(
         verifier_result=_vr("General Knowledge", []),
-        reverification_result={"passed": True, "remaining_contradictions": 0},
+        reverification_result={"passed": True, "remaining_contradictions": 0, "verifier_result": _vr("general", [_cr("Independent corrected claim", VerdictLabel.VERIFIED, 0.95, 0.01, 0.9)])},
         user_query="q", original_response="resp",
         domain="General Knowledge", retry_count=0,
     )

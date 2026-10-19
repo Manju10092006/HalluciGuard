@@ -141,16 +141,19 @@ async def test_final_pass_core_gap_reaches_terminal_abstain_not_dead_loop():
 
 
 @pytest.mark.asyncio
-async def test_grounded_answer_reaches_terminal_accept_not_human_review():
-    # Core verified + only peripheral unverified detail: the answer is
-    # substantively grounded, so the Judge reaches a terminal ACCEPT and routes
-    # to memory -- it never enters the dead VERIFY_AGAIN -> human_review branch,
-    # even on the final permitted pass.
+async def test_partial_answer_reaches_terminal_withholding():
     out = await graph._judge_node(
         _state(retry_count=2, verifier_result=_verifier_grounded_with_peripheral())
     )
-    assert out["judge_decision"] == "ACCEPT", (
-        f"grounded answer not accepted; got {out['judge_decision']} ({out['judge'].get('reason')})"
-    )
+    assert out["judge_decision"] == "ABSTAIN"
+    assert graph._judge_route({**out, "max_retries": 2}) == "human_escalation"
+
+
+@pytest.mark.asyncio
+async def test_fully_grounded_answer_reaches_terminal_accept():
+    verified = _verifier_grounded_with_peripheral()
+    verified["claim_reports"] = verified["claim_reports"][:1]
+    out = await graph._judge_node(_state(retry_count=2, verifier_result=verified))
+    assert out["judge_decision"] == "ACCEPT"
     assert graph._judge_route({**out, "max_retries": 2}) == "memory"
     assert out["terminal_status"] == "accepted"

@@ -1,4 +1,4 @@
-from halluciguard_detector.data import _sentence_label
+from halluciguard_detector.data import _uniform_sentence_label
 from halluciguard_detector.text import has_entity_conflict, lexical_evidence, sentence_spans
 
 
@@ -16,9 +16,11 @@ def test_annotation_mapping():
     conflict = [{"start": 5, "end": 10, "label_type": "Evident Conflict"}]
     baseless = [{"start": 5, "end": 10, "label_type": "Evident Baseless Info"}]
     implicit = [{"start": 5, "end": 10, "label_type": "Subtle Baseless Info", "implicit_true": True}]
-    assert _sentence_label(0, 20, conflict) == "CONTRADICTED"
-    assert _sentence_label(0, 20, baseless) == "NOT_ENOUGH_INFO"
-    assert _sentence_label(0, 20, implicit) == "SUPPORTED"
+    assert _uniform_sentence_label(0, 20, conflict) is None
+    assert _uniform_sentence_label(5, 10, conflict) == "CONTRADICTED"
+    assert _uniform_sentence_label(0, 20, baseless) is None
+    assert _uniform_sentence_label(5, 10, baseless) == "NOT_ENOUGH_INFO"
+    assert _uniform_sentence_label(0, 20, implicit) == "SUPPORTED"
 
 
 def test_lexical_retrieval_prefers_relevant_sentence():

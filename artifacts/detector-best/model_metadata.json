@@ -1,0 +1,32 @@
+{
+  "name": "halluciguard-detector",
+  "task": "three-class grounded claim verification (SUPPORTED / CONTRADICTED / NOT_ENOUGH_INFO)",
+  "base_model": "microsoft/deberta-v3-xsmall",
+  "sequence_length": 256,
+  "id2label": {
+    "0": "SUPPORTED",
+    "1": "CONTRADICTED",
+    "2": "NOT_ENOUGH_INFO"
+  },
+  "calibration": {
+    "temperature": 0.7586129307746887,
+    "contradiction_threshold": 0.4599999999999999,
+    "verification_risk_threshold": 0.625,
+    "deprecated_hallucination_threshold": 0.625
+  },
+  "training": {
+    "epochs": 1,
+    "seed": null,
+    "batch_size": null,
+    "max_length": 256
+  },
+  "evaluation": {
+    "test_metrics_file": "test_metrics.json",
+    "dev_predictions_file": "dev_predictions.npz",
+    "test_predictions_file": "test_predictions.npz"
+  },
+  "consistency": {
+    "conflicts": [],
+    "ok": true
+  }
+}

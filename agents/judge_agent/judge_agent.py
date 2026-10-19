@@ -292,6 +292,9 @@ class JudgeAgent:
         # -------------------------------------------------------------------
         claim_reports = normalized_verifier.claim_reports
 
+        def grounded(report, direction):
+            return any(str(e.snippet).strip() and _verdict_value(e.entailment_label) == direction for e in report.evidence)
+
         claims_to_correct: List[ClaimReport] = []
         claims_to_preserve: List[ClaimReport] = []
         trusted_evidence: List[Evidence] = []
@@ -301,7 +304,7 @@ class JudgeAgent:
 
         for claim in claim_reports:
             verdict_str = _verdict_value(claim.verdict)
-            if verdict_str == VerdictLabel.CONTRADICTED.value:
+            if verdict_str == VerdictLabel.CONTRADICTED.value and grounded(claim, "contradiction"):
                 claims_to_correct.append(claim)
                 # A contradicted claim's evidence is the refuting context for THAT
                 # claim and is kept as contradictory_evidence, cleanly separated from
@@ -311,10 +314,12 @@ class JudgeAgent:
                 # buckets, so it always has the replacement fact to write from.
                 for ev in claim.evidence:
                     contradictory_evidence.append(ev)
-            elif verdict_str == VerdictLabel.VERIFIED.value:
+            elif verdict_str == VerdictLabel.VERIFIED.value and grounded(claim, "entailment"):
                 claims_to_preserve.append(claim)
                 for ev in claim.evidence:
                     trusted_evidence.append(ev)
+            elif verdict_str in (VerdictLabel.VERIFIED.value, VerdictLabel.CONTRADICTED.value):
+                unverified_claims.append(claim)
             elif verdict_str == VerdictLabel.CONFLICTED.value:
                 conflicted_claims.append(claim)
             elif verdict_str == VerdictLabel.UNVERIFIED.value:
@@ -452,41 +457,8 @@ class JudgeAgent:
             reason = "All claims verified against authoritative ground-truth evidence."
             explanation = f"Response is fully grounded in {policy.domain_name} sources with overall confidence {normalized_verifier.overall_confidence:.2f}."
 
-        # Rule C2: Verified core with only PERIPHERAL unverified detail -> ACCEPT.
-        #
-        # This replaces the former count-majority rule (verified >= unverified),
-        # which could ACCEPT an answer whose CORE claim was unverified merely
-        # because incidental sub-claims outnumbered it. The corrected model is
-        # criticality-driven: ACCEPT only when
-        #   * there are no contradictions,
-        #   * NO CORE claim is unverified and NO CORE claim is conflicted
-        #     (peripheral unverified detail — decomposition noise or an incidental
-        #     fact the user did not ask about — may be tolerated),
-        #   * at least one CORE claim is verified (the answer actually grounds what
-        #     was asked), and
-        #   * the domain is MODERATE/RELAXED (STRICT/VERY_STRICT never tolerate any
-        #     grounding gap and fall through to the conservative path).
-        # This eliminates the entire false-ACCEPT class, not just one example.
-        elif (
-            not has_contradictions
-            and not has_core_grounding_gap
-            and core_preserved
-            and has_unverified
-            and policy.strictness_level in ("MODERATE", "RELAXED")
-        ):
-            decision = JudgeDecision.ACCEPT
-            severity = SeverityLevel.LOW
-            decision_basis = DecisionBasis.PERIPHERAL_UNVERIFIED_TOLERATED
-            reason = (
-                f"All core claims verified; {len(unverified_claims)} peripheral "
-                f"unverified detail(s) tolerated under {policy.domain_name} policy."
-            )
-            explanation = (
-                f"Every claim responsive to the query is grounded ({len(core_preserved)} "
-                f"core verified) with no contradictions or conflicts. The unverified "
-                f"remainder is peripheral to the question and does not warrant blocking "
-                f"a substantively grounded response in a {policy.strictness_level.lower()} domain."
-            )
+        # Every released factual assertion needs support. Peripheral content is
+        # still included in the delivered answer, so it cannot bypass Rule D.
 
         # Rule D: Unverified or Conflicted claims remain (including any CORE gap).
         elif has_unverified or has_conflicted:
@@ -668,6 +640,26 @@ class JudgeAgent:
             rev_status = str(getattr(rev_res, "status", "completed")).lower()
             v_res = getattr(rev_res, "verifier_result", None)
 
+        # A passed flag is not evidence. Re-check the independent verifier's
+        # completed, nonempty, fully supported claim reports at this boundary.
+        verified = self._normalize_verifier_result(v_res, "")
+        independently_grounded = bool(
+            verified and _verdict_value(verified.status) == "completed"
+            and verified.claim_reports and all(
+                _verdict_value(c.verdict) == "verified" and any(
+                    str(e.snippet).strip() and _verdict_value(e.entailment_label) == "entailment"
+                    for e in c.evidence
+                ) for c in verified.claim_reports
+            )
+        )
+        if passed and not independently_grounded:
+            return JudgeResult(
+                decision=JudgeDecision.ABSTAIN, severity=SeverityLevel.HIGH,
+                reason="Reverification passed flag lacks complete supporting evidence.",
+                explanation="Withheld: independent claim evidence is missing or incomplete.",
+                confidence=0.0, status=ExecutionStatus.FAILED,
+            )
+
         confidence = self._confidence_from_reverification(v_res, passed)
 
         # ---- The re-verification could not be executed -> ABSTAIN -------------
@@ -700,8 +692,7 @@ class JudgeAgent:
                 reason="Post-correction re-verification passed; no remaining contradiction.",
                 explanation=(
                     "The corrected answer was re-verified and contains no contradicted "
-                    "claim. Any unverified remainder carries no refuting evidence and is "
-                    "treated as unknown, not false. Safe to release."
+                    "claim. Every returned corrected claim has supporting evidence."
                 ),
                 confidence=confidence,
                 correction_request=None,

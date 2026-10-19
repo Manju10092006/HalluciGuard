@@ -52,7 +52,7 @@ export function HalluciGuardMessage({ message, onOpenSource }) {
         )}
 
         {/* Priority 5: Agent activity pipeline disclosure */}
-        <AgentActivity />
+        <AgentActivity pipeline={message.pipeline} />
       </div>
 
       <style>{`

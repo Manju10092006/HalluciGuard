@@ -115,6 +115,8 @@ async def store_fact(request: Request, body: StoreFactRequest):
         for _ in result.contradictions:
             contradiction_total.labels(body.domain).inc()
         return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.exception("Failed to store fact")
         raise HTTPException(status_code=500, detail=str(e))
@@ -152,7 +154,8 @@ async def update_fact(request: Request, fact_id: str, body: UpdateFactRequest):
         )
         return await agent.update_fact(update_body)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        code = 404 if str(e).startswith("Fact ") and str(e).endswith("not found") else 422
+        raise HTTPException(status_code=code, detail=str(e))
     except Exception as e:
         logger.exception("Failed to update fact")
         raise HTTPException(status_code=500, detail=str(e))

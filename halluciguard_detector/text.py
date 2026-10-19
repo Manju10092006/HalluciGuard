@@ -12,6 +12,9 @@ class Span:
 _BOUNDARY = re.compile(r"(?<=[.!?])(?:[\"')\]]*)\s+(?=[\"'(\[]*[A-Z0-9])")
 _TOKEN = re.compile(r"[A-Za-z0-9]+")
 _ENTITY = re.compile(r"\b(?:[A-Z][A-Za-z0-9'-]*)(?:\s+[A-Z][A-Za-z0-9'-]*)*\b")
+#: Words that genuinely start lowercase; used to tell a real proper noun from a
+#: sentence-initial capitalised common word (see ``shared_relation``).
+_LOWERCASE_WORD = re.compile(r"(?<![A-Za-z'])([a-z][A-Za-z0-9'-]*)")
 _ENTITY_STOP = {"The", "A", "An", "It", "This", "That", "In", "On", "At", "By"}
 _NON_TERMINAL = re.compile(
     r"^(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e|[A-Z]|\d+)\.$",
@@ -65,6 +68,79 @@ def lexical_evidence(claim: str, documents: list[str], limit: int = 6) -> list[s
     return selected
 
 
+def lexical_documents(claim: str, documents: list[str], limit: int = 6) -> list[str]:
+    """Rank supplied passages without silently removing their factual context.
+
+    Unlike ``lexical_evidence`` this fallback never splits a document into
+    sentences. Truncation remains the explicit normalizer/tokenizer's job.
+    Ranking is stable on ties; no relevance score is a truth probability.
+    """
+    if limit <= 0:
+        return []
+    query = set(_TOKEN.findall(claim.lower()))
+    def score(document: str) -> float:
+        terms = set(_TOKEN.findall(document.lower()))
+        return len(query & terms) / max(1.0, len(query) ** 0.5 * len(terms) ** 0.5)
+    return sorted((text for text in documents if text and text.strip()),
+                  key=score, reverse=True)[:limit]
+
+
+_RELATION_STOP = {
+    "a", "an", "the", "and", "or", "of", "in", "on", "at", "by", "to", "for",
+    "from", "with", "is", "are", "was", "were", "be", "been", "it", "its",
+    "this", "that", "as", "into", "about", "over", "under", "during",
+}
+
+
+def _entity_tokens(text: str) -> set[str]:
+    """Lowercased tokens that belong to a detected named entity."""
+    tokens: set[str] = set()
+    for entity in _ENTITY.findall(text):
+        if entity in _ENTITY_STOP:
+            continue
+        tokens.update(_TOKEN.findall(entity.lower()))
+    return tokens
+
+
+def shared_relation(claim: str, evidence: str) -> set[str]:
+    """Return content words shared by both texts, ignoring named entities.
+
+    Used to tell a *direct* entity contradiction (same predicate, e.g.
+    "Apple acquired Company A" vs "Apple acquired Company B", which shares
+    ``acquired``) from a *mere* entity mismatch (different predicate, e.g.
+    "Apple works with Company A" vs "Apple acquired Company B", which shares
+    no content word once the entities are removed). The entity guard uses this
+    only to modulate the secondary contradiction signal; it never decides truth
+    on its own.
+    """
+    # Entity words are excluded: they are the thing that *differs*, so counting
+    # them would make every entity conflict look like a shared relation. Bare
+    # numbers are excluded too: those are quantities, handled by
+    # ``numeric_consistency``, not relations.
+    #
+    # A capitalised word is only a proper noun if it never occurs in lowercase.
+    # The entity vocabulary is shared across both texts, so one spurious hit
+    # erases the word from *both* sides: "Released in 1995." reads "Released" as
+    # a name, and the shared predicate "released" then vanishes, hiding a real
+    # 1995-vs-1996 conflict. "Company A" / "Company B" stay excluded because
+    # "company" is only ever capitalised.
+    lowercase_seen: set[str] = set()
+    for text in (claim, evidence):
+        lowercase_seen.update(_LOWERCASE_WORD.findall(text))
+    entity_words = (_entity_tokens(claim) | _entity_tokens(evidence)) - lowercase_seen
+    claim_words = {
+        w
+        for w in _TOKEN.findall(claim.lower())
+        if w and w not in _RELATION_STOP and w not in entity_words and not w.isdigit()
+    }
+    evidence_words = {
+        w
+        for w in _TOKEN.findall(evidence.lower())
+        if w and w not in _RELATION_STOP and w not in entity_words and not w.isdigit()
+    }
+    return claim_words & evidence_words
+
+
 def has_entity_conflict(claim: str, evidence: str) -> bool:
     """Conservative guard for incompatible named entities around a shared anchor.
 
@@ -79,3 +155,64 @@ def has_entity_conflict(claim: str, evidence: str) -> bool:
         and (claim_entities - evidence_entities)
         and (evidence_entities - claim_entities)
     )
+
+
+_QUANTITY = re.compile(r"(\d[\d,.]*)\s*(%|percent|million|billion|trillion|m|bn|k)?\b", re.IGNORECASE)
+_YEAR = re.compile(r"\b(1[89]\d\d|20\d\d)\b")
+
+
+def numeric_consistency(claim: str, evidence: str) -> list[str]:
+    """Report lightweight number/date/percent mismatches between claim and evidence.
+
+    Conservative by design (no giant rule engine). Every reported mismatch must
+    clear two bars:
+
+    1. Both texts must share a relation word once named entities and bare
+       numbers are removed, so the two statements are about a comparable
+       predicate. Without this, "Tesla was founded in 2003" against "Tesla
+       went public in 2018" looks like a year conflict even though they are
+       different facts about different events, and a plain year disagreement
+       would manufacture contradiction mass.
+    2. For quantities, both sides must use the same unit, so a percentage is
+       never compared against a raw count.
+
+    Raw numbers with no mismatching unit/context are ignored, so dates, IDs and
+    naturally different statistics are not treated as contradictions. This is a
+    secondary signal only: it may resolve a near-tie and never overturn a
+    decisive model call.
+    """
+    conflicts: list[str] = []
+
+    # Comparability gate. A disagreement about numbers or years only speaks to
+    # the claim's truth when both texts are talking about the same relation.
+    if not shared_relation(claim, evidence):
+        return conflicts
+
+    def quantities(text: str) -> list[tuple[str, str]]:
+        # A unit is required. Unitless numbers are deliberately ignored: giving
+        # them a placeholder unit made *any* two differing bare integers in a
+        # comparable sentence a "conflict", so identifiers ("record id 12345"
+        # vs "98765") and plain counts were reported as contradictions. Years
+        # are handled separately below, where 1995-vs-1996 really is a clash.
+        lowered = text.lower()
+        return [
+            (num.replace(",", ""), (unit or "").lower())
+            for num, unit in _QUANTITY.findall(lowered)
+            if unit and not (len(num) == 4 and num.isdigit())
+        ]
+
+    claim_q = quantities(claim)
+    evidence_q = quantities(evidence)
+    units_in_claim = {unit for _, unit in claim_q}
+    for num, unit in evidence_q:
+        if unit in units_in_claim:
+            claim_nums = {n for n, u in claim_q if u == unit}
+            if claim_nums and num not in claim_nums:
+                conflicts.append(f"conflicting {unit}: '{num} {unit}' vs claim")
+
+    claim_years = set(_YEAR.findall(claim))
+    evidence_years = set(_YEAR.findall(evidence))
+    if claim_years and evidence_years and not (claim_years & evidence_years):
+        conflicts.append(f"conflicting years: {','.join(sorted(evidence_years))} vs claim")
+
+    return conflicts

@@ -5,6 +5,9 @@ import { VERIFICATION_STATUS } from '../../types/verification'
 export function VerificationStatus({ status, title, description }) {
   const getStatusConfig = () => {
     switch (status) {
+      case 'WITHHELD':
+      case 'FAILED':
+        return { icon: AlertTriangle, className: 'is-insufficient', defaultTitle: status, defaultDesc: 'No verified answer was released.' }
       case VERIFICATION_STATUS.SUPPORTED:
       case 'VERIFIED':
         return {

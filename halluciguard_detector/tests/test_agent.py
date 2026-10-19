@@ -30,6 +30,7 @@ def test_grounded_adapter_preserves_sentence_predictions(monkeypatch):
         },
         risk=RiskLevel.HIGH,
         evidence_snippets=["Java was created by James Gosling."],
+        model_input_evidence="Java was created by James Gosling.",
     )
     grounded = SimpleNamespace(
         sentences=[sentence],

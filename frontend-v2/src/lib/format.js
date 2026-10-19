@@ -1,4 +1,6 @@
 export const VERDICTS = {
+  withheld: { label: "Withheld", color: "var(--insufficient)", tint: "var(--insufficient-tint)" },
+  failed: { label: "Failed", color: "var(--contradicted)", tint: "var(--contradicted-tint)" },
   supported: { label: "Supported", color: "var(--supported)", tint: "var(--supported-tint)" },
   contradicted: { label: "Contradicted", color: "var(--contradicted)", tint: "var(--contradicted-tint)" },
   insufficient: { label: "Insufficient evidence", color: "var(--insufficient)", tint: "var(--insufficient-tint)" },
@@ -6,6 +8,8 @@ export const VERDICTS = {
 };
 
 export const CONV_STATUS = {
+  withheld: { label: "Withheld", verdict: "withheld" },
+  failed: { label: "Failed", verdict: "failed" },
   verified: { label: "Verified", verdict: "supported" },
   reviewing: { label: "Reviewing", verdict: "insufficient" },
   needs_correction: { label: "Needs correction", verdict: "contradicted" },

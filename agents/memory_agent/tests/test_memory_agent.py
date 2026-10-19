@@ -73,8 +73,8 @@ class TestStoreFact:
             domain="healthcare",
             verdict="verified",
             evidence=[
-                {"source_id": "pubmed", "title": "Study on Vit C"},
-                {"source_id": "nih", "title": "NIH Report"},
+                {"snippet": "Supporting passage for the storage lifecycle fixture.", "source_id": "pubmed", "title": "Study on Vit C"},
+                {"snippet": "Supporting passage for the storage lifecycle fixture.", "source_id": "nih", "title": "NIH Report"},
             ],
             source_ids=["pubmed", "nih"],
             confidence=0.85,
@@ -85,7 +85,7 @@ class TestStoreFact:
 
     @pytest.mark.asyncio
     async def test_store_updates_cache(self, agent):
-        req = StoreFactRequest(
+        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Test claim for cache",
             domain="test",
             verdict="verified",
@@ -111,7 +111,7 @@ class TestStoreFact:
 class TestRecall:
     @pytest.mark.asyncio
     async def test_recall_returns_similar_facts(self, agent):
-        store_req = StoreFactRequest(
+        store_req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Aspirin is used for pain relief",
             domain="healthcare",
             verdict="verified",
@@ -129,7 +129,7 @@ class TestRecall:
 
     @pytest.mark.asyncio
     async def test_recall_includes_cache(self, agent):
-        req = StoreFactRequest(
+        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Cached claim test",
             domain="test",
             verdict="verified",

@@ -128,6 +128,17 @@ class MemoryAgent:
         )
 
     async def store_fact(self, request: StoreFactRequest) -> StoreFactResponse:
+        # Negative verdicts remain explicitly labeled audit/pattern records.
+        # Unknown and incomplete claims are never eligible persistent facts.
+        verdict = request.verdict.strip().lower()
+        if verdict not in {"verified", "contradicted", "likely_hallucinated"}:
+            raise ValueError("memory_write_requires_verified_or_refuted_audit_record")
+        if verdict == "verified" and not any(
+            str(e.get("snippet") or e.get("text") or "").strip()
+            and str(e.get("source_id") or e.get("source") or e.get("url") or "").strip()
+            for e in request.evidence
+        ):
+            raise ValueError("verified_memory_requires_evidence_and_provenance")
         fact_id = str(uuid.uuid4())
         now = datetime.utcnow()
         contradictions: list[ContradictionAlert] = []
@@ -196,6 +207,9 @@ class MemoryAgent:
                 "domain": request.domain,
                 "verdict": request.verdict,
                 "claim_text": request.claim_text,
+                "confidence": request.confidence,
+                "evidence": request.evidence,
+                "source_ids": request.source_ids,
             },
             confidence=request.confidence,
         )
@@ -230,6 +244,8 @@ class MemoryAgent:
                 "verdict": request.verdict,
                 "confidence": request.confidence,
                 "fact_id": fact_id,
+                "source_ids": request.source_ids,
+                "evidence": request.evidence,
                 "timestamp": now.isoformat(),
             },
             entry_id=fact_id,
@@ -270,6 +286,8 @@ class MemoryAgent:
             trust_updates.append(update)
 
         self.kg.save()
+        # A successful store must survive restart, including batches under 100.
+        self.vectors.save()
 
         return StoreFactResponse(
             fact_id=fact_id,
@@ -358,7 +376,17 @@ class MemoryAgent:
 
         old_verdict = str(entity.properties.get("verdict", "unknown"))
         old_confidence = float(entity.properties.get("confidence", 0.0))
-        new_verdict = request.new_verdict or old_verdict
+        new_verdict = (request.new_verdict or old_verdict).strip().lower()
+        if new_verdict not in {"verified", "contradicted", "likely_hallucinated"}:
+            raise ValueError("memory_update_requires_verified_or_refuted_audit_record")
+        evidence = request.new_evidence or entity.properties.get("evidence", [])
+        if new_verdict == "verified":
+            if old_verdict != "verified" and not request.new_evidence:
+                raise ValueError("verified_memory_promotion_requires_new_evidence")
+            if not any(str(e.get("snippet") or e.get("text") or "").strip()
+                       and str(e.get("source_id") or e.get("source") or e.get("url") or "").strip()
+                       for e in evidence):
+                raise ValueError("verified_memory_requires_evidence_and_provenance")
         new_confidence = (
             request.new_confidence
             if request.new_confidence is not None
@@ -369,6 +397,11 @@ class MemoryAgent:
         # Update KG entity properties
         entity.properties["verdict"] = new_verdict
         entity.properties["confidence"] = new_confidence
+        entity.properties["evidence"] = evidence
+        source_ids = sorted({str(e.get("source_id") or e.get("source") or e.get("url"))
+                             for e in evidence if e.get("source_id") or e.get("source") or e.get("url")})
+        entity.properties["source_ids"] = source_ids
+        entity.confidence = new_confidence
         entity.updated_at = datetime.utcnow()
         updated_in.append("knowledge_graph")
 
@@ -377,6 +410,9 @@ class MemoryAgent:
         if vec_entry and vec_entry.metadata:
             vec_entry.metadata["verdict"] = new_verdict
             vec_entry.metadata["confidence"] = new_confidence
+            vec_entry.metadata["evidence"] = evidence
+            vec_entry.metadata["source_ids"] = source_ids
+            self.vectors.save()
             updated_in.append("vector_store")
 
         # Update cache if claim text exists
@@ -391,8 +427,12 @@ class MemoryAgent:
                 verdict=new_verdict,
                 evidence_summary=f"Updated: {new_verdict}",
                 confidence=new_confidence,
-                source_count=0,
+                source_count=len({str(e.get("source_id") or e.get("source") or e.get("url")) for e in evidence}),
             )
+            for claim in self.kg.find_entity_by_name(claim_text[:120], EntityType.CLAIM):
+                if claim.properties.get("fact_id") == request.fact_id:
+                    claim.properties.update(verdict=new_verdict, confidence=new_confidence)
+                    claim.confidence = new_confidence
             updated_in.append("cache")
 
         self.kg.save()

@@ -73,7 +73,7 @@ def _install(monkeypatch, texts, transform=None, fail=False):
             if fail:
                 raise RuntimeError("isolated persistence-free verifier failure")
             reports = [{"claim_id": c.claim_id, "claim_text": c.text,
-                        "verdict": "verified", "support_score": 0.9}
+                        "verdict": "verified", "support_score": 0.9, "evidence": [{"source":"fixture", "snippet":c.text, "entailment_label":"entailment"}]}
                        for c in payload.suspicious_claims]
             if transform:
                 reports = transform(reports)

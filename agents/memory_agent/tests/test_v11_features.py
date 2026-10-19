@@ -75,7 +75,7 @@ class TestDuplicateDetection:
 
     @pytest.mark.asyncio
     async def test_near_duplicate_flagged(self, agent):
-        req = StoreFactRequest(
+        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Regular exercise reduces heart disease risk",
             domain="healthcare",
             verdict="verified",
@@ -83,7 +83,7 @@ class TestDuplicateDetection:
         )
         await agent.store_fact(req)
 
-        near = StoreFactRequest(
+        near = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Regular exercise reduces heart disease risk significantly",
             domain="healthcare",
             verdict="verified",
@@ -96,7 +96,7 @@ class TestDuplicateDetection:
 class TestContradictionDetection:
     @pytest.mark.asyncio
     async def test_conflicting_verdict_raises_alert(self, agent):
-        positive = StoreFactRequest(
+        positive = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Vitamin C cures the common cold",
             domain="healthcare",
             verdict="verified",
@@ -118,7 +118,7 @@ class TestContradictionDetection:
 
     @pytest.mark.asyncio
     async def test_same_verdict_no_contradiction(self, agent):
-        first = StoreFactRequest(
+        first = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Water boils at 100 degrees Celsius at sea level",
             domain="science",
             verdict="verified",
@@ -126,7 +126,7 @@ class TestContradictionDetection:
         )
         await agent.store_fact(first)
 
-        second = StoreFactRequest(
+        second = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Water boils at 100 degrees Celsius at sea level approximately",
             domain="science",
             verdict="verified",
@@ -140,7 +140,7 @@ class TestBatchStore:
     @pytest.mark.asyncio
     async def test_batch_stores_multiple(self, agent):
         requests = [
-            StoreFactRequest(
+            StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
                 claim_text="Batch claim one",
                 domain="test",
                 verdict="verified",
@@ -152,7 +152,7 @@ class TestBatchStore:
                 verdict="likely_hallucinated",
                 confidence=0.1,
             ),
-            StoreFactRequest(
+            StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
                 claim_text="Batch claim three",
                 domain="test",
                 verdict="verified",
@@ -167,7 +167,7 @@ class TestBatchStore:
 
     @pytest.mark.asyncio
     async def test_batch_tracks_duplicates(self, agent):
-        req = StoreFactRequest(
+        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Batch duplicate claim",
             domain="test",
             verdict="verified",
@@ -194,7 +194,7 @@ class TestGraphAnalytics:
             claim_text="Graph analytics test claim",
             domain="test",
             verdict="verified",
-            evidence=[{"source_id": "src-a"}, {"source_id": "src-b"}],
+            evidence=[{"source_id": "src-a", "snippet": "Supporting graph analytics fixture."}, {"source_id": "src-b", "snippet": "Independent supporting graph analytics fixture."}],
             source_ids=["src-a", "src-b"],
             confidence=0.9,
         )
@@ -208,7 +208,7 @@ class TestGraphAnalytics:
 class TestReranking:
     @pytest.mark.asyncio
     async def test_recall_reranks(self, agent):
-        store = StoreFactRequest(
+        store = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Coffee increases alertness",
             domain="science",
             verdict="verified",
@@ -236,7 +236,7 @@ class TestReranking:
 
     @pytest.mark.asyncio
     async def test_min_similarity_filters(self, agent):
-        store = StoreFactRequest(
+        store = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Unrelated claim about gardening",
             domain="test",
             verdict="verified",
@@ -278,7 +278,7 @@ class TestFuzzyCache:
 class TestFactDeletion:
     @pytest.mark.asyncio
     async def test_delete_existing_fact(self, agent):
-        req = StoreFactRequest(
+        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             claim_text="Fact to be deleted",
             domain="test",
             verdict="verified",
@@ -319,6 +319,7 @@ class TestFactUpdate:
         update = UpdateFactRequest(
             fact_id=resp.fact_id,
             new_verdict="verified",
+            new_evidence=[{"source_id":"fixture", "snippet":"New evidence verifies the corrected stored claim."}],
             new_confidence=0.95,
         )
         update_resp = await agent.update_fact(update)
@@ -336,3 +337,45 @@ class TestFactUpdate:
         update = UpdateFactRequest(fact_id="nonexistent", new_verdict="verified")
         with _pytest.raises(ValueError, match="not found"):
             await agent.update_fact(update)
+
+@pytest.mark.asyncio
+async def test_update_cannot_promote_negative_audit_without_new_evidence(agent):
+    from agents.memory_agent.schemas.models import UpdateFactRequest
+    initial = await agent.store_fact(StoreFactRequest(claim_text='A disputed assertion', domain='test', verdict='contradicted', confidence=0.2))
+    with pytest.raises(ValueError, match='promotion_requires_new_evidence'):
+        await agent.update_fact(UpdateFactRequest(fact_id=initial.fact_id, new_verdict='verified'))
+    assert agent.kg.find_entity_by_name(initial.fact_id)[0].properties['verdict'] == 'contradicted'
+    assert agent.vectors.get(initial.fact_id).metadata['verdict'] == 'contradicted'
+
+@pytest.mark.asyncio
+async def test_update_support_provenance_and_confidence_are_retained(agent):
+    from agents.memory_agent.schemas.models import UpdateFactRequest
+    initial = await agent.store_fact(StoreFactRequest(claim_text='An evidence-backed assertion', domain='test', verdict='contradicted', confidence=0.2))
+    evidence = [{'source_id':'fixture', 'snippet':'Fresh independent support for the assertion.'}]
+    updated = await agent.update_fact(UpdateFactRequest(fact_id=initial.fact_id, new_verdict='verified', new_confidence=0.91, new_evidence=evidence))
+    fact=agent.kg.find_entity_by_name(initial.fact_id)[0]
+    assert fact.properties['evidence'] == evidence
+    assert fact.confidence == 0.91
+    assert agent.vectors.get(initial.fact_id).metadata['evidence'] == evidence
+    assert (await agent.check_cache('test','An evidence-backed assertion'))['verdict'] == 'verified'
+
+    import json
+    from pathlib import Path
+    entries=json.loads((Path(agent._settings.vector_store_path)/"entries.json").read_text())
+    saved=next(e for e in entries if e["entry_id"]==initial.fact_id)
+    assert saved["metadata"]["evidence"]==evidence
+    assert saved["metadata"]["source_ids"]==["fixture"]
+    assert saved["metadata"]["confidence"]==0.91
+
+@pytest.mark.asyncio
+async def test_successful_store_is_recallable_before_shutdown(agent):
+    req=StoreFactRequest(claim_text='A persistent verified claim',domain='test',verdict='verified',confidence=0.9,evidence=[{'source_id':'fixture','snippet':'The persistent claim is independently supported.'}])
+    stored=await agent.store_fact(req)
+    reopened=VectorStore(store_path=agent._settings.vector_store_path,embedding_model='all-MiniLM-L6-v2')
+    # Reuse the actual loaded encoder; reopen only the on-disk persistence layer.
+    reopened._model=agent.vectors._model
+    reopened.initialize()
+    recalled=reopened.search(req.claim_text,top_k=1)
+    assert recalled[0].entry_id==stored.fact_id
+    assert recalled[0].metadata['evidence']==req.evidence
+    assert recalled[0].metadata['verdict']=='verified'

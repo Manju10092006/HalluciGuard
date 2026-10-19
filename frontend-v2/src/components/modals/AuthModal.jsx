@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { X, ArrowRight } from 'lucide-react'
+import { useAuth } from '../../lib/auth/AuthContext'
 
 // Geometric 4-lobed / 8-point purple star logo matching Image 2
 function StarLogo({ size = 44 }) {
@@ -47,6 +48,9 @@ function GoogleIcon() {
 
 export function AuthModal({ isOpen, onClose, onLoginSuccess }) {
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const { signIn, signOut } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
@@ -61,42 +65,18 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }) {
 
   if (!isOpen) return null
 
-  const handleGoogleLogin = () => {
-    setIsSubmitting(true)
-    setTimeout(() => {
-      setIsSubmitting(false)
-      onLoginSuccess?.({
-        name: 'Judha Maygustya',
-        email: 'judha.design@halluciguard.ai',
-        plan: 'HalluciGuard Pro',
-      })
-      onClose()
-    }, 600)
-  }
-
-  const handleEmailSubmit = (e) => {
+  const handleGoogleLogin = () => setError('Google sign-in requires a valid Google credential. Use email and password or continue as guest.')
+  const handleEmailSubmit = async (e) => {
     e.preventDefault()
-    if (!email.trim()) return
+    if (!email.trim() || !password || isSubmitting) return
     setIsSubmitting(true)
-    setTimeout(() => {
-      setIsSubmitting(false)
-      onLoginSuccess?.({
-        name: email.split('@')[0],
-        email: email,
-        plan: 'HalluciGuard Pro',
-      })
-      onClose()
-    }, 600)
-  }
-
-  const handleGuestContinue = () => {
-    onLoginSuccess?.({
-      name: 'Guest User',
-      email: 'guest@halluciguard.ai',
-      plan: 'Free Preview',
-    })
+    const result = await signIn(email, password)
+    setIsSubmitting(false)
+    if (!result.ok) { setError(result.error); return }
+    onLoginSuccess?.()
     onClose()
   }
+  const handleGuestContinue = async () => { await signOut(); onClose() }
 
   return (
     <div className="auth-overlay">
@@ -136,6 +116,8 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }) {
             disabled={isSubmitting}
           />
 
+          <input type="password" aria-label="Password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} className="auth-email-input" placeholder="Password" disabled={isSubmitting} />
+          {error && <p role="alert">{error}</p>}
           <button type="submit" className="auth-submit-btn" disabled={isSubmitting || !email.trim()}>
             {isSubmitting ? 'Authenticating...' : 'Continue with Email'}
             <ArrowRight size={15} />

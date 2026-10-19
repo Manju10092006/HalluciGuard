@@ -1,0 +1,30 @@
+// Actual frontend API module + actual HTTP backend; storage is a Node shim.
+// This is client integration, not a browser rendering test.
+import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
+const records=new Map();
+globalThis.window={};
+globalThis.localStorage={getItem:k=>records.get(k)??null,setItem:(k,v)=>records.set(k,String(v)),removeItem:k=>records.delete(k)};
+process.env.NEXT_PUBLIC_BACKEND_URL='http://127.0.0.1:8020';
+const {api}=await import('../frontend-v2/src/lib/api.js');
+const c=await api.createConversation({title:'Real client integration'});
+const res=await api.sendMessage(c.id,'What is the capital of France? Answer with one short factual sentence.');
+assert.equal(res.assistant_message.verification.verdict,'supported');
+assert.ok(res.assistant_message.verification.execution_id);
+assert.match(res.assistant_message.content,/Paris/);
+assert.ok(res.assistant_message.verification.evidence.some(e=>e.excerpt && e.url));
+const reloaded=(await import('../frontend-v2/src/lib/api.js?reload')).api;
+assert.equal((await reloaded.getConversation(c.id)).messages.length,2);
+const cancellation = await api.createConversation();
+const ctrl=new AbortController();ctrl.abort();
+await assert.rejects(api.sendMessage(cancellation.id,'This should not be sent','standard',ctrl.signal));
+assert.equal((await api.getConversation(cancellation.id)).messages.length,0);
+process.env.NEXT_PUBLIC_BACKEND_URL='http://127.0.0.1:1';
+const offline=(await import('../frontend-v2/src/lib/api.js?offline')).api;
+await assert.rejects(offline.sendMessage(c.id,'Never fabricate success on network failure'));
+assert.equal((await offline.getConversation(c.id)).messages.length,2);
+localStorage.setItem('hg.auth.user.v1',JSON.stringify({id:'other-user'}));
+assert.equal((await api.listConversations()).length,0);
+const summary={status:'passed',execution_id:res.assistant_message.verification.execution_id,evidence:res.assistant_message.verification.evidence.length,checks:['actual frontend API to real backend','real supported answer with evidence','persist/reload','abort without stored result','offline rejects without fabricated response','user local history isolation'],browser:false};
+await writeFile('runtime-logs/frontend-client-integration.json',JSON.stringify(summary,null,2));
+console.log(summary);

@@ -8,14 +8,7 @@ repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", 
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
-agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if agent_dir not in sys.path:
-    sys.path.insert(0, agent_dir)
-
-decision_engine_stub = types.ModuleType("decision_engine")
-decision_engine_stub.DecisionIntelligenceEngine = object
-sys.modules.setdefault("decision_engine", decision_engine_stub)
-from judge_agent import JudgeAgent
+from agents.judge_agent.judge_agent import JudgeAgent
 
 
 def test_verifier_v2_claim_evidence_is_normalized_for_judge():

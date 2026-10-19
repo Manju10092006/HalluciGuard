@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { HalluciGuardSidebar } from './HalluciGuardSidebar'
 import { ChatHeader } from './ChatHeader'
 import { EmptyVerificationState } from '../empty/EmptyVerificationState'
@@ -9,8 +9,8 @@ import { SettingsModal } from '../modals/SettingsModal'
 import { SourceDrawer } from '../modals/SourceDrawer'
 import { CreateFlowModal } from '../modals/CreateFlowModal'
 import { AuthModal } from '../modals/AuthModal'
-import { INITIAL_RECENT_VERIFICATIONS } from '../../mock/verificationData'
-import { VERIFICATION_STATUS } from '../../types/verification'
+import { api } from '../../lib/api'
+import { useAuth } from '../../lib/auth/AuthContext'
 
 export function HalluciGuardShell() {
 
@@ -20,11 +20,7 @@ export function HalluciGuardShell() {
   const [density, setDensity] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('hg_density') : null) || 'comfortable')
 
   // User Authentication State
-  const [user, setUser] = useState({
-    name: 'Judha Maygustya',
-    email: 'judha.design@halluciguard.ai',
-    plan: 'HalluciGuard Pro',
-  })
+  const { user, signOut } = useAuth()
 
   // Modals & Drawers
   const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
@@ -40,10 +36,30 @@ export function HalluciGuardShell() {
   const [activeNav, setActiveNav] = useState('home')
 
   // Verification Sessions & Active Conversation
-  const [recentSessions, setRecentSessions] = useState(INITIAL_RECENT_VERIFICATIONS)
+  const [recentSessions, setRecentSessions] = useState([])
   const [activeSessionId, setActiveSessionId] = useState(null)
   const [activeSession, setActiveSession] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const pendingRef = useRef(null)
+  useEffect(() => {
+    setActiveSession(null)
+    setActiveSessionId(null)
+    setError(null)
+    setIsLoading(false)
+    pendingRef.current?.abort()
+    pendingRef.current = null
+    api.listConversations().then(convs => setRecentSessions(convs.map(toSession)))
+    return () => pendingRef.current?.abort()
+  }, [user?.id])
+
+  function toSession(conv) {
+    return { ...conv, timeGroup: 'Today', timestamp: new Date(conv.updated_at).toLocaleString(), statusBadge: conv.status === 'verified' ? 'Verified' : conv.status === 'reviewing' ? 'Pending' : conv.status === 'failed' ? 'Failed' : 'Withheld', statusBadgeTone: conv.status === 'verified' ? 'supported' : 'insufficient', messages: (conv.messages || []).map(m => {
+      if (m.role === 'user') return { id: m.id, sender: 'user', text: m.content }
+      const v = m.verification
+      return { id: m.id, sender: 'halluciguard', text: m.content, status: v.verdict.toUpperCase(), statusTitle: v.verdict.toUpperCase(), statusDescription: v.explanation, sources: v.evidence.map(e => ({ ...e, relationshipTone: e.relationship === 'supports' ? 'supported' : e.relationship === 'contradicts' ? 'contradicted' : 'insufficient' })), evidenceSummary: { totalSources: v.evidence.length, supportingCount: v.counts.supporting, contradictingCount: v.counts.contradicting }, claims: v.claims.map((c,i) => ({ ...c, number: String(i+1).padStart(2,'0'), status: c.status.toUpperCase(), tone: c.status, verdict: c.status })), pipeline: v.pipeline }
+    }) }
+  }
 
   // Apply Theme & Atmosphere
   useEffect(() => {
@@ -82,6 +98,10 @@ export function HalluciGuardShell() {
 
   // Start a new verification (reset to empty state)
   const handleNewVerification = () => {
+    pendingRef.current?.abort()
+    pendingRef.current = null
+    setIsLoading(false)
+    setError(null)
     setActiveSessionId(null)
     setActiveSession(null)
     setActiveNav('home')
@@ -107,149 +127,28 @@ export function HalluciGuardShell() {
     handleNewVerification()
   }
 
-  // Submit claim or flow trigger handler
-  const handleSendMessage = ({ text, deepVerify, evidenceAttachment, flowMeta }) => {
-    const timestamp = 'Just now'
-    const userMessage = {
-      id: `msg-${Date.now()}`,
-      sender: 'user',
-      text,
-      timestamp,
-      attachment: evidenceAttachment,
-    }
-
-    // Determine mock verification response based on query heuristics
-    const lower = text.toLowerCase()
-    let status = VERIFICATION_STATUS.SUPPORTED
-    let statusTitle = 'SUPPORTED'
-    let statusTone = 'supported'
-    let statusDesc = 'All claims are verified by authoritative primary documentation.'
-    let replyText = 'This claim is supported by primary records. The retrieved documentation confirms the stated events.'
-    let correction = null
-
-    if (flowMeta || lower.includes('flow:') || lower.includes('slack') || lower.includes('linear')) {
-      status = VERIFICATION_STATUS.SUPPORTED
-      statusTitle = 'FLOW CONFIGURED & VERIFIED'
-      statusTone = 'supported'
-      statusDesc = 'Flow logic, tool authentication, and evidence triggers validated across integrated services.'
-      replyText = `I have instantiated the workflow "${flowMeta?.title || 'Automated Verification Flow'}". HalluciGuard has connected the event listener, configured the payload validator, and scheduled continuous evidence checking.`
-    } else if (lower.includes('snehith') || lower.includes('buzz aldrin stepped out first') || lower.includes('contradict')) {
-      status = VERIFICATION_STATUS.CONTRADICTED
-      statusTitle = 'CONTRADICTED'
-      statusTone = 'contradicted'
-      statusDesc = 'The statement conflicts directly with authoritative primary source records.'
-      if (lower.includes('snehith')) {
-        replyText = 'That claim is contradicted by historical archives. Java was created by James Gosling and his team at Sun Microsystems in 1991–1995.'
-        correction = {
-          original: text,
-          corrected: 'Java was created by James Gosling and his team at Sun Microsystems in 1995.',
-          verificationNote: 'Verified against Computer History Museum & Oracle Documentation.',
-        }
-      } else {
-        replyText = 'Apollo 11 landed in 1969, but the claim contains a contradiction. Neil Armstrong was the first astronaut to step onto the lunar surface.'
-        correction = {
-          original: text,
-          corrected: 'Neil Armstrong stepped onto the lunar surface first on July 20, 1969, followed by Buzz Aldrin.',
-          verificationNote: 'Verified against NASA Apollo 11 Surface Journal transcripts.',
-        }
-      }
-    } else if (lower.includes('gpt-5') || lower.includes('unsupported') || lower.includes('leak') || lower.includes('rumor')) {
-      status = VERIFICATION_STATUS.INSUFFICIENT_EVIDENCE
-      statusTitle = 'INSUFFICIENT EVIDENCE'
-      statusTone = 'insufficient'
-      statusDesc = 'No credible independent publications or official evaluation records confirm this claim.'
-      replyText = 'There is insufficient verified evidence to confirm this claim. No technical benchmark reports or official releases substantiate it.'
-    }
-
-    // New or updated session object
-    const newSessionId = activeSessionId || `session-${Date.now()}`
-    const sessionTitle = flowMeta ? flowMeta.title : text.length > 32 ? `${text.slice(0, 32)}...` : text
-
-    const initialMessages = activeSession ? [...activeSession.messages, userMessage] : [userMessage]
-
-    const updatedSession = {
-      id: newSessionId,
-      title: sessionTitle,
-      timeGroup: 'Today',
-      timestamp: 'Just now',
-      status,
-      statusBadge: status === VERIFICATION_STATUS.SUPPORTED ? 'Verified' : 'Needs correction',
-      statusBadgeTone: statusTone,
-      query: text,
-      messages: initialMessages,
-    }
-
-    setActiveSessionId(newSessionId)
-    setActiveSession(updatedSession)
+  // Only the real local backend can establish a verification result.
+  const handleSendMessage = async ({ text, evidenceAttachment, flowMeta }) => {
+    if (pendingRef.current || !text?.trim()) return
+    if (evidenceAttachment || flowMeta) { setError('Attachments and automated flows are not supported by the local verification API. Submit a text question.'); return }
+    const controller = new AbortController()
+    pendingRef.current = controller
+    setError(null)
     setIsLoading(true)
-
-    // Simulate multi-agent verification progress
-    setTimeout(() => {
-      const assistantMessage = {
-        id: `msg-${Date.now() + 1}`,
-        sender: 'halluciguard',
-        text: replyText,
-        timestamp: 'Just now',
-        status,
-        statusTitle,
-        statusDescription: statusDesc,
-        correction,
-        evidenceSummary: {
-          totalSources: 3,
-          supportingCount: status === VERIFICATION_STATUS.SUPPORTED ? 3 : 1,
-          contradictingCount: status === VERIFICATION_STATUS.CONTRADICTED ? 2 : 0,
-          contextCount: 1,
-        },
-        sources: [
-          {
-            id: 'src-gen-1',
-            title: 'Verified Historical & Technical Archive',
-            domain: flowMeta ? 'api.integration.io' : 'archive.org',
-            relationship: status === VERIFICATION_STATUS.CONTRADICTED ? 'Contradicts claim' : 'Supports claim',
-            relationshipTone: status === VERIFICATION_STATUS.CONTRADICTED ? 'contradicted' : 'supported',
-            excerpt: flowMeta
-              ? 'Webhook contract schema validated with 200 OK. Entailment checks active.'
-              : 'Primary corpus record confirming chronological order of events, authorship, and technical specifications.',
-            url: 'https://archive.org',
-          },
-          {
-            id: 'src-gen-2',
-            title: 'Institutional Technical Documentation',
-            domain: flowMeta ? 'linear.app' : 'standards.org',
-            relationship: status === VERIFICATION_STATUS.CONTRADICTED ? 'Contradicts claim' : 'Supports claim',
-            relationshipTone: status === VERIFICATION_STATUS.CONTRADICTED ? 'contradicted' : 'supported',
-            excerpt: flowMeta
-              ? 'Trigger listener active on endpoint #bugs. Automated cross-referencing enabled.'
-              : 'Official specification and milestone log verified by authoritative consensus.',
-            url: 'https://standards.org',
-          },
-        ],
-        claims: [
-          {
-            number: '01',
-            text: text,
-            status,
-            tone: statusTone,
-            verdict: statusDesc,
-            evidenceExcerpt: 'Retrieved primary document passage compared with atomic claim statements.',
-          },
-        ],
-      }
-
-      const completedSession = {
-        ...updatedSession,
-        messages: [...initialMessages, assistantMessage],
-      }
-
-      setActiveSession(completedSession)
-      setIsLoading(false)
-
-      // Update recent sessions list
-      setRecentSessions((prev) => {
-        const existing = prev.filter((s) => s.id !== newSessionId)
-        return [completedSession, ...existing]
-      })
-    }, 2400)
+    try {
+      const conv = activeSessionId ? await api.getConversation(activeSessionId) : await api.createConversation({ title: text.slice(0,60) })
+      setActiveSessionId(conv.id)
+      setActiveSession({ ...toSession(conv), messages: [...toSession(conv).messages, { id: 'pending', sender: 'user', text }], statusBadge: 'Pending' })
+      const res = await api.sendMessage(conv.id, text, 'standard', controller.signal)
+      if (controller.signal.aborted) return
+      const completed = toSession(res.conversation)
+      setActiveSession(completed)
+      setRecentSessions(prev => [completed, ...prev.filter(c => c.id !== conv.id)])
+    } catch (err) {
+      if (!controller.signal.aborted) setError('Verification could not complete. No answer was verified. ' + (err.response?.data?.detail || err.message || 'Service unavailable.'))
+    } finally {
+      if (pendingRef.current === controller) { pendingRef.current = null; setIsLoading(false) }
+    }
   }
 
   const isHome = !activeSession
@@ -266,7 +165,7 @@ export function HalluciGuardShell() {
         onOpenCreateFlow={() => setIsCreateFlowOpen(true)}
         onOpenAuth={() => setIsAuthOpen(true)}
         user={user}
-        onLogout={() => setUser(null)}
+        onLogout={signOut}
         recentSessions={recentSessions}
         activeSessionId={activeSessionId}
         onSelectSession={handleSelectSession}
@@ -301,6 +200,8 @@ export function HalluciGuardShell() {
 
         {/* Workspace Central Stage */}
         <main className="chat-main-viewport">
+          {error && <div role="alert" data-testid="verification-error" style={{padding:16}}>{error}</div>}
+          {isLoading && <button type="button" onClick={() => { pendingRef.current?.abort(); pendingRef.current = null; setIsLoading(false); setError("Verification stopped. No result was verified.") }}>Stop verification</button>}
           {isHome ? (
             <EmptyVerificationState
               onSendMessage={handleSendMessage}
@@ -349,7 +250,7 @@ export function HalluciGuardShell() {
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
-        onLoginSuccess={(userData) => setUser(userData)}
+        onLoginSuccess={() => setIsAuthOpen(false)}
       />
 
       {/* Appearance Modal */}

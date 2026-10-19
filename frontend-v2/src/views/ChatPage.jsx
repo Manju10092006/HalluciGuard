@@ -15,7 +15,7 @@ const MIN_VERIFY_MS = 2600;
 
 export default function ChatPage() {
   const { upsertConversation, settings, activePath, navigate } = useChat();
-  
+
   const id = activePath.startsWith("/c/") ? activePath.replace("/c/", "") : null;
 
   const [conversation, setConversation] = useState(null);
@@ -27,7 +27,7 @@ export default function ChatPage() {
   const abortRef = useRef({ cancelled: false });
 
   useEffect(() => {
-    setError(null); setPending(null);
+    setError(null);
     if (!id) { setConversation(null); return; }
     let alive = true;
     setLoading(true);
@@ -46,7 +46,9 @@ export default function ChatPage() {
   }, [pending, error]);
 
   const send = useCallback(async (text, { mode = "standard" } = {}) => {
-    abortRef.current = { cancelled: false };
+    if (pending) return;
+    abortRef.current = { cancelled: false, controller: new AbortController() };
+    setPending(text);
     const ctrl = abortRef.current;
     let convId = id;
     setError(null);
@@ -60,7 +62,7 @@ export default function ChatPage() {
       }
       setPending(text);
       const started = Date.now();
-      const res = await api.sendMessage(convId, text, settings.deepVerifyDefault && mode === "standard" ? "deep" : mode);
+      const res = await api.sendMessage(convId, text, settings.deepVerifyDefault && mode === "standard" ? "deep" : mode, ctrl.controller.signal);
       const wait = Math.max(0, MIN_VERIFY_MS - (Date.now() - started));
       await new Promise((r) => setTimeout(r, wait));
       if (ctrl.cancelled) return;
@@ -71,11 +73,12 @@ export default function ChatPage() {
         toast("Correction required", { description: "HalluciGuard found a contradicted claim." });
       }
     } catch (e) {
+      if (ctrl.cancelled) return;
       setError(e?.response?.data?.detail || "The verification service didn't respond. Your claim is kept below so you can retry.");
     }
-  }, [id, navigate, upsertConversation, settings.deepVerifyDefault, settings.notifyCompleted]);
+  }, [id, navigate, upsertConversation, settings.deepVerifyDefault, settings.notifyCompleted, pending]);
 
-  const stop = () => { abortRef.current.cancelled = true; setPending(null); toast("Verification stopped"); };
+  const stop = () => { abortRef.current.cancelled = true; abortRef.current.controller?.abort(); setPending(null); toast("Verification stopped"); };
   const retry = () => { const text = pending; setPending(null); setError(null); send(text); };
   const regenerate = () => {
     const lastUser = [...(conversation?.messages || [])].reverse().find((m) => m.role === "user");

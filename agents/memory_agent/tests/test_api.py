@@ -74,7 +74,7 @@ class TestDomainsEndpoint:
 class TestStoreEndpoint:
     @pytest.mark.asyncio
     async def test_store_fact(self, client):
-        payload = {
+        payload = {"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             "claim_text": "Test API claim",
             "domain": "test",
             "verdict": "verified",
@@ -92,7 +92,7 @@ class TestStoreEndpoint:
             "claim_text": "API claim with evidence",
             "domain": "healthcare",
             "verdict": "likely_hallucinated",
-            "evidence": [{"source_id": "pubmed", "title": "Study"}],
+            "evidence": [{"snippet": "Supporting passage for the storage lifecycle fixture.", "source_id": "pubmed", "title": "Study"}],
             "source_ids": ["pubmed"],
             "confidence": 0.2,
         }
@@ -103,7 +103,7 @@ class TestStoreEndpoint:
 class TestRecallEndpoint:
     @pytest.mark.asyncio
     async def test_recall(self, client):
-        await client.post("/store", json={
+        await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             "claim_text": "Recall test claim",
             "domain": "test",
             "verdict": "verified",
@@ -132,7 +132,7 @@ class TestCacheEndpoints:
 
     @pytest.mark.asyncio
     async def test_check_cache_hit(self, client):
-        await client.post("/store", json={
+        await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
             "claim_text": "Cache hit test",
             "domain": "test",
             "verdict": "verified",

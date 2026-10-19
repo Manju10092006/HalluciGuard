@@ -169,3 +169,6 @@ verify_and_clean_crops.py
 
 # Local-only bin for superseded/scratch files (see useless/README.md). Never pushed.
 /useless/
+
+# Isolated local validation frontend output
+/frontend-v2/.next-*-validation/

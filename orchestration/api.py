@@ -305,6 +305,7 @@ async def health(deep: bool = False) -> Dict[str, Any]:
             "active_agents": [
                 "base_llm",
                 "detector",
+                "claim_analyzer",
                 "verifier",
                 "judge",
                 "corrector",
@@ -332,6 +333,7 @@ async def health(deep: bool = False) -> Dict[str, Any]:
         "active_agents": [
             "base_llm",
             "detector",
+            "claim_analyzer",
             "verifier",
             "judge",
             "corrector",
@@ -412,7 +414,7 @@ async def _execute_verification(
             derived_status = pipeline_ver_status
         elif claims_ev:
             has_c = any("contradict" in str(c.get("verdict", "")).lower() or "hallucinat" in str(c.get("verdict", "")).lower() for c in claims_ev)
-            has_v = any(str(c.get("verdict", "")).lower() in ("verified", "supported", "verdictlabel.verified") or (str(c.get("verdict", "")).lower().startswith("verif") and "unverif" not in str(c.get("verdict", "")).lower()) for c in claims_ev)
+            has_v = all(str(c.get("verdict", "")).lower() in ("verified", "supported", "verdictlabel.verified") for c in claims_ev)
             has_conf = any("conflict" in str(c.get("verdict", "")).lower() for c in claims_ev)
             derived_status = "contradicted" if has_c else "conflicted" if has_conf else "verified" if has_v else "unverified"
         else:
@@ -434,6 +436,7 @@ async def _execute_verification(
             "active_agents": result.get("active_agents") or [
                 "base_llm",
                 "detector",
+                "claim_analyzer",
                 "verifier",
                 "judge",
                 "corrector",
