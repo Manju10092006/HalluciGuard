@@ -9,4 +9,3 @@ for (const [name,changes] of Object.entries({withheld:{terminal_status:'human_re
 }
 test('unverified correction never displayed',()=>{const v=verificationView({...response,terminal_status:'human_review',correction_result:{corrected_text:'Unsafe candidate'},reverification_result:{passed:false}});assert.equal(v.correction,null)});
 test('malformed response fails visibly',()=>assert.throws(()=>verificationView({}),/Malformed/));
-
