@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from typing import Mapping
+from services.cost_policy import free_only
 
 
 # Canonical provider identifiers. Order in this tuple is the documented default
@@ -124,7 +125,7 @@ def resolve_provider_order(raw: str | None = None) -> list[str]:
     if raw is None:
         raw = os.getenv("HALLUCIGUARD_LLM_PROVIDER_ORDER")
     if raw is None or not raw.strip():
-        return list(DEFAULT_PROVIDER_ORDER)
+        raw = ",".join(DEFAULT_PROVIDER_ORDER)
 
     order: list[str] = []
     unknown: list[str] = []
@@ -144,7 +145,9 @@ def resolve_provider_order(raw: str | None = None) -> list[str]:
             f"{', '.join(unknown)}. Valid providers: {', '.join(KNOWN_PROVIDERS)}."
         )
     if not order:
-        return list(DEFAULT_PROVIDER_ORDER)
+        order = list(DEFAULT_PROVIDER_ORDER)
+    if free_only() and order != [OPENROUTER]:
+        raise ProviderConfigError("Free-only policy requires explicit openrouter-only provider order")
     return order
 
 

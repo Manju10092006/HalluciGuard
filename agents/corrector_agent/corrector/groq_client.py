@@ -38,6 +38,8 @@ class GroqGenerator:
         self.reasoning_effort = reasoning_effort
 
     def generate(self, system_text: str, prompt_text: str) -> str:
+        from services.cost_policy import guard_unapproved_service
+        guard_unapproved_service("direct Groq Corrector")
         if not self.api_key:
             raise RuntimeError("GROQ_API_KEY is not configured")
 

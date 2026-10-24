@@ -24,6 +24,7 @@ from functools import wraps
 from typing import Any, List, Optional, Sequence
 
 from .text import lexical_documents
+from agents.verifier_agent.claims.claim_decomposer import _MAX_CLAIMS as MAX_DECOMPOSED_CLAIMS
 
 logger = logging.getLogger(__name__)
 
@@ -137,10 +138,18 @@ def is_checkable(text: str) -> bool:
     Returns True for factual content worth evidence verification. Without an
     LLM and without loading spaCy, the shared regex/parser filter decides.
     """
+    # Presentation framing cannot turn the following factual assertion into
+    # an opinion. The shared conversational filter is deliberately broader
+    # than a safe Detector exemption (e.g. "Note that Paris is in Germany").
+    content = re.sub(r"^\s*(?:note\s+that|keep\s+in\s+mind(?:\s+that)?)\b[\s,:]*", "", text, flags=re.IGNORECASE)
+    # Modal second-person statements can still assert testable facts. Retain
+    # them for NLI rather than exempting every sentence beginning "You can".
+    if re.match(r"^\s*you\s+(?:can|could|should|may|might|will|would)\b", content, re.IGNORECASE):
+        return True
     if not _ensure_verifier() or _decomposer is None:
         return True
     try:
-        return _decomposer._is_checkable(text)  # noqa: SLF001 - shared helper
+        return _decomposer._is_checkable(content)  # noqa: SLF001 - shared helper
     except Exception:  # pragma: no cover - defensive
         return True
 

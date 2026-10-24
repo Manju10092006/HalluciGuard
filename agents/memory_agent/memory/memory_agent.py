@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from ..cache.verification_cache import VerificationCache
 from ..config.settings import Settings, get_settings
@@ -32,7 +32,8 @@ from ..schemas.models import (
     VectorSearchResult,
 )
 from ..trust.source_trust import SourceTrustManager
-from ..vector_store.faiss_store import VectorStore
+if TYPE_CHECKING:
+    from ..vector_store.faiss_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +71,15 @@ class MemoryAgent:
             learning_rate=self._settings.trust_learning_rate,
             decay_rate=self._settings.trust_decay_rate,
         )
-        self.vectors = vector_store or VectorStore(
-            embedding_model=self._settings.embedding_model,
-            store_path=self._settings.vector_store_path,
-            dimension=self._settings.vector_dimension,
-            top_k=self._settings.vector_top_k,
-        )
+        if vector_store is None:
+            from ..vector_store.faiss_store import VectorStore
+            vector_store = VectorStore(
+                embedding_model=self._settings.embedding_model,
+                store_path=self._settings.vector_store_path,
+                dimension=self._settings.vector_dimension,
+                top_k=self._settings.vector_top_k,
+            )
+        self.vectors = vector_store
 
     async def initialize(self) -> None:
         await self.cache.initialize()
@@ -120,6 +124,21 @@ class MemoryAgent:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _has_supporting_evidence(evidence: list[dict]) -> bool:
+        """Require an attributed, explicitly supporting verifier passage.
+
+        A topical passage or a caller's verified flag cannot establish support.
+        Unlabeled legacy evidence must be reverified before it is promoted.
+        """
+        return any(
+            str(item.get("snippet") or item.get("text") or "").strip()
+            and str(item.get("source_id") or item.get("source") or item.get("url") or "").strip()
+            and str(getattr(item.get("entailment_label"), "value", item.get("entailment_label")))
+            .strip().lower().rsplit(".", 1)[-1] == "entailment"
+            for item in evidence
+        )
+
+    @staticmethod
     def _verdict_conflicts(verdict_a: str, verdict_b: str) -> bool:
         positive = {"verified", "likely_verified"}
         negative = {"likely_hallucinated", "contradicted"}
@@ -133,12 +152,10 @@ class MemoryAgent:
         verdict = request.verdict.strip().lower()
         if verdict not in {"verified", "contradicted", "likely_hallucinated"}:
             raise ValueError("memory_write_requires_verified_or_refuted_audit_record")
-        if verdict == "verified" and not any(
-            str(e.get("snippet") or e.get("text") or "").strip()
-            and str(e.get("source_id") or e.get("source") or e.get("url") or "").strip()
-            for e in request.evidence
-        ):
-            raise ValueError("verified_memory_requires_evidence_and_provenance")
+        if verdict == "verified" and not self._has_supporting_evidence(request.evidence):
+            raise ValueError("verified_memory_requires_evidence_and_provenance_with_entailment")
+        # Use the validated verdict throughout KG, vectors, cache, and dedup.
+        request = request.model_copy(update={"verdict": verdict})
         fact_id = str(uuid.uuid4())
         now = datetime.utcnow()
         contradictions: list[ContradictionAlert] = []
@@ -154,6 +171,7 @@ class MemoryAgent:
             if (
                 res.score >= self._settings.duplicate_similarity_threshold
                 and res.metadata.get("verdict") == request.verdict
+                and " ".join(res.text.split()) == " ".join(request.claim_text.split())
             ):
                 duplicate_of = res.entry_id
             if (
@@ -383,10 +401,8 @@ class MemoryAgent:
         if new_verdict == "verified":
             if old_verdict != "verified" and not request.new_evidence:
                 raise ValueError("verified_memory_promotion_requires_new_evidence")
-            if not any(str(e.get("snippet") or e.get("text") or "").strip()
-                       and str(e.get("source_id") or e.get("source") or e.get("url") or "").strip()
-                       for e in evidence):
-                raise ValueError("verified_memory_requires_evidence_and_provenance")
+            if not self._has_supporting_evidence(evidence):
+                raise ValueError("verified_memory_requires_evidence_and_provenance_with_entailment")
         new_confidence = (
             request.new_confidence
             if request.new_confidence is not None

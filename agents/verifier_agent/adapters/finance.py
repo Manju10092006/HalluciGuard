@@ -205,6 +205,8 @@ class FinanceAdapter:
     async def _search_alphavantage(
         self, client: ResilientHttpClient, query: str, k: int
     ) -> List[Passage]:
+        from services.cost_policy import guard_unapproved_service
+        guard_unapproved_service("Alpha Vantage retrieval")
         try:
             match = re.search(r'\b[A-Z]{1,5}\b', query)
             if match:

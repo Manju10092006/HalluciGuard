@@ -6,10 +6,11 @@ import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from .calibration import DEFAULT_MAX_LENGTH, apply_temperature, load_calibration
-from .evidence import ClaimEvidenceEngine
+from .evidence import ClaimEvidenceEngine, MAX_DECOMPOSED_CLAIMS
 from .nli_input import encode_nli_pair
 from .schemas import ClaimLabel, DetectResponse, RiskLevel, SentenceResult
 from .text import (
+    complete_claim_units,
     has_entity_conflict,
     numeric_consistency,
     sentence_spans,
@@ -114,12 +115,11 @@ class Detector:
         # span so offsets always stay inside the original string.
         if decomposed:
             aligned = self._align_claims(draft_answer, spans, decomposed)
-            covered = {offsets for _, offsets in aligned}
             # The shared decomposer caps extraction. Preserve source sentences
             # beyond that cap rather than silently omitting them from scoring.
-            aligned.extend((span.text, (span.start, span.end)) for span in spans
-                           if (span.start, span.end) not in covered)
-            return aligned
+            return complete_claim_units(
+                spans, aligned, decomposition_capped=len(decomposed) >= MAX_DECOMPOSED_CLAIMS,
+            )
         return [(span.text, (span.start, span.end)) for span in spans]
 
     @staticmethod
@@ -348,7 +348,10 @@ class Detector:
             # It is the probability this claim still needs checking; it is NOT
             # the probability the claim is false (that is contradicted only).
             verification_risk = mapping[ClaimLabel.CONTRADICTED] + mapping[ClaimLabel.NOT_ENOUGH_INFO]
-            requires_verification = label != ClaimLabel.SUPPORTED or guard_requires
+            requires_verification = (
+                label != ClaimLabel.SUPPORTED or guard_requires
+                or verification_risk >= self.verification_risk_threshold
+            )
             results.append(
                 SentenceResult(
                     sentence_id=f"C{index:03d}",

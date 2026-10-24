@@ -38,7 +38,7 @@ export function EmptyVerificationState({
     })
   }
 
-  const userName = user?.name ? user.name.split(' ')[0] : 'Liam'
+  const userName = user?.name ? user.name.split(' ')[0] : 'there'
 
   return (
     <div className="empty-verification-viewport">

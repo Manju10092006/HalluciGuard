@@ -287,6 +287,6 @@
         "empirical_frequency": 0.049369
       }
     },
-    "interpretation": "Temperature scaling is fitted on dev only. These numbers describe the dev distribution and do not transfer to other domains without re-measurement."
+    "interpretation": "Temperature scaling is fitted on dev only. These metrics describe the supplied held-out test labels and saved logits; they are not a new runtime evaluation and do not transfer to other domains without re-measurement."
   }
 }

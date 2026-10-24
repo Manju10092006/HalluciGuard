@@ -293,7 +293,8 @@ class JudgeAgent:
         claim_reports = normalized_verifier.claim_reports
 
         def grounded(report, direction):
-            return any(str(e.snippet).strip() and _verdict_value(e.entailment_label) == direction for e in report.evidence)
+            return any(str(e.snippet).strip() and str(e.source or e.url or "").strip()
+                       and _verdict_value(e.entailment_label) == direction for e in report.evidence)
 
         claims_to_correct: List[ClaimReport] = []
         claims_to_preserve: List[ClaimReport] = []
@@ -628,11 +629,12 @@ class JudgeAgent:
             try:
                 rev_res = ReverificationResult.model_validate(reverification_result)
             except Exception:
-                rev_res = None
-                passed = bool(reverification_result.get("passed", False))
-                rem_count = int(reverification_result.get("remaining_contradictions", 0) or 0)
-                rev_status = str(reverification_result.get("status", "completed")).lower()
-                v_res = reverification_result.get("verifier_result")
+                return JudgeResult(
+                    decision=JudgeDecision.ABSTAIN, severity=SeverityLevel.HIGH,
+                    reason="Invalid independent reverification contract.",
+                    explanation="Withheld: reverification could not be validated.",
+                    confidence=0.0, status=ExecutionStatus.FAILED,
+                )
 
         if rev_res is not None:
             passed = bool(rev_res.passed)
@@ -647,7 +649,8 @@ class JudgeAgent:
             verified and _verdict_value(verified.status) == "completed"
             and verified.claim_reports and all(
                 _verdict_value(c.verdict) == "verified" and any(
-                    str(e.snippet).strip() and _verdict_value(e.entailment_label) == "entailment"
+                    str(e.snippet).strip() and str(e.source or e.url or "").strip()
+                    and _verdict_value(e.entailment_label) == "entailment"
                     for e in c.evidence
                 ) for c in verified.claim_reports
             )
@@ -665,7 +668,7 @@ class JudgeAgent:
         # ---- The re-verification could not be executed -> ABSTAIN -------------
         # A verifier that crashed/timed out is NOT proof the correction is wrong.
         # Fail closed to human review rather than rejecting a possibly-good fix.
-        if rev_status in ("failed", "executionstatus.failed"):
+        if rev_status not in ("completed", "executionstatus.completed"):
             return JudgeResult(
                 decision=JudgeDecision.ABSTAIN,
                 severity=SeverityLevel.HIGH,
@@ -806,161 +809,87 @@ class JudgeAgent:
     def _normalize_verifier_result(
         self,
         verifier_result: Union[VerifierResult, Dict[str, Any]],
-        fallback_domain: str
+        fallback_domain: str,
     ) -> Optional[VerifierResult]:
-        """
-        Normalizes input into canonical VerifierResult Pydantic model.
-        Task 2 & 3: Structural conversion only. No heuristic refutation keywords or regex string matching.
-        """
-        if verifier_result is None:
-            return None
+        """Convert explicit contracts without inventing support or dropping claims."""
         if isinstance(verifier_result, VerifierResult):
             return verifier_result
+        if not isinstance(verifier_result, dict):
+            return None
+        try:
+            payload = dict(verifier_result)
+            payload.setdefault("query_id", "Q-001")
+            payload.setdefault("domain", fallback_domain or "General Knowledge")
+            if "claim_reports" in payload:
+                # Canonical validation is atomic: one malformed report invalidates
+                # the payload rather than silently accepting the remaining subset.
+                return VerifierResult.model_validate(payload)
 
-        if isinstance(verifier_result, dict):
-            try:
-                return VerifierResult.model_validate(verifier_result)
-            except Exception as e:
-                logger.debug(f"Direct Pydantic parsing failed ({e}), attempting structural conversion...")
+            def verdict(value):
+                return {"verified": "verified", "supported": "verified",
+                        "contradicted": "contradicted", "conflicted": "conflicted"}.get(
+                            _verdict_value(value), "unverified")
 
-            query_id = verifier_result.get("query_id", "Q-001")
-            domain = verifier_result.get("domain", fallback_domain or "General Knowledge")
-            overall_conf = verifier_result.get("overall_confidence", verifier_result.get("confidence_score", 0.8))
+            def direction(value):
+                return {"entailment": "entailment", "supports": "entailment",
+                        "supported": "entailment", "contradiction": "contradiction",
+                        "contradicts": "contradiction"}.get(
+                            str(value or "").lower().rsplit(".", 1)[-1], "neutral")
 
-            claim_reports: List[ClaimReport] = []
-
-            # Format A: "claim_reports"
-            if "claim_reports" in verifier_result:
-                for c in verifier_result["claim_reports"]:
-                    if isinstance(c, ClaimReport):
-                        claim_reports.append(c)
-                    elif isinstance(c, dict):
-                        try:
-                            claim_reports.append(ClaimReport.model_validate(c))
-                        except Exception:
-                            pass
-
-            # Format B: "claims" or "claim_evidence"
-            elif "claims" in verifier_result or "claim_evidence" in verifier_result:
-                raw_claims = verifier_result.get("claims") or verifier_result.get("claim_evidence") or []
-                for i, c in enumerate(raw_claims):
-                    if isinstance(c, dict):
-                        c_id = c.get("claim_id", f"C{i+1}")
-                        c_text = c.get("claim_text", c.get("claim", ""))
-                        v_str = str(c.get("verdict", "unverified")).lower()
-                        if "contradict" in v_str:
-                            verdict = VerdictLabel.CONTRADICTED
-                        elif "conflict" in v_str:
-                            verdict = VerdictLabel.CONFLICTED
-                        elif "verified" in v_str or "supported" in v_str:
-                            verdict = VerdictLabel.VERIFIED
-                        else:
-                            verdict = VerdictLabel.UNVERIFIED
-
-                        ev_list: List[Evidence] = []
-                        for j, ev_data in enumerate(c.get("evidence", [])):
-                            if isinstance(ev_data, dict):
-                                entail_str = str(ev_data.get("entailment_label", "neutral")).lower()
-                                if "contra" in entail_str:
-                                    e_label = EntailmentLabel.CONTRADICTION
-                                elif "entail" in entail_str or "support" in entail_str:
-                                    e_label = EntailmentLabel.ENTAILMENT
-                                else:
-                                    e_label = EntailmentLabel.NEUTRAL
-
-                                ev_list.append(Evidence(
-                                    evidence_id=ev_data.get("evidence_id", f"E{j+1}"),
-                                    title=ev_data.get("title", ""),
-                                    source=ev_data.get("source", "Unknown"),
-                                    url=ev_data.get("url"),
-                                    snippet=ev_data.get("snippet", ev_data.get("evidence_snippet", "")),
-                                    entailment_label=e_label,
-                                    entailment_score=ev_data.get("entailment_score", 0.8),
-                                    credibility_score=ev_data.get("credibility_score", 0.8)
-                                ))
-
-                        claim_reports.append(ClaimReport(
-                            claim_id=c_id,
-                            claim_text=c_text,
-                            verdict=verdict,
-                            support_score=c.get("support_score", 0.9 if verdict == VerdictLabel.VERIFIED else 0.1),
-                            contradiction_score=c.get("contradiction_score", 0.9 if verdict == VerdictLabel.CONTRADICTED else 0.1),
-                            confidence_score=c.get("confidence_score", c.get("trust_score", 0.8)),
-                            evidence=ev_list
-                        ))
-                    elif isinstance(c, str):
-                        claim_reports.append(ClaimReport(
-                            claim_id=f"C{i+1}",
-                            claim_text=c,
-                            verdict=VerdictLabel.UNVERIFIED,
-                            support_score=0.5,
-                            contradiction_score=0.0,
-                            confidence_score=0.5,
-                            evidence=[]
-                        ))
-
-            # Format C: "claim_evidence_pairs" (Structural adapter for legacy benchmark/dict inputs)
-            elif "claim_evidence_pairs" in verifier_result:
-                pairs = verifier_result["claim_evidence_pairs"]
-                import re
-                for i, pair in enumerate(pairs):
-                    c_text = pair.get("claim", "")
-                    ev_text = pair.get("evidence", pair.get("evidence_snippet", ""))
-                    src = pair.get("source", "Unknown")
-                    rel = pair.get("nli_relation", pair.get("top_relation", pair.get("relation", ""))).lower()
-                    v_raw = str(pair.get("verifier_verdict", pair.get("verdict", ""))).lower()
-                    ev_lower = ev_text.lower()
-
-                    c_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', c_text.lower()))
-                    ev_nums = set(re.findall(r'\b\d+(?:\.\d+)?\b', ev_lower))
-                    is_num_mismatch = bool(c_nums and ev_nums and not c_nums.intersection(ev_nums))
-                    is_refutation_text = any(w in ev_lower for w in ["not directly", "is not ", "false", "incorrect", "contraindicated", "refutes", "denied", "contrary"])
-
-                    is_contradiction_signal = (
-                        "contra" in rel
-                        or "contradict" in v_raw
-                        or pair.get("contradiction_score", 0) >= 0.5
-                        or is_num_mismatch
-                        or (bool(ev_text) and is_refutation_text)
-                    )
-
-                    if is_contradiction_signal:
-                        verdict = VerdictLabel.CONTRADICTED
-                    elif "entail" in rel or "verified" in v_raw or pair.get("entailment_score", 0) >= 0.5 or (ev_text and not rel):
-                        verdict = VerdictLabel.VERIFIED
-                    else:
-                        verdict = VerdictLabel.UNVERIFIED
-
-                    ev = Evidence(
-                        evidence_id=f"E{i+1}",
-                        title=src,
-                        source=src,
-                        snippet=ev_text,
-                        entailment_label=EntailmentLabel.CONTRADICTION if verdict == VerdictLabel.CONTRADICTED else EntailmentLabel.ENTAILMENT,
-                        entailment_score=pair.get("entailment_score", 0.85),
-                        credibility_score=pair.get("credibility_score", 0.80)
-                    )
-
-                    claim_reports.append(ClaimReport(
-                        claim_id=f"C{i+1}",
-                        claim_text=c_text,
-                        verdict=verdict,
-                        support_score=0.85 if verdict == VerdictLabel.VERIFIED else 0.1,
-                        contradiction_score=0.85 if verdict == VerdictLabel.CONTRADICTED else 0.1,
-                        confidence_score=0.85,
-                        evidence=[ev] if ev_text else []
-                    ))
-
-            return VerifierResult(
-                query_id=query_id,
-                domain=domain,
-                claim_reports=claim_reports,
-                evidence=[],
-                overall_confidence=overall_conf,
-                status=ExecutionStatus.COMPLETED
-            )
-
-        return None
+            reports = []
+            if "claims" in payload or "claim_evidence" in payload:
+                raw = payload["claims"] if "claims" in payload else payload["claim_evidence"]
+                if not isinstance(raw, list):
+                    return None
+                for i, item in enumerate(raw):
+                    if isinstance(item, str):
+                        item = {"claim_text": item}
+                    if not isinstance(item, dict):
+                        return None
+                    evidence = []
+                    if not isinstance(item.get("evidence", []), list):
+                        return None
+                    for j, ev in enumerate(item.get("evidence", [])):
+                        if not isinstance(ev, dict):
+                            return None
+                        evidence.append({**ev, "evidence_id": ev.get("evidence_id", f"E{j+1}"),
+                            "source": ev.get("source_id") or ev.get("source") or ev.get("url") or "",
+                            "snippet": ev.get("snippet", ev.get("evidence_snippet", "")),
+                            "entailment_label": direction(ev.get("entailment_label"))})
+                    reports.append({**item, "claim_id": item.get("claim_id", f"C{i+1}"),
+                        "claim_text": item.get("claim_text", item.get("claim", "")),
+                        "verdict": verdict(item.get("verdict")), "evidence": evidence})
+            elif "claim_evidence_pairs" in payload:
+                raw = payload["claim_evidence_pairs"]
+                if not isinstance(raw, list):
+                    return None
+                for i, pair in enumerate(raw):
+                    if not isinstance(pair, dict):
+                        return None
+                    relation = direction(pair.get("nli_relation") or pair.get("top_relation")
+                                         or pair.get("relationship") or pair.get("relation"))
+                    # A passage, score, negation, or differing number cannot by
+                    # itself establish entailment. Preserve explicit relationships.
+                    raw_verdict = pair.get("verifier_verdict", pair.get("verdict"))
+                    v = verdict(raw_verdict)
+                    if raw_verdict is None:
+                        v = {"entailment": "verified", "contradiction": "contradicted"}.get(relation, "unverified")
+                    evidence = [{"evidence_id": f"E{i+1}", "source": pair.get("source", ""),
+                        "snippet": pair.get("evidence", ""), "entailment_label": relation,
+                        "entailment_score": pair.get("entailment_score", 0.0)}]
+                    reports.append({"claim_id": pair.get("claim_id", f"C{i+1}"),
+                        "claim_text": pair.get("claim", ""), "verdict": v,
+                        "support_score": pair.get("support_score", 0.0),
+                        "contradiction_score": pair.get("contradiction_score", 0.0),
+                        "confidence_score": pair.get("confidence_score", 0.0), "evidence": evidence})
+            else:
+                return None
+            payload["claim_reports"] = reports
+            payload.setdefault("overall_confidence", payload.get("confidence_score", 0.0))
+            # Preserve failed/degraded execution status through legacy conversion.
+            return VerifierResult.model_validate(payload)
+        except (ValueError, TypeError, KeyError):
+            return None
 
     @staticmethod
     def _normalize_verifier_output(verifier_output: Dict[str, Any]) -> List[Dict[str, Any]]:

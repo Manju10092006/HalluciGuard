@@ -218,7 +218,9 @@ def _snap_region(text: str, lo: int, hi: int) -> tuple[int, int]:
     hi = max(0, min(hi, len(text)))
     while lo > 0 and not text[lo - 1].isspace() and text[lo - 1] not in _REGION_EDGE:
         lo -= 1
-    while hi < len(text) and not text[hi].isspace() and text[hi] not in _REGION_EDGE:
+    while (0 < hi < len(text) and not text[hi - 1].isspace()
+           and text[hi - 1] not in _REGION_EDGE
+           and not text[hi].isspace() and text[hi] not in _REGION_EDGE):
         hi += 1
     while lo < hi and text[lo].isspace():
         lo += 1
@@ -230,9 +232,10 @@ def _snap_region(text: str, lo: int, hi: int) -> tuple[int, int]:
 def _regions(start: int, end: int, annotations: list[dict], text: str) -> list[tuple[str, str]]:
     """Split a mixed sentence into ``(region_text, label)`` pairs.
 
-    Only the annotated regions are emitted, and each carries the human label of
-    the annotations covering it. Regions dominated by non-factual content are
-    skipped rather than labelled.
+    Only the annotated regions are emitted. Overlapping annotations must agree
+    on their label; an incompatible overlap is omitted rather than assigning a
+    label to its union from annotation order. Adjacent regions with different
+    labels stay separate. Non-factual regions are skipped rather than labelled.
     """
     relevant = sorted(
         (a for a in _relevant(annotations, start, end)),
@@ -243,19 +246,27 @@ def _regions(start: int, end: int, annotations: list[dict], text: str) -> list[t
     merged: list[list] = []
     for annotation in relevant:
         span = (int(annotation["start"]), int(annotation["end"]), annotation_concept(annotation))
-        if merged and span[0] <= merged[-1][1]:
+        if merged and span[0] < merged[-1][1]:
             previous = merged[-1]
             previous[1] = max(previous[1], span[1])
-            # A region that mixes problem and sufficient text is not cleanly
-            # classifiable; keep the stronger, non-SUPPORTED reading.
-            if previous[2] != span[2] and "SUPPORTED" in (previous[2], span[2]):
-                previous[2] = "NOT_ENOUGH_INFO" if "CONTRADICTED" not in (previous[2], span[2]) else "CONTRADICTED"
+            previous[2].add(span[2])
         else:
-            merged.append(list(span))
-    out: list[tuple[str, str]] = []
-    for region_start, region_end, concept in merged:
+            merged.append([span[0], span[1], {span[2]}])
+    clean: list[list] = []
+    for region_start, region_end, concepts in merged:
+        if len(concepts) != 1:
+            continue
+        concept = next(iter(concepts))
         if concept == "NON_FACTUAL":
             continue
+        # Resolve actual overlaps before merging adjacent equal labels, so an
+        # ambiguous region cannot absorb a clean neighbouring annotation.
+        if clean and region_start == clean[-1][1] and concept == clean[-1][2]:
+            clean[-1][1] = region_end
+        else:
+            clean.append([region_start, region_end, concept])
+    out: list[tuple[str, str]] = []
+    for region_start, region_end, concept in clean:
         lo, hi = _snap_region(text, max(region_start, start), min(region_end, end))
         if hi <= lo:
             continue

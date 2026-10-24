@@ -9,6 +9,21 @@ class Span:
     end: int
 
 
+def complete_claim_units(spans, aligned, *, decomposition_capped=False):
+    """Retain source assertions when sentence coverage or extraction is partial."""
+    result = list(aligned)
+    covered = {offsets for _, offsets in result}
+    exact = {claim.strip().rstrip(".!?") for claim, _ in result}
+    for span in spans:
+        offsets = (span.start, span.end)
+        # At the shared extraction cap, an aligned sentence may still contain
+        # omitted assertions. Keep that original sentence for an additional
+        # NLI check rather than treating its offsets as proof of full coverage.
+        if offsets not in covered or (decomposition_capped and span.text.strip().rstrip(".!?") not in exact):
+            result.append((span.text, offsets))
+    return result
+
+
 _BOUNDARY = re.compile(r"(?<=[.!?])(?:[\"')\]]*)\s+(?=[\"'(\[]*[A-Z0-9])")
 _TOKEN = re.compile(r"[A-Za-z0-9]+")
 _ENTITY = re.compile(r"\b(?:[A-Z][A-Za-z0-9'-]*)(?:\s+[A-Z][A-Za-z0-9'-]*)*\b")

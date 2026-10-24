@@ -60,8 +60,9 @@ async def test_nonempty_hosted_extraction_cannot_drop_source_fact():
  assert len({c.claim_id for c in result.factual_claims})==len(result.factual_claims)
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('gated', [True, False])
 @pytest.mark.parametrize('mutation',['missing','duplicate','mismatched','unexpected'])
-async def test_initial_verifier_requires_all_requested_claims(monkeypatch,mutation):
+async def test_initial_verifier_requires_all_requested_claims(monkeypatch,mutation,gated):
  from types import SimpleNamespace
  from orchestration import graph
  class Suspicious:
@@ -77,7 +78,7 @@ async def test_initial_verifier_requires_all_requested_claims(monkeypatch,mutati
    else:claims.append(dict(claims[0],claim_id='new'))
    return {'query_id':'test','domain':'general','claim_evidence':claims,'overall_evidence_confidence':0.9}
  monkeypatch.setattr(graph,'_get_verifier_imports',lambda:(Pipeline,Suspicious,Payload))
- state={'claims_gated':True,'detected_claims':[{'claim_id':'c1','text':'First claim.'},{'claim_id':'c2','text':'Second claim.'}],'domain':'general','trace':[],'inter_agent_bus':[],'errors':[]}
+ state={'claims_gated':gated,'detected_claims':[{'claim_id':'c1','text':'First claim.'},{'claim_id':'c2','text':'Second claim.'}],'domain':'general','trace':[],'inter_agent_bus':[],'errors':[]}
  out=await graph._verifier_node(state)
  assert out['verifier_result']['status']=='failed'
  assert graph._verifier_route(out)=='human_escalation'
@@ -123,3 +124,102 @@ def test_presentation_constraints_do_not_make_grounded_correction_off_topic(quer
 def test_number_word_in_company_name_remains_a_topic():
  from orchestration.graph import _answer_addresses_query
  assert not _answer_addresses_query('Tell me about Two Sigma.','Sigma Computing makes software.')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('extra', [
+ {'judge_decision': 'REJECT'},
+ {'judge_decision': 'ABSTAIN'},
+ {'correction_result': {'corrected_text': 'Unverified replacement'}},
+ {'reverification_result': {'passed': False, 'verifier_result': verifier([report()])}},
+ {'verifier_result': dict(verifier([report()]), status='failed')},
+ {'verifier_result': verifier([report(), report('unverified')])},
+ {'verifier_result': verifier([dict(report(), evidence=[{'source': 'fixture', 'snippet': 'Related text', 'entailment_label': 'neutral'}])])},
+ {'verifier_result': verifier([dict(report(), evidence=[{'snippet': 'Unattributed text', 'entailment_label': 'entailment'}])])},
+])
+async def test_legacy_memory_view_cannot_bypass_final_eligibility(monkeypatch, extra):
+ def forbidden_init(*args, **kwargs):
+  raise AssertionError('Ineligible state must not initialize persistent Memory')
+ monkeypatch.setattr(MemoryAgent, '__init__', forbidden_init)
+ state = {'judge_decision': 'ACCEPT', 'verifier_result': verifier([report()]),
+          'verifier': {'claim_evidence': [report()]}, 'trace': [], 'inter_agent_bus': [], **extra}
+ result = await _memory_node(state)
+ assert result['memory_result']['status'] == 'skipped'
+ assert result['memory_result']['stored_count'] == 0
+
+
+@pytest.mark.parametrize('verdict', ['unverified', 'unsupported', 'not_verified', 'likely_verified'])
+def test_judge_legacy_verdict_substrings_never_become_verified(verdict):
+ payload = {'claim_evidence': [report(verdict)]}
+ normalized = JudgeAgent()._normalize_verifier_result(payload, 'general')
+ assert normalized is not None
+ assert normalized.claim_reports[0].verdict == 'unverified'
+ assert JudgeAgent().evaluate(payload, retry_count=99).decision != 'ACCEPT'
+
+
+@pytest.mark.parametrize('payload', [
+ verifier([report(), {'claim_id': 'broken', 'verdict': 'invalid'}]),
+ {'claim_evidence': [report(), None]},
+ {'claim_evidence': [report()], 'status': 'failed'},
+ {'claim_evidence_pairs': [{'claim': 'Unproven assertion', 'evidence': 'Related passage', 'source': 'fixture', 'entailment_score': .99}]},
+])
+def test_judge_normalization_does_not_drop_claims_or_invent_completion(payload):
+ assert JudgeAgent().evaluate(payload, retry_count=99).decision != 'ACCEPT'
+
+
+def test_judge_legacy_valid_contract_retains_all_reports():
+ payload = {'claim_evidence': [report()], 'status': 'completed'}
+ normalized = JudgeAgent()._normalize_verifier_result(payload, 'general')
+ assert len(normalized.claim_reports) == 1
+ assert JudgeAgent().evaluate(payload).decision == 'ACCEPT'
+
+
+@pytest.mark.parametrize('status', ['degraded', 'skipped', 'failed', 'unknown'])
+def test_passed_flag_cannot_override_noncompleted_reverification(status):
+ payload = {'passed': True, 'status': status, 'verifier_result': verifier([report()])}
+ assert JudgeAgent().evaluate(verifier([]), reverification_result=payload).decision != 'ACCEPT'
+
+
+@pytest.mark.asyncio
+async def test_memory_preserves_source_id_only_provenance(monkeypatch):
+ from types import SimpleNamespace
+ captured = []
+ class Memory:
+  async def initialize(self): pass
+  async def close(self): pass
+  async def store_facts_batch(self, requests):
+   captured.extend(requests)
+   return SimpleNamespace(results=[{'fact_id':'stored'}],stored=1,duplicates=0,failed=0)
+ monkeypatch.setattr('agents.memory_agent.memory.memory_agent.MemoryAgent', Memory)
+ r = report()
+ r['evidence'][0]['source_id'] = r['evidence'][0].pop('source')
+ state = {'judge_decision':'ACCEPT','verifier_result':verifier([r]),'trace':[],'inter_agent_bus':[]}
+ out = await _memory_node(state)
+ assert out['memory_result']['stored_count'] == 1
+ assert captured[0].source_ids == ['fixture']
+ assert captured[0].evidence[0]['source_id'] == 'fixture'
+ assert captured[0].evidence[0]['entailment_label'] == 'entailment'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('extra', [{'status':'failed'}, {'status':'degraded'}, {'remaining_contradictions':1}])
+async def test_memory_rejects_inconsistent_outer_reverification(monkeypatch, extra):
+ def forbidden_init(*args, **kwargs):
+  raise AssertionError('Invalid independent reverification cannot initialize Memory')
+ monkeypatch.setattr(MemoryAgent, '__init__', forbidden_init)
+ state = {'judge_decision':'ACCEPT','correction_result':{'corrected_text':'Corrected answer'},
+          'reverification_result':{'passed':True,'status':'completed','remaining_contradictions':0,
+                                   'verifier_result':verifier([report()]),**extra},
+          'trace':[],'inter_agent_bus':[]}
+ result=await _memory_node(state)
+ assert result['memory_result']['status']=='skipped'
+
+
+@pytest.mark.parametrize('field', ['nli_relation', 'top_relation', 'relationship', 'relation'])
+def test_judge_preserves_explicit_legacy_relationship_aliases(field):
+ payload={'claim_evidence_pairs':[{'claim':'Paris is the capital of France.',
+           'evidence':'Paris is the capital of France.','source':'fixture',field:'entailment',
+           'verifier_verdict':'verified'}]}
+ normalized=JudgeAgent()._normalize_verifier_result(payload,'general')
+ assert normalized.claim_reports[0].verdict=='verified'
+ assert normalized.claim_reports[0].evidence[0].entailment_label=='entailment'

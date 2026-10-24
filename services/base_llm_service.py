@@ -22,6 +22,7 @@ except ImportError:
 from typing import Any, Literal
 
 import httpx
+from services.cost_policy import CostPolicyError, free_only, guard_hosted_request
 
 from services.llm_providers import (
     ProviderConfigError,
@@ -66,6 +67,7 @@ class GenerationErrorCode(StrEnum):
     EMPTY_CONTENT = "EMPTY_CONTENT"
     MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
     UNSUPPORTED_PROVIDER = "UNSUPPORTED_PROVIDER"
+    COST_POLICY = "COST_POLICY"
     UNKNOWN_ERROR = "UNKNOWN_ERROR"
 
 
@@ -304,6 +306,8 @@ class BaseLLMService:
         last_error = None
         if check_network:
             try:
+                guard_hosted_request(self.config.provider, self.config.base_url,
+                                     {"model": self.config.model, "messages": []})
                 async with httpx.AsyncClient(
                     timeout=min(self.config.timeout_seconds, 5)
                 ) as client:
@@ -441,7 +445,7 @@ class BaseLLMService:
             try:
                 response = await self._post_chat_completions(payload)
                 if response.status_code >= 400:
-                    if response.status_code == 404 and payload.get("model") != "qwen/qwen-2.5-7b-instruct":
+                    if not free_only() and response.status_code == 404 and payload.get("model") != "qwen/qwen-2.5-7b-instruct":
                         logging.getLogger("services.base_llm_service").warning(
                             "OpenRouter model '%s' returned HTTP 404; falling back to "
                             "'qwen/qwen-2.5-7b-instruct' and retrying.",
@@ -456,7 +460,7 @@ class BaseLLMService:
                     # generation whenever the cap was a hair too high), shrink max_tokens
                     # to the affordable amount once and retry. This keeps the pipeline
                     # generating on a near-empty balance instead of escalating to a human.
-                    if response.status_code == 402 and not credit_adapted:
+                    if not free_only() and response.status_code == 402 and not credit_adapted:
                         affordable = self._affordable_tokens_from_402(response.text)
                         if affordable and affordable > 0:
                             capped = max(_CREDIT_MIN_TOKENS, affordable - _CREDIT_TOKEN_MARGIN)
@@ -668,6 +672,7 @@ class BaseLLMService:
             # to a widely-available model before giving up on the provider.
             if (
                 spec.name == "openrouter"
+                and not free_only()
                 and response.status_code == 404
                 and payload.get("model") != "qwen/qwen-2.5-7b-instruct"
             ):
@@ -696,6 +701,7 @@ class BaseLLMService:
         self, spec: ProviderSpec, payload: dict[str, Any]
     ) -> httpx.Response:
         """Send a chat completion request to a specific provider endpoint."""
+        payload = guard_hosted_request(spec.name, spec.base_url, payload)
         headers = {
             "Authorization": f"Bearer {spec.api_key}",
             "Content-Type": "application/json",
@@ -730,6 +736,7 @@ class BaseLLMService:
         Returns:
             The HTTP response from OpenRouter.
         """
+        payload = guard_hosted_request(self.config.provider, self.config.base_url, payload)
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
             "Content-Type": "application/json",
@@ -947,6 +954,8 @@ class BaseLLMService:
         Returns:
             The corresponding GenerationErrorCode enum value.
         """
+        if isinstance(exc, CostPolicyError):
+            return GenerationErrorCode.COST_POLICY
         if isinstance(exc, httpx.TimeoutException):
             return GenerationErrorCode.TIMEOUT
         if isinstance(exc, httpx.ConnectError):

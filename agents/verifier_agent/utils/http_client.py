@@ -42,6 +42,19 @@ class ResilientHttpClient:
         return {**default, **adapter_config}
 
     async def _execute_with_retry(self, method: str, url: str, adapter_name: Optional[str] = None, **kwargs: Any) -> httpx.Response:
+        from services.cost_policy import free_only, guard_public_retrieval_request
+        guard_public_retrieval_request(method, url, kwargs)
+        if free_only():
+            # Request options inherit client credentials/params/cookies. Inspect
+            # those defaults too; otherwise an apparently anonymous GET can
+            # acquire account credentials or follow an unapproved redirect.
+            guard_public_retrieval_request(method, url, {
+                "headers": getattr(self.client, "headers", {}),
+                "params": getattr(self.client, "params", {}),
+                "auth": getattr(self.client, "auth", None),
+                "cookies": getattr(self.client, "cookies", None),
+                "follow_redirects": getattr(self.client, "follow_redirects", False),
+            })
         cfg = self._get_adapter_config(adapter_name)
         max_retries = cfg["max_retries"]
         base_delay = cfg["base_delay_seconds"]

@@ -38,6 +38,21 @@ C = ClaimLabel.CONTRADICTED
 N = ClaimLabel.NOT_ENOUGH_INFO
 
 
+@pytest.mark.parametrize('risk,required', [(0.624, False), (0.625, True), (0.626, True)])
+def test_supported_argmax_still_respects_verification_risk_threshold(monkeypatch, risk, required):
+    claim = "The Earth orbits the Sun."
+    probabilities = {S: 1.0 - risk, C: 0.32, N: risk - 0.32}
+    detector = make_detector(monkeypatch, claims=[(claim, (0, len(claim)))],
+                             classify=lambda c, e: probabilities,
+                             evidence_stub=EvidenceStub(snippets={claim: [claim]}))
+    detector.verification_risk_threshold = 0.625
+    result = detector.detect(claim, [claim])
+    assert result.sentences[0].label == S
+    assert result.requires_verification is required
+    assert result.sentences[0].requires_verification is required
+    assert result.sentences[0].probabilities == pytest.approx(probabilities)
+
+
 # ---------------------------------------------------------------------------
 # Canonical supported / contradicted / unknown cases.
 # ---------------------------------------------------------------------------

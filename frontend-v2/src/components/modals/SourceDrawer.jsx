@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react'
-import { X, ExternalLink, Globe, BookOpenCheck, ShieldCheck, AlertOctagon } from 'lucide-react'
+import { X, ExternalLink, Globe, BookOpenCheck } from 'lucide-react'
+import { evidenceRecordView } from '../../lib/evidence-record.mjs'
 
 export function SourceDrawer({ source, isOpen, onClose }) {
   useEffect(() => {
@@ -13,6 +14,7 @@ export function SourceDrawer({ source, isOpen, onClose }) {
   }, [isOpen, onClose])
 
   if (!isOpen || !source) return null
+  const record = evidenceRecordView(source)
 
   return (
     <div className="drawer-overlay" onClick={onClose} role="dialog" aria-modal="true">
@@ -20,7 +22,7 @@ export function SourceDrawer({ source, isOpen, onClose }) {
         <div className="drawer-header">
           <div className="drawer-title-group">
             <BookOpenCheck size={16} className="drawer-icon" />
-            <h3>Primary Source Record</h3>
+            <h3>Evidence source record</h3>
           </div>
           <button
             type="button"
@@ -39,8 +41,8 @@ export function SourceDrawer({ source, isOpen, onClose }) {
               <Globe size={14} className="globe-icon" />
               <span className="domain-text">{source.domain}</span>
             </div>
-            <span className={`relationship-badge tone-${source.relationshipTone}`}>
-              {source.relationship}
+            <span className={`relationship-badge tone-${record.tone}`}>
+              {record.label}
             </span>
           </div>
 
@@ -50,7 +52,7 @@ export function SourceDrawer({ source, isOpen, onClose }) {
 
           {/* Full passage citation */}
           <div className="passage-section">
-            <label className="section-heading">Verified Passage</label>
+            <label className="section-heading">Evidence passage</label>
             <blockquote className="passage-quote">
               “{source.excerpt}”
             </blockquote>
@@ -63,25 +65,25 @@ export function SourceDrawer({ source, isOpen, onClose }) {
               <div className="provenance-item">
                 <span className="prov-label">Entailment Status</span>
                 <span className="prov-val">
-                  {source.relationshipTone === 'contradicted' ? 'Direct Contradiction' : 'Factual Entailment'}
+                  {record.status}
                 </span>
               </div>
               <div className="provenance-item">
-                <span className="prov-label">Extraction Method</span>
-                <span className="prov-val">Passage-level BGE Retrieval</span>
+                <span className="prov-label">Source attribution</span>
+                <span className="prov-val">{record.attribution}</span>
               </div>
-              <div className="provenance-item">
-                <span className="prov-label">Corpus Index</span>
-                <span className="prov-val">Authoritative Primary Record</span>
-              </div>
+              {record.retrievalMethod && <div className="provenance-item">
+                <span className="prov-label">Retrieval method</span>
+                <span className="prov-val">{record.retrievalMethod}</span>
+              </div>}
             </div>
           </div>
         </div>
 
         <div className="drawer-footer">
-          {source.url ? (
+          {record.externalUrl ? (
             <a
-              href={source.url}
+              href={record.externalUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="external-link-btn"

@@ -109,6 +109,10 @@ class N8NRetrievalClient:
 
     async def check_health(self) -> Dict[str, Any]:
         """Query n8n health webhook endpoint with authentication headers."""
+        from services.cost_policy import free_only
+        if free_only():
+            return {"healthy": False, "status_code": None, "latency_ms": 0,
+                    "error": "Free-only policy blocks unverified n8n downstream costs"}
         if not self.health_url:
             logger.error("n8n health webhook URL is not configured (set N8N_HEALTH_WEBHOOK_URL)")
             return {
@@ -333,6 +337,10 @@ class N8NRetrievalClient:
         not prune. Relevance ranking (:mod:`services.evidence_ranker`) runs in the
         Verifier pipeline, before NLI, where relevance is a verification concern.
         """
+        from services.cost_policy import free_only
+        if free_only():
+            return N8NRetrievalResult(success=False,
+                error="Free-only policy blocks unverified n8n downstream costs")
         if not self.webhook_url:
             logger.error("n8n retrieval webhook URL is not configured (set N8N_RETRIEVAL_WEBHOOK_URL)")
             return N8NRetrievalResult(
@@ -479,6 +487,10 @@ class N8NRetrievalClient:
         """
         Execute POST request to n8n Retrieval Webhook with a batch payload of claims.
         """
+        from services.cost_policy import free_only
+        if free_only():
+            return N8NRetrievalResult(success=False,
+                error="Free-only policy blocks unverified n8n downstream costs")
         if not self.webhook_url:
             return N8NRetrievalResult(
                 success=False,

@@ -55,7 +55,7 @@ class TestBatchEndpoint:
     @pytest.mark.asyncio
     async def test_store_batch(self, client):
         payload = [
-            {"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+            {"evidence": [{"source_id": "fixture", "snippet": "Batch API one", "entailment_label": "entailment"}],
                 "claim_text": "Batch API one",
                 "domain": "test",
                 "verdict": "verified",
@@ -82,7 +82,7 @@ class TestAnalyticsEndpoint:
             "claim_text": "Analytics claim",
             "domain": "test",
             "verdict": "verified",
-            "evidence": [{"source_id": "s1"}],
+            "evidence": [{"source_id": "s1", "snippet": "Analytics claim", "entailment_label": "entailment"}],
             "source_ids": ["s1"],
             "confidence": 0.9,
         })
@@ -104,7 +104,7 @@ class TestMetricsEndpoint:
 class TestDuplicateEndpoint:
     @pytest.mark.asyncio
     async def test_duplicate_store_via_api(self, client):
-        payload = {"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        payload = {"evidence": [{"source_id": "fixture", "snippet": "Duplicate API claim", "entailment_label": "entailment"}],
             "claim_text": "Duplicate API claim",
             "domain": "test",
             "verdict": "verified",
@@ -126,7 +126,7 @@ class TestApiKeyAuth:
 
         monkeypatch.setattr(api_module.main.settings, "memory_agent_api_key", "secret-key")
 
-        resp = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        resp = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Unauthorized claim", "entailment_label": "entailment"}],
             "claim_text": "Unauthorized claim",
             "domain": "test",
             "verdict": "verified",
@@ -142,7 +142,7 @@ class TestApiKeyAuth:
 
         resp = await client.post(
             "/store",
-            json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+            json={"evidence": [{"source_id": "fixture", "snippet": "Authorized claim", "entailment_label": "entailment"}],
                 "claim_text": "Authorized claim",
                 "domain": "test",
                 "verdict": "verified",
@@ -163,7 +163,7 @@ class TestApiKeyAuth:
 
     @pytest.mark.asyncio
     async def test_no_key_configured_allows_access(self, client):
-        resp = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        resp = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Open claim", "entailment_label": "entailment"}],
             "claim_text": "Open claim",
             "domain": "test",
             "verdict": "verified",
@@ -175,7 +175,7 @@ class TestApiKeyAuth:
 class TestDeleteFactEndpoint:
     @pytest.mark.asyncio
     async def test_delete_fact(self, client):
-        r = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        r = await client.post("/store", json={"evidence": [{"source_id": "fixture", "snippet": "Delete me", "entailment_label": "entailment"}],
             "claim_text": "Delete me",
             "domain": "test",
             "verdict": "verified",
@@ -207,7 +207,7 @@ class TestUpdateFactEndpoint:
         fact_id = r.json()["fact_id"]
         resp = await client.put(
             f"/facts/{fact_id}",
-            json={"new_verdict": "verified", "new_confidence": 0.9, "new_evidence": [{"source_id":"fixture", "snippet":"Independent support for this updated fixture."}]},
+            json={"new_verdict": "verified", "new_confidence": 0.9, "new_evidence": [{"source_id":"fixture", "snippet":"Update me", "entailment_label":"entailment"}]},
         )
         assert resp.status_code == 200
         data = resp.json()

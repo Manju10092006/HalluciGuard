@@ -75,3 +75,12 @@ def test_hedged_text_is_not_checkable():
 
 def test_a_factual_sentence_is_checkable():
     assert is_checkable(ONE_FACT)
+
+
+@pytest.mark.parametrize('text', [
+    'Note that Paris is the capital of Germany.',
+    'Keep in mind that Paris is the capital of Germany.',
+    'You can see Mount Everest from space.',
+])
+def test_framing_cannot_exempt_a_factual_assertion(text):
+    assert is_checkable(text)

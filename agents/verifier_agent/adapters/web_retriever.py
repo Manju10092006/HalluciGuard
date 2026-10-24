@@ -221,6 +221,8 @@ class TavilyWebRetriever:
 
     def _get_client(self):
         """Lazy-initialize Tavily client."""
+        from services.cost_policy import guard_unapproved_service
+        guard_unapproved_service("Tavily retrieval")
         if self._client is None:
             if not self._api_key:
                 raise RuntimeError(
@@ -371,4 +373,5 @@ class TavilyWebRetriever:
     @property
     def is_available(self) -> bool:
         """Check if Tavily API key is configured."""
-        return bool(self._api_key)
+        from services.cost_policy import free_only
+        return bool(self._api_key) and not free_only()

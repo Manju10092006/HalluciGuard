@@ -74,29 +74,31 @@ class TestDuplicateDetection:
         assert resp2.entities_created == 0
 
     @pytest.mark.asyncio
-    async def test_near_duplicate_flagged(self, agent):
-        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+    async def test_nearby_different_claim_is_preserved(self, agent):
+        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Regular exercise reduces heart disease risk", "entailment_label": "entailment"}],
             claim_text="Regular exercise reduces heart disease risk",
             domain="healthcare",
             verdict="verified",
             confidence=0.9,
         )
-        await agent.store_fact(req)
+        original = await agent.store_fact(req)
 
-        near = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        near = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Regular exercise reduces heart disease risk significantly", "entailment_label": "entailment"}],
             claim_text="Regular exercise reduces heart disease risk significantly",
             domain="healthcare",
             verdict="verified",
             confidence=0.9,
         )
         resp = await agent.store_fact(near)
-        assert resp.duplicate_of is not None
+        assert resp.duplicate_of is None
+        assert resp.stored is True
+        assert resp.fact_id != original.fact_id
 
 
 class TestContradictionDetection:
     @pytest.mark.asyncio
     async def test_conflicting_verdict_raises_alert(self, agent):
-        positive = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        positive = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Vitamin C cures the common cold", "entailment_label": "entailment"}],
             claim_text="Vitamin C cures the common cold",
             domain="healthcare",
             verdict="verified",
@@ -118,7 +120,7 @@ class TestContradictionDetection:
 
     @pytest.mark.asyncio
     async def test_same_verdict_no_contradiction(self, agent):
-        first = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        first = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Water boils at 100 degrees Celsius at sea level", "entailment_label": "entailment"}],
             claim_text="Water boils at 100 degrees Celsius at sea level",
             domain="science",
             verdict="verified",
@@ -126,7 +128,7 @@ class TestContradictionDetection:
         )
         await agent.store_fact(first)
 
-        second = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        second = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Water boils at 100 degrees Celsius at sea level approximately", "entailment_label": "entailment"}],
             claim_text="Water boils at 100 degrees Celsius at sea level approximately",
             domain="science",
             verdict="verified",
@@ -140,7 +142,7 @@ class TestBatchStore:
     @pytest.mark.asyncio
     async def test_batch_stores_multiple(self, agent):
         requests = [
-            StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+            StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Batch claim one", "entailment_label": "entailment"}],
                 claim_text="Batch claim one",
                 domain="test",
                 verdict="verified",
@@ -152,7 +154,7 @@ class TestBatchStore:
                 verdict="likely_hallucinated",
                 confidence=0.1,
             ),
-            StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+            StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Batch claim three", "entailment_label": "entailment"}],
                 claim_text="Batch claim three",
                 domain="test",
                 verdict="verified",
@@ -167,7 +169,7 @@ class TestBatchStore:
 
     @pytest.mark.asyncio
     async def test_batch_tracks_duplicates(self, agent):
-        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Batch duplicate claim", "entailment_label": "entailment"}],
             claim_text="Batch duplicate claim",
             domain="test",
             verdict="verified",
@@ -194,7 +196,7 @@ class TestGraphAnalytics:
             claim_text="Graph analytics test claim",
             domain="test",
             verdict="verified",
-            evidence=[{"source_id": "src-a", "snippet": "Supporting graph analytics fixture."}, {"source_id": "src-b", "snippet": "Independent supporting graph analytics fixture."}],
+            evidence=[{"source_id": "src-a", "snippet": "Graph analytics test claim", "entailment_label": "entailment"}, {"source_id": "src-b", "snippet": "Graph analytics test claim", "entailment_label": "entailment"}],
             source_ids=["src-a", "src-b"],
             confidence=0.9,
         )
@@ -208,7 +210,7 @@ class TestGraphAnalytics:
 class TestReranking:
     @pytest.mark.asyncio
     async def test_recall_reranks(self, agent):
-        store = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        store = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Coffee increases alertness", "entailment_label": "entailment"}],
             claim_text="Coffee increases alertness",
             domain="science",
             verdict="verified",
@@ -236,7 +238,7 @@ class TestReranking:
 
     @pytest.mark.asyncio
     async def test_min_similarity_filters(self, agent):
-        store = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        store = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Unrelated claim about gardening", "entailment_label": "entailment"}],
             claim_text="Unrelated claim about gardening",
             domain="test",
             verdict="verified",
@@ -278,7 +280,7 @@ class TestFuzzyCache:
 class TestFactDeletion:
     @pytest.mark.asyncio
     async def test_delete_existing_fact(self, agent):
-        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Supporting passage for the storage lifecycle fixture."}],
+        req = StoreFactRequest(evidence=[{"source_id": "fixture", "snippet": "Fact to be deleted", "entailment_label": "entailment"}],
             claim_text="Fact to be deleted",
             domain="test",
             verdict="verified",
@@ -319,7 +321,7 @@ class TestFactUpdate:
         update = UpdateFactRequest(
             fact_id=resp.fact_id,
             new_verdict="verified",
-            new_evidence=[{"source_id":"fixture", "snippet":"New evidence verifies the corrected stored claim."}],
+            new_evidence=[{"source_id":"fixture", "snippet":"Fact to be updated", "entailment_label":"entailment"}],
             new_confidence=0.95,
         )
         update_resp = await agent.update_fact(update)
@@ -351,7 +353,7 @@ async def test_update_cannot_promote_negative_audit_without_new_evidence(agent):
 async def test_update_support_provenance_and_confidence_are_retained(agent):
     from agents.memory_agent.schemas.models import UpdateFactRequest
     initial = await agent.store_fact(StoreFactRequest(claim_text='An evidence-backed assertion', domain='test', verdict='contradicted', confidence=0.2))
-    evidence = [{'source_id':'fixture', 'snippet':'Fresh independent support for the assertion.'}]
+    evidence = [{'source_id':'fixture', 'snippet':'An evidence-backed assertion', 'entailment_label':'entailment'}]
     updated = await agent.update_fact(UpdateFactRequest(fact_id=initial.fact_id, new_verdict='verified', new_confidence=0.91, new_evidence=evidence))
     fact=agent.kg.find_entity_by_name(initial.fact_id)[0]
     assert fact.properties['evidence'] == evidence
@@ -369,7 +371,7 @@ async def test_update_support_provenance_and_confidence_are_retained(agent):
 
 @pytest.mark.asyncio
 async def test_successful_store_is_recallable_before_shutdown(agent):
-    req=StoreFactRequest(claim_text='A persistent verified claim',domain='test',verdict='verified',confidence=0.9,evidence=[{'source_id':'fixture','snippet':'The persistent claim is independently supported.'}])
+    req=StoreFactRequest(claim_text='A persistent verified claim',domain='test',verdict='verified',confidence=0.9,evidence=[{'source_id':'fixture','snippet':'A persistent verified claim','entailment_label':'entailment'}])
     stored=await agent.store_fact(req)
     reopened=VectorStore(store_path=agent._settings.vector_store_path,embedding_model='all-MiniLM-L6-v2')
     # Reuse the actual loaded encoder; reopen only the on-disk persistence layer.

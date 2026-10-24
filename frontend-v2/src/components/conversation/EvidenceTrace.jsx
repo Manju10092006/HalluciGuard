@@ -90,7 +90,7 @@ export function EvidenceTrace({ summary, sources, onOpenSource }) {
                       className="open-source-link"
                       onClick={() => onOpenSource?.(src)}
                     >
-                      <span>Open primary record</span>
+                      <span>Inspect source</span>
                       <ExternalLink size={12} />
                     </button>
                   </div>

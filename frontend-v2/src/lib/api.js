@@ -1,6 +1,7 @@
 import axios from "axios";
 import { verificationView } from "./verification-contract.mjs";
-const API_BASE = (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000").replace(/\/$/, "");
+import { apiBase } from "./api-base.mjs";
+const API_BASE = apiBase();
 const http = axios.create({ baseURL: API_BASE, timeout: 300000 });
 const STORAGE = "hg_local_conversations_v2", PROJECTS = "hg_local_projects_v2";
 let conversations = [], projects = [], loaded = false, namespace = "";
@@ -34,12 +35,19 @@ export const api = {
   deleteConversation: async id => { load(); conversations = conversations.filter(c => c.id !== id); save(); return { ok: true }; },
   sendMessage: async (id, content, mode = "standard", signal) => {
     const c = find(id);
+    const requestScope = scope();
+    const requestToken = typeof window !== "undefined" ? localStorage.getItem("hg.auth.jwt.v1") : null;
     const { data } = await http.post("/api/v1/verify", { user_query: content, generation_mode: "normal", conversation_history: c.messages.slice(-28).map(m => ({ role: m.role, content: m.content })) }, { signal, headers: typeof window !== "undefined" && localStorage.getItem("hg.auth.jwt.v1") ? { Authorization: `Bearer ${localStorage.getItem("hg.auth.jwt.v1")}` } : {} });
+    if (signal?.aborted || scope() !== requestScope || (typeof window !== "undefined" && localStorage.getItem("hg.auth.jwt.v1") !== requestToken)) {
+      throw new Error("Verification cancelled because the request or session changed");
+    }
+    // Reload the current conversation: it may have been deleted while awaiting HTTP.
+    const target = find(id);
     const verification = verificationView(data, mode), now = new Date().toISOString();
     const user_message = { id: identifier(), role: "user", content, created_at: now };
     const assistant_message = { id: identifier(), role: "assistant", content: verification.answer, verification, created_at: now };
-    c.messages.push(user_message, assistant_message); c.status = verification.verdict === "supported" ? "verified" : verification.verdict === "failed" ? "failed" : "withheld"; c.updated_at = now; save();
-    return { user_message, assistant_message, conversation: structuredClone(c) };
+    target.messages.push(user_message, assistant_message); target.status = verification.verdict === "supported" ? "verified" : verification.verdict === "failed" ? "failed" : "withheld"; target.updated_at = now; save();
+    return { user_message, assistant_message, conversation: structuredClone(target) };
   },
   setFeedback: async (id, msgId, feedback) => { const m = find(id).messages.find(m => m.id === msgId); if (!m) throw new Error("Message not found"); m.feedback = feedback; save(); return { ok: true }; },
   listProjects: async () => { load(); return projects; },

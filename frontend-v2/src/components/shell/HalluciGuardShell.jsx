@@ -20,7 +20,7 @@ export function HalluciGuardShell() {
   const [density, setDensity] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('hg_density') : null) || 'comfortable')
 
   // User Authentication State
-  const { user, signOut } = useAuth()
+  const { user, status: authStatus, signOut } = useAuth()
 
   // Modals & Drawers
   const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
@@ -43,21 +43,27 @@ export function HalluciGuardShell() {
   const [error, setError] = useState(null)
   const pendingRef = useRef(null)
   useEffect(() => {
+    let active = true
     setActiveSession(null)
     setActiveSessionId(null)
+    setRecentSessions([])
+    setActiveSource(null)
+    setIsSourceDrawerOpen(false)
     setError(null)
     setIsLoading(false)
     pendingRef.current?.abort()
     pendingRef.current = null
-    api.listConversations().then(convs => setRecentSessions(convs.map(toSession)))
-    return () => pendingRef.current?.abort()
-  }, [user?.id])
+    if (authStatus !== 'loading') {
+      api.listConversations().then(convs => { if (active) setRecentSessions(convs.map(toSession)) })
+    }
+    return () => { active = false; pendingRef.current?.abort() }
+  }, [authStatus, user?.id])
 
   function toSession(conv) {
     return { ...conv, timeGroup: 'Today', timestamp: new Date(conv.updated_at).toLocaleString(), statusBadge: conv.status === 'verified' ? 'Verified' : conv.status === 'reviewing' ? 'Pending' : conv.status === 'failed' ? 'Failed' : 'Withheld', statusBadgeTone: conv.status === 'verified' ? 'supported' : 'insufficient', messages: (conv.messages || []).map(m => {
       if (m.role === 'user') return { id: m.id, sender: 'user', text: m.content }
       const v = m.verification
-      return { id: m.id, sender: 'halluciguard', text: m.content, status: v.verdict.toUpperCase(), statusTitle: v.verdict.toUpperCase(), statusDescription: v.explanation, sources: v.evidence.map(e => ({ ...e, relationshipTone: e.relationship === 'supports' ? 'supported' : e.relationship === 'contradicts' ? 'contradicted' : 'insufficient' })), evidenceSummary: { totalSources: v.evidence.length, supportingCount: v.counts.supporting, contradictingCount: v.counts.contradicting }, claims: v.claims.map((c,i) => ({ ...c, number: String(i+1).padStart(2,'0'), status: c.status.toUpperCase(), tone: c.status, verdict: c.status })), pipeline: v.pipeline }
+      return { id: m.id, sender: 'halluciguard', text: m.content, status: v.verdict.toUpperCase(), statusTitle: v.verdict.toUpperCase(), statusDescription: v.explanation, correction: v.correction && v.original_claim ? { original: v.original_claim, corrected: v.correction } : null, sources: v.evidence.map(e => ({ ...e, relationshipTone: e.relationship === 'supports' ? 'supported' : e.relationship === 'contradicts' ? 'contradicted' : 'insufficient' })), evidenceSummary: { totalSources: v.evidence.length, supportingCount: v.counts.supporting, contradictingCount: v.counts.contradicting }, claims: v.claims.map((c,i) => ({ ...c, number: String(i+1).padStart(2,'0'), status: c.status.toUpperCase(), tone: c.status, verdict: c.status })), pipeline: v.pipeline }
     }) }
   }
 
@@ -89,7 +95,13 @@ export function HalluciGuardShell() {
   // Select an existing recent session
   const handleSelectSession = (id) => {
     const found = recentSessions.find((s) => s.id === id)
-    if (found) {
+    if (found && authStatus !== 'loading') {
+      pendingRef.current?.abort()
+      pendingRef.current = null
+      setIsLoading(false)
+      setError(null)
+      setActiveSource(null)
+      setIsSourceDrawerOpen(false)
       setActiveSessionId(id)
       setActiveSession(found)
       setActiveNav('verify')
@@ -129,7 +141,7 @@ export function HalluciGuardShell() {
 
   // Only the real local backend can establish a verification result.
   const handleSendMessage = async ({ text, evidenceAttachment, flowMeta }) => {
-    if (pendingRef.current || !text?.trim()) return
+    if (authStatus === 'loading' || pendingRef.current || !text?.trim()) return
     if (evidenceAttachment || flowMeta) { setError('Attachments and automated flows are not supported by the local verification API. Submit a text question.'); return }
     const controller = new AbortController()
     pendingRef.current = controller
@@ -137,15 +149,19 @@ export function HalluciGuardShell() {
     setIsLoading(true)
     try {
       const conv = activeSessionId ? await api.getConversation(activeSessionId) : await api.createConversation({ title: text.slice(0,60) })
+        if (controller.signal.aborted || pendingRef.current !== controller) return
       setActiveSessionId(conv.id)
       setActiveSession({ ...toSession(conv), messages: [...toSession(conv).messages, { id: 'pending', sender: 'user', text }], statusBadge: 'Pending' })
       const res = await api.sendMessage(conv.id, text, 'standard', controller.signal)
-      if (controller.signal.aborted) return
+        if (controller.signal.aborted || pendingRef.current !== controller) return
       const completed = toSession(res.conversation)
       setActiveSession(completed)
       setRecentSessions(prev => [completed, ...prev.filter(c => c.id !== conv.id)])
     } catch (err) {
-      if (!controller.signal.aborted) setError('Verification could not complete. No answer was verified. ' + (err.response?.data?.detail || err.message || 'Service unavailable.'))
+      if (!controller.signal.aborted) {
+        setActiveSession(prev => prev ? { ...prev, statusBadge: 'Failed', statusBadgeTone: 'insufficient' } : prev)
+        setError('Verification could not complete. No answer was verified. ' + (err.response?.data?.detail || err.message || 'Service unavailable.'))
+      }
     } finally {
       if (pendingRef.current === controller) { pendingRef.current = null; setIsLoading(false) }
     }
@@ -201,7 +217,7 @@ export function HalluciGuardShell() {
         {/* Workspace Central Stage */}
         <main className="chat-main-viewport">
           {error && <div role="alert" data-testid="verification-error" style={{padding:16}}>{error}</div>}
-          {isLoading && <button type="button" onClick={() => { pendingRef.current?.abort(); pendingRef.current = null; setIsLoading(false); setError("Verification stopped. No result was verified.") }}>Stop verification</button>}
+            {isLoading && <button type="button" onClick={() => { pendingRef.current?.abort(); pendingRef.current = null; setIsLoading(false); setActiveSession(prev => prev ? { ...prev, statusBadge: 'Withheld', statusBadgeTone: 'insufficient' } : prev); setError("Verification stopped. No result was verified.") }}>Stop verification</button>}
           {isHome ? (
             <EmptyVerificationState
               onSendMessage={handleSendMessage}

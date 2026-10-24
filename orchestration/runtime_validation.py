@@ -25,33 +25,39 @@ class ComponentCheckResult:
 
 
 def validate_openrouter_configuration() -> ComponentCheckResult:
-    """Validate OpenRouter API key and model configuration."""
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    model = os.environ.get("OPENROUTER_MODEL", "qwen/qwen3-14b")
-    base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    """Check the actual Base LLM router configuration, without contacting it."""
+    from services.cost_policy import CostPolicyError, guard_hosted_request
+    from services.llm_providers import build_provider_specs, resolve_provider_order
 
-    if not api_key:
-        return ComponentCheckResult(
-            ok=False,
-            component="base_llm",
-            detail="OPENROUTER_API_KEY is not configured in the environment.",
-            metadata={
-                "provider": "openrouter",
-                "model": model,
-                "base_url": base_url,
-                "key_configured": False,
-            },
-        )
+    metadata: Dict[str, Any] = {"configuration_only": True, "network_checked": False}
+    try:
+        order = resolve_provider_order()
+        specs = build_provider_specs()
+        providers = []
+        for name in order:
+            spec = specs[name]
+            allowed = True
+            try:
+                guard_hosted_request(name, spec.base_url, {"model": spec.model, "messages": []})
+            except CostPolicyError:
+                allowed = False
+            providers.append({
+                "provider": name,
+                "model": spec.model,
+                "key_configured": spec.has_key,
+                "cost_policy_allowed": allowed,
+            })
+        metadata.update({"order": order, "providers": providers})
+        ready = any(p["key_configured"] and p["cost_policy_allowed"] for p in providers)
+    except ValueError:
+        ready = False
+        metadata["configuration_valid"] = False
     return ComponentCheckResult(
-        ok=True,
+        ok=ready,
         component="base_llm",
-        detail="OpenRouter Base LLM configuration is ready.",
-        metadata={
-            "provider": "openrouter",
-            "model": model,
-            "base_url": base_url,
-            "key_configured": True,
-        },
+        detail=("Base LLM router configuration permits a keyed provider; availability is untested."
+                if ready else "Base LLM has no usable configured provider under the current cost policy."),
+        metadata=metadata,
     )
 
 
@@ -176,14 +182,29 @@ def validate_corrector_configuration() -> ComponentCheckResult:
     """Validate the configured correction generator without loading model weights."""
     provider = os.environ.get("HG_CORRECTOR_PROVIDER", "openrouter").strip().lower()
     try:
-        from agents.corrector_agent.corrector import CorrectorAgent
-        if provider == "openrouter":
-            key_ready = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
+        if provider != "local":
+            # The graph routes every non-local selector through CharacterRegenerator,
+            # whose explicit BaseLLMConfig uses single-provider dispatch.
+            from services.base_llm_service import BaseLLMConfig
+            from services.cost_policy import CostPolicyError, guard_hosted_request
+            config = BaseLLMConfig()
+            model = os.environ.get("HG_CORRECTOR_OPENROUTER_MODEL", "").strip() or config.model
+            key_ready = bool(config.api_key and config.api_key.strip())
+            allowed = True
+            try:
+                guard_hosted_request(config.provider, config.base_url, {"model": model, "messages": []})
+            except CostPolicyError:
+                allowed = False
+            ready = key_ready and allowed
             return ComponentCheckResult(
-                ok=key_ready and callable(CorrectorAgent),
+                ok=ready,
                 component="corrector",
-                detail="OpenRouter-backed Corrector is ready." if key_ready else "OPENROUTER_API_KEY is required by the configured Corrector.",
-                metadata={"provider": provider, "key_configured": key_ready},
+                detail=("Hosted Corrector configuration permits dispatch; availability is untested."
+                        if ready else "Hosted Corrector configuration cannot dispatch under the current cost policy."),
+                metadata={"provider": config.provider, "provider_selector": provider,
+                          "model": model, "key_configured": key_ready,
+                          "cost_policy_allowed": allowed, "configuration_only": True,
+                          "network_checked": False},
             )
         from agents.corrector_agent.corrector.config import CorrectorConfig
         from agents.corrector_agent.corrector.model_client import resolve_model
@@ -191,8 +212,9 @@ def validate_corrector_configuration() -> ComponentCheckResult:
         return ComponentCheckResult(
             ok=bool(status.available),
             component="corrector",
-            detail=status.detail or "Local Corrector model is available.",
-            metadata={"provider": "local", "model_status": status.model_dump()},
+            detail="Local Corrector artifact resolution passed; loading and inference are untested." if status.available else status.detail,
+            metadata={"provider": "local", "model_status": status.model_dump(),
+                      "configuration_only": True, "model_loaded": False},
         )
     except Exception as exc:
         return ComponentCheckResult(

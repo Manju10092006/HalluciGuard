@@ -396,6 +396,10 @@ class WebEnhancedAdapter:
         reason: str,
     ) -> List[Passage]:
         """Execute Tavily search with trace recording."""
+        from services.cost_policy import free_only
+        if free_only():
+            trace.tavily = TavilyRetrievalTrace(called=False, reason="FREE_ONLY_COST_POLICY")
+            return []
         active_key = self._tavily_key if self._tavily_key is not None else os.environ.get("TAVILY_API_KEY", "").strip()
         if not active_key:
             logger.info("Tavily API key not configured; skipping web fallback")

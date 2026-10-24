@@ -861,7 +861,7 @@ async def _verifier_node(state: HalluciGuardState) -> dict[str, Any]:
 
         # Every requested claim must have exactly one matching report. A
         # supported subset is not verification of the submitted whole answer.
-        if state.get("claims_gated"):
+        if suspicious_claims:
             requested = {c.claim_id: " ".join(c.text.split()) for c in suspicious_claims}
             returned = canonical_verifier_result.claim_reports
             ids = [c.claim_id for c in returned]
@@ -1370,7 +1370,8 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
         positively_verified = bool(canonical_v_res.claim_reports) and all(
             str(getattr(r, "verdict", "")).lower()
             in ("verified", "supported", "verdictlabel.verified")
-            and any(str(e.snippet).strip() and str(e.entailment_label).lower().rsplit(".", 1)[-1] == "entailment"
+            and any(str(e.snippet).strip() and str(e.source or e.url or "").strip()
+                    and str(e.entailment_label).lower().rsplit(".", 1)[-1] == "entailment"
                     for e in r.evidence)
             for r in canonical_v_res.claim_reports
         )
@@ -1637,13 +1638,18 @@ async def _memory_node_impl(state: HalluciGuardState) -> dict[str, Any]:
     # Sourcing verified facts: ONLY if judge accepted and reverification passed (if reverification ran)
     judge_decision = str(state.get("judge_decision", "")).upper()
     rev_res = state.get("reverification_result")
+    reverification_cleared = (
+        isinstance(rev_res, dict) and rev_res.get("passed") is True
+        and str(rev_res.get("status", "")).lower().rsplit(".", 1)[-1] == "completed"
+        and rev_res.get("remaining_contradictions", 0) == 0
+    )
 
     verified_reports: list[dict[str, Any]] = []
 
     # Memory must not store anything if Judge did not ACCEPT or if reverification failed
     if judge_decision == "ACCEPT":
         if rev_res and isinstance(rev_res, dict):
-            if rev_res.get("passed") is True:
+            if reverification_cleared:
                 v_res = rev_res.get("verifier_result", {})
                 for cr in v_res.get("claim_reports", []):
                     verdict_str = str(cr.get("verdict", "")).lower()
@@ -1656,28 +1662,24 @@ async def _memory_node_impl(state: HalluciGuardState) -> dict[str, Any]:
                     verdict_str = str(cr.get("verdict", "")).lower()
                     if verdict_str in {"verified", "verdictlabel.verified"}:
                         verified_reports.append(cr)
-            # A correction without independent reverification must never reach storage.
-    if state.get("correction_result") and not (isinstance(rev_res, dict) and rev_res.get("passed") is True):
+    # A correction without independent reverification must never reach storage.
+    if state.get("correction_result") and not reverification_cleared:
         verified_reports = []
     # Defense in depth: even a forged ACCEPT cannot persist a partial answer.
     final_verifier = (rev_res or {}).get("verifier_result") if isinstance(rev_res, dict) else state.get("verifier_result")
     final_reports = (final_verifier or {}).get("claim_reports", [])
-    if final_reports and any(str(r.get("verdict", "")).lower() not in {"verified", "verdictlabel.verified"} for r in final_reports):
+    if (not final_verifier or str(final_verifier.get("status", "")).lower().rsplit(".", 1)[-1] != "completed"
+            or not final_reports or any(str(r.get("verdict", "")).lower() not in {"verified", "verdictlabel.verified"} for r in final_reports)):
         verified_reports = []
-    verified_reports = [r for r in verified_reports if any(
+    # Eligibility applies to the whole answer, not a supported subset. Never
+    # repopulate rejected reports from the legacy pre-correction verifier view.
+    if not all(str(r.get("claim_text", "")).strip() and any(
         str(e.get("snippet") or e.get("text") or "").strip()
         and str(e.get("source") or e.get("source_id") or e.get("url") or "").strip()
+        and str(e.get("entailment_label", "")).lower().rsplit(".", 1)[-1] == "entailment"
         for e in r.get("evidence", [])
-    )]
-
-    if not verified_reports:
-                claim_evidence = state.get("verifier", {}).get("claim_evidence", [])
-                verified_reports = [
-                    r
-                    for r in claim_evidence
-                    if str(r.get("verdict", "")).lower()
-                    in {"verified", "verdictlabel.verified"}
-                ]
+    ) for r in verified_reports):
+        verified_reports = []
 
     if not verified_reports:
         memory = {
@@ -1733,17 +1735,18 @@ async def _memory_node_impl(state: HalluciGuardState) -> dict[str, Any]:
                     verdict="verified",
                     evidence=[
                         {
-                            "source_id": e.get("source", ""),
+                            "source_id": e.get("source_id") or e.get("source") or e.get("url", ""),
                             "title": e.get("title", ""),
                             "url": e.get("url"),
                             "snippet": e.get("snippet", ""),
+                            "entailment_label": e.get("entailment_label", ""),
                         }
                         for e in report.get("evidence", [])
                     ],
                     source_ids=[
-                        str(e.get("source", ""))
+                        str(e.get("source_id") or e.get("source") or e.get("url", ""))
                         for e in report.get("evidence", [])
-                        if e.get("source")
+                        if e.get("source_id") or e.get("source") or e.get("url")
                     ],
                     confidence=float(
                         report.get("confidence_score", report.get("trust_score", 0.0))

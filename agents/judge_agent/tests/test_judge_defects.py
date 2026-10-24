@@ -150,7 +150,9 @@ def test_reverification_failed_with_remaining_contradictions_never_accepts():
         domain="General Knowledge", retry_count=99,
     )
     assert _str(r.decision) != "ACCEPT", f"got {_str(r.decision)} ({r.reason})"
-    assert _str(r.decision) == "REJECT"
+    # Missing independent verifier output is a contract failure, not evidence
+    # that the corrected fact is false. Withhold without a factual rejection.
+    assert _str(r.decision) == "ABSTAIN"
 
 
 def test_reverification_passed_accepts():
