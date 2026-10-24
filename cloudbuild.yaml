@@ -1,0 +1,13 @@
+# Manual candidate build only. No service deploy, trigger, or traffic update.
+# Run from the fresh prepare_source.py output directory, not the repository root.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    timeout: 1100s
+    args: ['build', '--tag', 'asia-south1-docker.pkg.dev/project-836457aa-3a05-4a11-8f8/cloud-run-source-deploy/halluciguard/halluciguard-detector:reviewed-$BUILD_ID', '.']
+images:
+  - 'asia-south1-docker.pkg.dev/project-836457aa-3a05-4a11-8f8/cloud-run-source-deploy/halluciguard/halluciguard-detector:reviewed-$BUILD_ID'
+timeout: 1200s
+options:
+  machineType: E2_STANDARD_2
+  diskSizeGb: 100
+  logging: CLOUD_LOGGING_ONLY
