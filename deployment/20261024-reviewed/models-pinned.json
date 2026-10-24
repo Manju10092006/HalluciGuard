@@ -1,0 +1,37 @@
+[
+  {
+    "repo_id": "BAAI/bge-m3",
+    "revision": "5617a9f61b028005a4858fdac845db406aefb181",
+    "safetensors_available": false,
+    "root_weights": [
+      "pytorch_model.bin"
+    ]
+  },
+  {
+    "repo_id": "BAAI/bge-reranker-large",
+    "revision": "55611d7bca2a7133960a6d3b71e083071bbfc312",
+    "safetensors_available": true,
+    "root_weights": [
+      "model.safetensors",
+      "pytorch_model.bin"
+    ]
+  },
+  {
+    "repo_id": "cross-encoder/nli-deberta-v3-base",
+    "revision": "6c749ce3425cd33b46d187e45b92bbf96ee12ec7",
+    "safetensors_available": true,
+    "root_weights": [
+      "model.safetensors",
+      "pytorch_model.bin"
+    ]
+  },
+  {
+    "repo_id": "sentence-transformers/all-MiniLM-L6-v2",
+    "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "safetensors_available": true,
+    "root_weights": [
+      "model.safetensors",
+      "pytorch_model.bin"
+    ]
+  }
+]
