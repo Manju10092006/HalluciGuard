@@ -111,6 +111,12 @@ class JudgeConfig:
     nli_model: str = "cross-encoder/nli-deberta-v3-base"
     use_huggingface: bool = True
     circuit_breaker_error_threshold: int = 3
+    release_policy: str = "default"
+    entity_aliases: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.release_policy not in {"default", "strict_all_verified", "slot_aware"}:
+            raise ValueError("release_policy must be default, strict_all_verified, or slot_aware")
 
     @property
     def default_nli_model(self) -> str:

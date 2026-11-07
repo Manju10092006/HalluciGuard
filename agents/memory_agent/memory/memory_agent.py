@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import copy
+import json
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -130,6 +132,8 @@ class MemoryAgent:
     async def store_fact(self, request: StoreFactRequest) -> StoreFactResponse:
         fact_id = str(uuid.uuid4())
         now = datetime.utcnow()
+        provenance = {"schema_version": 1, "evidence": copy.deepcopy(request.evidence),
+                      "source_ids": list(request.source_ids), "metadata": copy.deepcopy(request.metadata)}
         contradictions: list[ContradictionAlert] = []
 
         # Duplicate + contradiction detection against existing memory
@@ -196,6 +200,7 @@ class MemoryAgent:
                 "domain": request.domain,
                 "verdict": request.verdict,
                 "claim_text": request.claim_text,
+                "provenance": provenance,
             },
             confidence=request.confidence,
         )
@@ -231,6 +236,7 @@ class MemoryAgent:
                 "confidence": request.confidence,
                 "fact_id": fact_id,
                 "timestamp": now.isoformat(),
+                "provenance": provenance,
             },
             entry_id=fact_id,
         )
@@ -248,7 +254,7 @@ class MemoryAgent:
             domain=request.domain,
             claim_text=request.claim_text,
             verdict=request.verdict,
-            evidence_summary=f"Evidence from {len(request.evidence)} sources",
+            evidence_summary=json.dumps(provenance, ensure_ascii=True, sort_keys=True),
             confidence=request.confidence,
             source_count=len(request.source_ids),
         )
@@ -270,6 +276,10 @@ class MemoryAgent:
             trust_updates.append(update)
 
         self.kg.save()
+
+        # A successful admission must include a successful vector persistence
+        # attempt. close() is best-effort and intentionally swallows errors.
+        self.vectors.save()
 
         return StoreFactResponse(
             fact_id=fact_id,

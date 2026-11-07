@@ -5,7 +5,7 @@ All application-wide configuration is managed through this module.
 Settings are loaded from ``.env`` file and/or environment variables.
 """
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # -- Cache --
     cache_ttl: int = 86400
     verifier_cache_enabled: bool = True
+    relation_policy: Literal["structured", "no_scoped", "soft", "nli_temporal"] = "structured"
 
     # -- Retrieval quality gate --
     # Minimum number of passages with BGE relevance above relevance_threshold to consider primary evidence sufficient

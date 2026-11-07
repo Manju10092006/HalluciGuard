@@ -356,6 +356,13 @@ class JudgeAgent:
             grounded_anchors |= (_salient_terms(c.claim_text) & query_terms)
         core_unverified = [c for c in unverified_claims if _claim_leaves_core_gap(c.claim_text, query_terms, grounded_anchors)]
         core_conflicted = [c for c in conflicted_claims if _claim_leaves_core_gap(c.claim_text, query_terms, grounded_anchors)]
+        if self.config.release_policy == "slot_aware":
+            from .answer_slots import same_answer_slot
+            verified_texts = [c.claim_text for c in claims_to_preserve]
+            core_unverified = [c for c in unverified_claims if c in core_unverified or
+                same_answer_slot(c.claim_text, verified_texts, self.config.entity_aliases)]
+            # Evidence conflict always requires reconciliation in this policy.
+            core_conflicted = list(conflicted_claims)
         core_preserved = [c for c in claims_to_preserve if _claim_is_core(c.claim_text, query_terms)]
         has_core_grounding_gap = bool(core_unverified) or bool(core_conflicted)
 
@@ -469,6 +476,7 @@ class JudgeAgent:
         # This eliminates the entire false-ACCEPT class, not just one example.
         elif (
             not has_contradictions
+            and self.config.release_policy != "strict_all_verified"
             and not has_core_grounding_gap
             and core_preserved
             and has_unverified
@@ -571,6 +579,7 @@ class JudgeAgent:
                 # The detector is a triage prior, never factual evidence — it is
                 # not read by any decision branch (invariant: DETECTOR != VERDICT).
                 "detector_role": "triage_only",
+                "release_policy": self.config.release_policy,
             },
             status=ExecutionStatus.COMPLETED
         )

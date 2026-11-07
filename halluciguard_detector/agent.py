@@ -106,7 +106,8 @@ class DetectorAgent:
                     claim["phase1_risk"] = risk
             return result
 
-        grounded = self._get_detector().detect(
+        detector = self._get_detector()
+        grounded = detector.detect(
             user_query=user_query,
             draft_answer=answer,
             evidence=evidence_texts,
@@ -124,7 +125,7 @@ class DetectorAgent:
                         key.value: value for key, value in sentence.probabilities.items()
                     },
                     "risk_level": sentence.risk.value,
-                    "requires_verification": sentence.label.value != "SUPPORTED",
+                    "requires_verification": sentence.hallucination_probability >= detector.threshold,
                     "evidence_snippets": sentence.evidence_snippets,
                 }
             )

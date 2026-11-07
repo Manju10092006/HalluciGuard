@@ -367,6 +367,7 @@ async def _detector_node(state: HalluciGuardState) -> dict[str, Any]:
         phase1_valid = _valid_phase1_bypass(phase1, len(atomic_claims))
         should_verify = (
             always_verify
+            or os.getenv("HALLUCIGUARD_RELEASE_POLICY", "default") != "default"
             or not allow_fast_path
             or is_stress
             or detector_degraded
@@ -960,6 +961,7 @@ def _verifier_route(state: HalluciGuardState) -> str:
 
 
 async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
+    from agents.judge_agent.config import JudgeConfig
     from agents.judge_agent.judge_agent import JudgeAgent
 
     node_start = start_timer()
@@ -980,7 +982,7 @@ async def _judge_node(state: HalluciGuardState) -> dict[str, Any]:
         # graph reachability.
 
         def _run_judge():
-            agent = JudgeAgent()
+            agent = JudgeAgent(JudgeConfig(release_policy=os.getenv("HALLUCIGUARD_RELEASE_POLICY", "default")))
             return agent.evaluate(
                 verifier_result=verifier_output,
                 detector_result=detector_output,
@@ -1295,6 +1297,7 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             suspicious_claims=suspicious_claims,
         )
 
+        raw_verifier = {}
         try:
             verifier_timeout = float(os.environ.get("VERIFIER_TIMEOUT_SECONDS", "120.0"))
             raw_verifier_res = await asyncio.wait_for(
@@ -1396,6 +1399,12 @@ async def _reverifier_node(state: HalluciGuardState) -> dict[str, Any]:
             failure_category=failure_category,
         )
         dumped_rev = _dump(rev_result)
+        # Preserve retrieval and inference diagnostics that the canonical report
+        # intentionally omits. A missing citation is not proof retrieval failed.
+        dumped_rev["verification_trace"] = {
+            "claim_reports": raw_verifier.get("claim_evidence", []),
+            "pipeline_stages": raw_verifier.get("pipeline_stages", []),
+        }
         # Additive diagnostics: these describe extraction and report coverage,
         # not successful model consumption or support for omitted assertions.
         dumped_rev["claim_analysis"] = analysis.to_dict()
@@ -1782,13 +1791,10 @@ async def _memory_node(state: HalluciGuardState) -> dict[str, Any]:
             update["route"] = "memory"  # Stay at memory node, not escalate
             update["terminal_status"] = "accepted"  # Answer remains accepted
             update["verification_status"] = "verified_and_accepted"
-        update["agent_outcomes"] = _build_agent_outcomes(
-            state,
-            memory_result={
-                "status": "failed",
-                "reason": f"{type(exc).__name__}: {str(exc)[:160]}",
-            },
-        )
+        memory_result = _dump(MemoryResult(status=MemoryStatus.FAILED,
+            reason=f"{type(exc).__name__}: {str(exc)[:160]}"))
+        update["memory_result"] = memory_result
+        update["agent_outcomes"] = _build_agent_outcomes(state, memory_result=memory_result)
         return update
 
 

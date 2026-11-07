@@ -25,9 +25,10 @@ class EvidenceScorer:
 
     MIN_NLI_SIGNAL = 0.35  # Aligned with decision-grade evidence selection threshold
 
-    def __init__(self, credibility_config: Dict[str, Any] | None = None) -> None:
+    def __init__(self, credibility_config: Dict[str, Any] | None = None, *, relation_policy: str = "structured") -> None:
         self.reliability_manager = SourceReliabilityManager()
-        self.relation_verifier = RelationVerifier()
+        from .research_policies import make_relation_verifier
+        self.relation_verifier = make_relation_verifier(relation_policy)
 
     def _get_relevance_gate_threshold(self) -> float:
         """Get the relevance gate threshold from settings, fallback to 0.20."""

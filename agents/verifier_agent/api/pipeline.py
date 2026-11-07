@@ -104,6 +104,8 @@ class VerificationPipeline:
     """
 
     def __init__(self) -> None:
+        from config.settings import get_settings
+        self.settings = get_settings()
         self.claim_decomposer = ClaimDecomposer()
         self.claim_normalizer = ClaimNormalizer()
         self.claim_merger = ClaimMerger()
@@ -112,7 +114,7 @@ class VerificationPipeline:
         self.aggregator = EvidenceAggregator()
         self.reranker = CrossEncoderReranker()
         self.nli_engine = NLIEngine()
-        self.evidence_scorer = EvidenceScorer()
+        self.evidence_scorer = EvidenceScorer(relation_policy=self.settings.relation_policy)
         self.reliability_manager = SourceReliabilityManager()
         self.conflict_resolver = ConflictResolver()
         self.explanation_generator = ExplanationGenerator()
@@ -136,6 +138,7 @@ class VerificationPipeline:
             bool(getattr(self.settings, "cache_enabled", True))
             and bool(getattr(self.settings, "verifier_cache_enabled", True))
             and not self.certification_mode
+            and self.settings.relation_policy == "structured"
         )
         if self.certification_mode:
             self.logger.warning(
@@ -400,6 +403,7 @@ class VerificationPipeline:
                 # score floor; a shared founder of another org is insufficient.
                 if (
                     claim_rel in ("created_by", "leads", "location_of")
+                    and not getattr(relation_verifier, "allow_unresolved_nli", False)
                     and rel_status == "NO_TRIPLE_EXTRACTED"
                     and not relation_addressed
                     # Retain the existing location-contradiction suppression
@@ -467,6 +471,7 @@ class VerificationPipeline:
             # match remains decision-grade; otherwise abstain on this pair.
             if (
                 aggregate_claim_rel
+                and not getattr(relation_verifier, "allow_unresolved_nli", False)
                 and rel_status == "NO_TRIPLE_EXTRACTED"
                 and contradiction > entailment
                 and not relation_addressed
@@ -888,6 +893,7 @@ class VerificationPipeline:
 
                     # Only evidence with a meaningful NLI or relation signal is allowed to
                     # influence scoring, conflict resolution, or final citations.
+                    raw_nli_snapshot = copy.deepcopy(nli_results)
                     decision_passages, decision_nli = (
                         self._select_decision_grade_evidence(
                             relevant_passages,
@@ -904,6 +910,8 @@ class VerificationPipeline:
                         "backend_execution": backend_execution,
                         "reranker_execution": copy.deepcopy(self._last_reranker_diag),
                         "nli_execution": copy.deepcopy(self._last_nli_diag),
+                        "raw_nli_results": raw_nli_snapshot,
+                        "relation_policy": self.settings.relation_policy,
                         "counts": {"retrieved": retrieved_passage_count,
                                    "relevance_selected": len(raw_passages),
                                    "aggregated": len(aggregated_passages),

@@ -467,6 +467,17 @@ class CharacterRegenerator:
             )
 
         final_text = corrected_text.strip()
+        # Literal preservation is promised by CorrectionRequest. A provider may
+        # rewrite a whole sentence containing both a bad and a verified clause.
+        # If a preserved claim occurred literally in the input, it must survive
+        # literally. Paraphrased claims still require independent re-verification.
+        lost_preserved = [c.claim_id for c in request.claims_to_preserve
+                          if c.claim_text and c.claim_text in original
+                          and c.claim_text not in final_text]
+        if lost_preserved:
+            return self._failed_result(request, "literal_preservation_failed: " + ",".join(lost_preserved),
+                attempts=total_attempts, failure_category="PRESERVATION_VIOLATION",
+                provider_used=last_provider_used)
         if final_text == original.strip():
             # Defensive: repaired_any is True yet nothing changed. Treat as a no-op
             # failure rather than emit an "unchanged" correction.
