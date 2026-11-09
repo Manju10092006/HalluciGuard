@@ -142,13 +142,13 @@ export function HalluciGuardSidebar({
               setActiveNav('flows')
               onOpenCreateFlow()
             }}
-            title={collapsed ? 'Flows' : undefined}
+            title={collapsed ? 'Examples' : undefined}
           >
             {activeNav === 'flows' && <div className="active-indicator-bar" />}
             <Layers size={16} className="nav-item-icon" />
             {!collapsed && (
               <div className="nav-label-with-badge">
-                <span>Flows</span>
+                <span>Examples</span>
                 <span className="new-badge">Templates</span>
               </div>
             )}
@@ -158,7 +158,7 @@ export function HalluciGuardSidebar({
             type="button"
             className={`nav-item-btn ${activeNav === 'memory' ? 'is-active' : ''}`}
             onClick={() => handleNavClick('memory')}
-            title={collapsed ? 'Memory' : undefined}
+            disabled title="Memory explorer is not available yet"
           >
             {activeNav === 'memory' && <div className="active-indicator-bar" />}
             <Database size={16} className="nav-item-icon" />
@@ -169,7 +169,7 @@ export function HalluciGuardSidebar({
             type="button"
             className={`nav-item-btn ${activeNav === 'integrations' ? 'is-active' : ''}`}
             onClick={() => handleNavClick('integrations')}
-            title={collapsed ? 'Integrations' : undefined}
+            disabled title="Integrations are not connected"
           >
             {activeNav === 'integrations' && <div className="active-indicator-bar" />}
             <Boxes size={16} className="nav-item-icon" />
@@ -257,7 +257,7 @@ export function HalluciGuardSidebar({
               <div className="popover-plan-row">
                 <div className="plan-badge-pill">
                   <Sparkles size={12} />
-                  <span>{user?.plan || 'HalluciGuard Pro'}</span>
+                  <span>{user?.plan || 'Guest'}</span>
                 </div>
               </div>
               <div className="popover-divider" />
@@ -300,7 +300,7 @@ export function HalluciGuardSidebar({
               <>
                 <div className="user-details-col">
                   <span className="user-name-text truncate">{user?.name || 'Judha Maygustya'}</span>
-                  <span className="user-plan-label">{user?.plan || 'HalluciGuard Pro'}</span>
+                  <span className="user-plan-label">{user?.plan || 'Guest'}</span>
                 </div>
                 <ChevronsUpDown size={14} className="user-chevron" />
               </>

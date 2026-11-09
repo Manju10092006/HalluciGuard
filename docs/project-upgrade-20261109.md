@@ -49,7 +49,10 @@ Firestore stores accounts and authenticated history. Browser conversations remai
 - Frontend: five failure/acceptance/evidence/transport contract tests passed; production build passed with Next.js 15.5.29; npm audit reported zero vulnerabilities.
 - Targeted cloud-auth/readiness/Detector/span regressions: 14 passed.
 - Complete run against patched FastAPI 0.162.2 and Starlette 1.10.0: **1,510 passed, 14 skipped**. The Memory environment-isolation regression found during the preceding run was fixed and the complete suite rerun successfully.
-- The local preview server launch was blocked by automatic approval review. No claim of local browser QA is made.
+- Real local generation: accepted Microsoft founder answer; actual Groq generation, evidence retrieval, grounded Detector inference, Judge and Memory executed without errors.
+- Real local correction diagnostic: the supplied false founder draft was corrected to Bill Gates and Paul Allen, independently re-verified and accepted; Corrector and ReVerifier executed. These are execution demonstrations, not accuracy benchmarks.
+- Fresh Linux CI exposed an Arrow/NumPy compatibility issue and n8n tests that depended on local environment flags. Arrow is constrained to a compatible release and mocked-broker tests now select their boundary explicitly; a fresh CI run is required before final release.
+- The local preview server launch was blocked by automatic approval review. Browser review is being performed against the Vercel preview instead.
 
 Run `python scripts/check_live_release.py <backend-origin> --auth --correction` to check real generation, evidence, Detector execution, password validation, history and the correction path. For the frontend proxy use `<vercel-origin>/api/backend`. Passing builds or shallow health alone is not a release gate.
 

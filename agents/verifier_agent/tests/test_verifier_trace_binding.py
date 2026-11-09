@@ -89,6 +89,7 @@ def test_cache_reuse_binds_new_claim_id_without_replaying_execution_proof():
 
 def _isolated_pipeline(monkeypatch, responses):
     pipeline = VerificationPipeline()
+    monkeypatch.setattr(pipeline.settings, "n8n_retrieval_enabled", True)
     pipeline.cache_enabled = False
     pipeline.certification_mode = False
     pipeline._n8n_client = SimpleNamespace(retrieve_evidence=AsyncMock(side_effect=responses))

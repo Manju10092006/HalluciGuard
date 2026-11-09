@@ -38,7 +38,7 @@ export function EmptyVerificationState({
     })
   }
 
-  const userName = user?.name ? user.name.split(' ')[0] : 'Liam'
+  const userName = user?.name ? user.name.split(' ')[0] : null
 
   return (
     <div className="empty-verification-viewport">
@@ -132,17 +132,19 @@ export function EmptyVerificationState({
               <circle cx="12" cy="12" r="4" fill="#E9B51D" />
               <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M4.93 19.07l2.12-2.12M16.95 7.05l2.12-2.12" stroke="#E9B51D" strokeWidth="2" strokeLinecap="round" />
             </svg>
-            <span>Upgrade Plan</span>
+            <span>{user ? 'Your verification workspace' : 'Sign in to save history'}</span>
           </div>
 
-          <h1 className="greeting-heading">Good morning, {userName}</h1>
-          <p className="greeting-subtitle">Welcome to HalluciGuard, by The General Intelligence Company</p>
+          <h1 className="greeting-heading">{userName ? `Welcome, ${userName}` : 'Trace the evidence'}</h1>
+          <p className="greeting-subtitle">Ask a question. Inspect the evidence behind the answer.</p>
 
           <div className="composer-card">
             <textarea
               className="composer-input"
               rows={2}
-              placeholder="my name is Connie what can you do?"
+              placeholder="Ask a factual question…"
+              aria-label="Verification input"
+              disabled={disabled}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -150,17 +152,13 @@ export function EmptyVerificationState({
 
             <div className="composer-bottom">
               <div className="composer-tools">
-                <button className="tool-icon-btn" title="Attach file" aria-label="Attach file">
+                <button className="tool-icon-btn" disabled title="File uploads are not available yet" aria-label="File uploads unavailable">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
 
-                <div
-                  className={`mini-toggle ${deepVerify ? 'active' : ''}`}
-                  title="Toggle Deep Verification Mode"
-                  onClick={() => setDeepVerify(!deepVerify)}
-                />
+                <span title="Every answer is checked against evidence" style={{ fontSize: 11 }}>Evidence verification</span>
 
                 <button
                   className="tool-icon-btn"
@@ -190,65 +188,17 @@ export function EmptyVerificationState({
         <footer className="bottom-section">
           <div className="template-rail-wrapper">
             <div className="template-rail">
-              <div
-                className="template-card"
-                onClick={() => handleSelectTemplate('Comprehensive analysis, benchmarks, and market strategy...')}
-              >
-                <div className="card-header">
-                  <span className="card-category category-cofounder">(HalluciGuard)</span>
-                  <span className="card-watch">Watch ↗</span>
-                </div>
-                <div className="card-title">Deep dive: build an analysis</div>
-                <div className="card-desc">Comprehensive analysis, benchmarks, and market strategy...</div>
-              </div>
-
-              <div
-                className="template-card"
-                onClick={() => handleSelectTemplate("What's going on in engineering team status, priorities, and challenges.")}
-              >
-                <div className="card-header">
-                  <span className="card-category category-engineering">Sync with engineering</span>
-                  <span className="card-watch">Watch ↗</span>
-                </div>
-                <div className="card-title">What's going on in engineering</div>
-                <div className="card-desc">Get a snapshot of your engineering team's status, priorities, and challenges.</div>
-              </div>
-
-              <div
-                className="template-card"
-                onClick={() => handleSelectTemplate('Make me a resume based on known data and online research...')}
-              >
-                <div className="card-header">
-                  <span className="card-category category-build">Build a resume</span>
-                  <span className="card-watch">Watch ↗</span>
-                </div>
-                <div className="card-title">Make me a resume based on what you...</div>
-                <div className="card-desc">Create a public-ready PDF resume from known data and online research, omitting all personal...</div>
-              </div>
-
-              <div
-                className="template-card"
-                onClick={() => handleSelectTemplate('Make this into retro pixel art with adjustable pixel size.')}
-              >
-                <div className="card-header">
-                  <span className="card-category category-design">Design</span>
-                  <span className="card-watch">Watch ↗</span>
-                </div>
-                <div className="card-title">Make this into pixel art</div>
-                <div className="card-desc">Convert any image into retro pixel art with adjustable pixel size.</div>
-              </div>
-
-              <div
-                className="template-card"
-                onClick={() => handleSelectTemplate('Extract key insights from meeting transcripts and organize them in structured docs.')}
-              >
-                <div className="card-header">
-                  <span className="card-category category-knowledge">Coalesce knowledge</span>
-                  <span className="card-watch">Watch ↗</span>
-                </div>
-                <div className="card-title">Add these meeting notes...</div>
-                <div className="card-desc">Extract key insights from meeting transcripts and organize them in structured docs.</div>
-              </div>
+              {[
+                { category: 'History', title: 'Who founded Microsoft?', prompt: 'Who founded Microsoft?', description: 'Inspect the people and sources behind the answer.' },
+                { category: 'Science', title: 'Why does altitude affect boiling?', prompt: 'Why does water boil at different temperatures at different altitudes?', description: 'Check an explanation against retrieved evidence.' },
+                { category: 'Technology', title: 'Who created Java?', prompt: 'Who created the Java programming language?', description: 'Trace an authorship claim to its supporting sources.' },
+              ].map(example => (
+                <button type="button" key={example.title} className="template-card" disabled={disabled} onClick={() => handleSelectTemplate(example.prompt)} style={{ textAlign: 'left' }}>
+                  <div className="card-header"><span className="card-category category-knowledge">{example.category}</span><span className="card-watch">Try →</span></div>
+                  <div className="card-title">{example.title}</div>
+                  <div className="card-desc">{example.description}</div>
+                </button>
+              ))}
             </div>
           </div>
 

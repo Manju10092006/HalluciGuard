@@ -106,7 +106,7 @@ export function VerificationComposer({
               type="button"
               className="action-pill"
               onClick={() => fileInputRef.current?.click()}
-              title="Attach primary document or passage"
+              disabled title="File uploads are not available yet"
               aria-label="Attach evidence file"
             >
               <Paperclip size={13} />
@@ -124,7 +124,7 @@ export function VerificationComposer({
               type="button"
               className={`action-pill ${evidenceMode ? 'active' : ''}`}
               onClick={() => setEvidenceMode(!evidenceMode)}
-              title="Filter by primary-source repositories"
+              disabled title="Source filters are not available yet"
               aria-pressed={evidenceMode}
             >
               <Database size={13} />
@@ -135,7 +135,7 @@ export function VerificationComposer({
               type="button"
               className={`action-pill deep-verify-pill ${deepVerify ? 'active' : ''}`}
               onClick={() => setDeepVerify(!deepVerify)}
-              title="Run 6-stage cross-agent verification pipeline"
+              disabled title="Every answer runs through evidence verification"
               aria-pressed={deepVerify}
             >
               <Sparkles size={13} />

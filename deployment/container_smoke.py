@@ -1,6 +1,7 @@
 """Actual offline CPU inference, cache and HTTP smoke; no quality claim."""
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import torch
@@ -10,6 +11,7 @@ from huggingface_hub import snapshot_download
 
 torch.set_num_threads(1)
 root = Path('/app')
+sys.path.insert(0, str(root))
 weight = root / 'artifacts/detector-best/model.safetensors'
 assert hashlib.sha256(weight.read_bytes()).hexdigest() == '470261f81870f5c4f97fe85918d02aa08673ac08744b5cae4d4621ee9d631bf9', 'Unexpected Detector checkpoint'
 for repo in ['BAAI/bge-m3', 'BAAI/bge-reranker-large', 'cross-encoder/nli-deberta-v3-base', 'sentence-transformers/all-MiniLM-L6-v2']:

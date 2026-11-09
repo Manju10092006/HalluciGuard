@@ -42,6 +42,14 @@ from schemas.models import Passage, SuspiciousClaim, VerifierInputV2
 from api.pipeline import VerificationPipeline
 
 
+@pytest.fixture(autouse=True)
+def _enable_mocked_n8n_boundary(monkeypatch):
+    # These wiring tests explicitly mock the broker. Never depend on a local
+    # .env or the production broker-disabled setting to select that test path.
+    from config.settings import get_settings
+    monkeypatch.setattr(get_settings(), "n8n_retrieval_enabled", True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
