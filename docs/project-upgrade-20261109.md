@@ -25,7 +25,7 @@ This work covers the application and deployment. The existing uncommitted resear
 | Memory | Verifier `EMBEDDING_MODEL` could override Memory's 384-dimensional model | Independent `MEMORY_EMBEDDING_MODEL` setting |
 | Accounts/history | SQLite on an ephemeral Cloud Run filesystem could lose passwords/history after restart | Optional Firestore repository using the Cloud Run service identity, transactional email uniqueness and per-user history; SQLite retained for local use |
 | Dependencies | npm reported six vulnerabilities, including a critical Next.js advisory | Updated lockfile to patched Next.js 15.5.29 and dependencies; compatible PostCSS override; npm audit reports zero |
-| CI | Detector workflow referenced deleted `agents/detector_agent`; detector/services tests absent from default pytest paths | Current backend regression paths and frontend production/test/audit workflow |
+| CI | Detector workflow referenced deleted `agents/detector_agent`; detector/services tests absent from default pytest paths | One current backend regression/compilation workflow covering all configured agents, replacing redundant older per-agent workflows, plus frontend production/test/audit checks |
 | Packaging | Docker sent research, local data and generated files with a broad COPY | Source allowlists for Docker/Cloud Build; no credentials/research/state in the upload |
 
 ## Detector quality boundary
@@ -51,7 +51,7 @@ Firestore stores accounts and authenticated history. Browser conversations remai
 - Complete run against patched FastAPI 0.162.2 and Starlette 1.10.0: **1,510 passed, 14 skipped**. The Memory environment-isolation regression found during the preceding run was fixed and the complete suite rerun successfully.
 - Real local generation: accepted Microsoft founder answer; actual Groq generation, evidence retrieval, grounded Detector inference, Judge and Memory executed without errors.
 - Real local correction diagnostic: the supplied false founder draft was corrected to Bill Gates and Paul Allen, independently re-verified and accepted; Corrector and ReVerifier executed. These are execution demonstrations, not accuracy benchmarks.
-- Fresh Linux CI exposed an Arrow/NumPy compatibility issue and n8n tests that depended on local environment flags. Arrow is constrained to a compatible release and mocked-broker tests now select their boundary explicitly; a fresh CI run is required before final release.
+- Fresh Linux CI exposed an Arrow/NumPy compatibility issue and n8n tests that depended on local environment flags. Arrow is constrained to a compatible release and mocked-broker tests now select their boundary explicitly. Both fresh Linux backend CI and frontend CI passed on commit `535c9a8`.
 - The local preview server launch was blocked by automatic approval review. Browser review is being performed against the Vercel preview instead.
 
 Run `python scripts/check_live_release.py <backend-origin> --auth --correction` to check real generation, evidence, Detector execution, password validation, history and the correction path. For the frontend proxy use `<vercel-origin>/api/backend`. Passing builds or shallow health alone is not a release gate.
