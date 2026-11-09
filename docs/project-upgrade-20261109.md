@@ -52,6 +52,7 @@ Firestore stores accounts and authenticated history. Browser conversations remai
 - Real local generation: accepted Microsoft founder answer; actual Groq generation, evidence retrieval, grounded Detector inference, Judge and Memory executed without errors.
 - Real local correction diagnostic: the supplied false founder draft was corrected to Bill Gates and Paul Allen, independently re-verified and accepted; Corrector and ReVerifier executed. These are execution demonstrations, not accuracy benchmarks.
 - Fresh Linux CI exposed an Arrow/NumPy compatibility issue and n8n tests that depended on local environment flags. Arrow is constrained to a compatible release and mocked-broker tests now select their boundary explicitly. Both fresh Linux backend CI and frontend CI passed on commit `535c9a8`.
+- The cloud image self-test also caught an older inherited `datasets` package using Arrow's removed `PyExtensionType`. The overlay now installs the tested `datasets` 5.0.1 alongside Arrow 23.0.1, and retains the Transformers-compatible Hugging Face Hub major version.
 - The local preview server launch was blocked by automatic approval review. Browser review is being performed against the Vercel preview instead.
 
 Run `python scripts/check_live_release.py <backend-origin> --auth --correction` to check real generation, evidence, Detector execution, password validation, history and the correction path. For the frontend proxy use `<vercel-origin>/api/backend`. Passing builds or shallow health alone is not a release gate.
