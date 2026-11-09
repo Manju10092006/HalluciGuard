@@ -16,7 +16,7 @@ This work covers the application and deployment. The existing uncommitted resear
 | --- | --- | --- |
 | Active chat | Keyword-based verdicts, invented evidence, a sample signed-in identity and a timed fake success | Real `/verify` requests, actual evidence and trace rendering, anonymous initial state, visible errors |
 | Authentication | Passwords ignored; decoded Google tokens trusted client-side; fake JWT persisted | Backend login/register/Google-token exchange; stored JWT validated with `/auth/me` |
-| Backend connection | Missing Next.js API route; inconsistent public environment variables and localhost fallbacks | One same-origin `/api/backend` transport with server-only `BACKEND_URL`, endpoint allowlist, uncached responses and bounded timeouts |
+| Backend connection | Missing Next.js API route; inconsistent public environment variables and localhost fallbacks | One same-origin `/api/backend` transport with server-only `BACKEND_URL`, endpoint allowlist, uncached responses and bounded timeouts; legacy public backend URLs are ignored |
 | Release display | Partial or unavailable results could be presented as supported; draft fallback could leak unreleased text | Supported requires Judge acceptance and every claim verified; no answer fallback to draft; corrections require passed re-verification |
 | Detector | Entity-name heuristic replaced calibrated probabilities with fixed 0.05/0.90/0.05 values | Preserve learned probabilities; make entity mismatch an explicit verification requirement rather than proof of contradiction |
 | Detector runtime | Missing calibration silently defaulted while adapter claimed calibration; assumed class order; unbounded answer batches | Validate calibration/class order, offline checkpoint loading, eight-sentence batches, finite-output checks, preserve claim tokens |
@@ -48,7 +48,7 @@ Firestore stores accounts and authenticated history. Browser conversations remai
 - Separate Verifier suite: 466 passed, 8 skipped.
 - Frontend: five failure/acceptance/evidence/transport contract tests passed; production build passed with Next.js 15.5.29; npm audit reported zero vulnerabilities.
 - Targeted cloud-auth/readiness/Detector/span regressions: 14 passed.
-- A complete run against patched FastAPI/Starlette is being checked; final results and actual deployment status are recorded in the release notes after validation.
+- Complete run against patched FastAPI 0.162.2 and Starlette 1.10.0: **1,510 passed, 14 skipped**. The Memory environment-isolation regression found during the preceding run was fixed and the complete suite rerun successfully.
 - The local preview server launch was blocked by automatic approval review. No claim of local browser QA is made.
 
 Run `python scripts/check_live_release.py <backend-origin> --auth --correction` to check real generation, evidence, Detector execution, password validation, history and the correction path. For the frontend proxy use `<vercel-origin>/api/backend`. Passing builds or shallow health alone is not a release gate.

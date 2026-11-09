@@ -4,9 +4,9 @@ The frontend is `frontend-v2` on Vercel. The Python model backend runs on Google
 
 ## Vercel
 
-Use the existing Vercel project with root directory `frontend-v2`, Next.js framework, Node.js 22, install `npm ci` and build `npm run build`. The repository-root Vercel config also supports building the nested frontend when the project root remains the repository root.
+Use the existing Vercel project with root directory `frontend-v2`, Next.js framework, Node.js 22, install `npm ci` and build `npm run build`. Select `frontend-v2` explicitly: the repository-root package does not declare Next.js, so Vercel version detection fails when the project root is left empty.
 
-Set server-side `BACKEND_URL` to the verified Cloud Run origin with no path or trailing slash. The browser uses `/api/backend`; leave `NEXT_PUBLIC_API_BASE_URL` unset. Set `NEXT_PUBLIC_GOOGLE_CLIENT_ID` to the public Google web client ID that matches backend `GOOGLE_CLIENT_ID`. Provider keys and JWT signing secrets stay on Cloud Run.
+Set server-side `BACKEND_URL` to the verified Cloud Run origin with no path or trailing slash. The browser uses `/api/backend`; the legacy `NEXT_PUBLIC_API_BASE_URL` variable is ignored. Set `NEXT_PUBLIC_GOOGLE_CLIENT_ID` to the public Google web client ID that matches backend `GOOGLE_CLIENT_ID`. Provider keys and JWT signing secrets stay on Cloud Run.
 
 The proxy handles health, verification, authentication and authenticated history. It has no success mock and does not cache account data or verification results. Verification allows up to 285 seconds upstream within a 300-second Vercel function deadline; browser timeout defaults to 290 seconds. Confirm the Vercel account supports that duration before release.
 

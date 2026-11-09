@@ -2,7 +2,9 @@
 // The default stays on the Vercel origin; BACKEND_URL is server-side only.
 export const AUTH_TOKEN_KEY = "hg.auth.jwt.v1";
 export const AUTH_USER_KEY = "hg.auth.user.v1";
-const base = (process.env.NEXT_PUBLIC_API_BASE_URL || "/api/backend").replace(/\/+$/, "");
+// A stale public backend URL must never send browser requests to a retired
+// service. All traffic goes through the configured server-side origin.
+const base = "/api/backend";
 
 export async function backendRequest(path, { token, timeout, ...options } = {}) {
   const configuredTimeout = Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS || 290000);
