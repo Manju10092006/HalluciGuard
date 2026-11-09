@@ -3,7 +3,7 @@
 ARG MODEL_RUNTIME
 FROM ${MODEL_RUNTIME}
 WORKDIR /app
-RUN pip install --no-cache-dir 'fastapi==0.162.2' 'starlette==1.10.0' 'google-cloud-firestore>=2.34.1,<3.0.0'
+RUN pip install --no-cache-dir 'fastapi==0.162.2' 'starlette==1.10.0' 'google-cloud-firestore>=2.34.1,<3.0.0' 'pyarrow==23.0.1'
 COPY orchestration /app/orchestration
 COPY services /app/services
 COPY agents /app/agents

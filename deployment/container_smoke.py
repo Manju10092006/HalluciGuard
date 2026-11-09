@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 import torch
+import datasets  # Catch Arrow/NumPy ABI incompatibility before serving traffic.
+from sentence_transformers import SentenceTransformer  # noqa: F401
 from huggingface_hub import snapshot_download
 
 torch.set_num_threads(1)
