@@ -41,11 +41,7 @@ export function HalluciGuardSidebar({
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [sidebarTab, setSidebarTab] = useState('chats') // 'chats' | 'flow-runs'
 
-  const mockFlowRuns = [
-    { id: 'fr-1', name: 'Slack #bugs to Linear Issue', status: 'Active', time: '10m ago', tone: 'supported' },
-    { id: 'fr-2', name: 'Linear Urgent to Slack #oncall', status: 'Triggered', time: '1h ago', tone: 'contradicted' },
-    { id: 'fr-3', name: 'Email Invitation Research', status: 'Completed', time: 'Yesterday', tone: 'supported' },
-  ]
+  const mockFlowRuns = []
 
   // Group recent sessions by relative time
   const timeGroups = ['Today', 'Yesterday', '2 days ago', '3 days ago', 'Last week']

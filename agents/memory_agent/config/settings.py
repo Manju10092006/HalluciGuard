@@ -1,10 +1,18 @@
 from functools import lru_cache
 from typing import Optional
+from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    def __init__(self, **values):
+        # Preserve the Python constructor API without enabling environment
+        # lookup through the verifier's unprefixed EMBEDDING_MODEL variable.
+        if "embedding_model" in values:
+            values["MEMORY_EMBEDDING_MODEL"] = values.pop("embedding_model")
+        super().__init__(**values)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -25,7 +33,9 @@ class Settings(BaseSettings):
     cache_ttl: int = 86400
 
     # Vector Store
-    embedding_model: str = "all-MiniLM-L6-v2"
+    # The verifier's EMBEDDING_MODEL may be 1024-dimensional BGE. Memory's
+    # persisted FAISS index uses its own model and dimension contract.
+    embedding_model: str = Field(default="all-MiniLM-L6-v2", validation_alias="MEMORY_EMBEDDING_MODEL")
     vector_store_path: str = "data/vector_store"
     vector_dimension: int = 384
     vector_top_k: int = 10

@@ -20,7 +20,7 @@ export function SourceDrawer({ source, isOpen, onClose }) {
         <div className="drawer-header">
           <div className="drawer-title-group">
             <BookOpenCheck size={16} className="drawer-icon" />
-            <h3>Primary Source Record</h3>
+            <h3>Source Record</h3>
           </div>
           <button
             type="button"
@@ -50,7 +50,7 @@ export function SourceDrawer({ source, isOpen, onClose }) {
 
           {/* Full passage citation */}
           <div className="passage-section">
-            <label className="section-heading">Verified Passage</label>
+            <label className="section-heading">Retrieved Passage</label>
             <blockquote className="passage-quote">
               “{source.excerpt}”
             </blockquote>
@@ -63,16 +63,16 @@ export function SourceDrawer({ source, isOpen, onClose }) {
               <div className="provenance-item">
                 <span className="prov-label">Entailment Status</span>
                 <span className="prov-val">
-                  {source.relationshipTone === 'contradicted' ? 'Direct Contradiction' : 'Factual Entailment'}
+                  {source.relationship || 'Context only'}
                 </span>
               </div>
               <div className="provenance-item">
                 <span className="prov-label">Extraction Method</span>
-                <span className="prov-val">Passage-level BGE Retrieval</span>
+                <span className="prov-val">{source.extractionMethod || 'Not reported'}</span>
               </div>
               <div className="provenance-item">
                 <span className="prov-label">Corpus Index</span>
-                <span className="prov-val">Authoritative Primary Record</span>
+                <span className="prov-val">{source.sourceType || 'Not reported'}</span>
               </div>
             </div>
           </div>

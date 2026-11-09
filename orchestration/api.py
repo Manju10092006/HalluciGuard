@@ -48,20 +48,20 @@ class VerificationRequest(BaseModel):
 
 class RegisterRequest(BaseModel):
     """Request model for user registration."""
-    email: str = Field(min_length=3, description="User email address")
-    password: str = Field(min_length=8, description="User password (min 8 characters)")
-    name: Optional[str] = Field(default=None, description="User display name")
+    email: EmailStr = Field(max_length=254, description="User email address")
+    password: str = Field(min_length=8, max_length=1024, description="User password (min 8 characters)")
+    name: Optional[str] = Field(default=None, max_length=200, description="User display name")
 
 
 class LoginRequest(BaseModel):
     """Request model for user login."""
-    email: str = Field(min_length=3, description="User email address")
-    password: str = Field(min_length=1, description="User password")
+    email: EmailStr = Field(max_length=254, description="User email address")
+    password: str = Field(min_length=1, max_length=1024, description="User password")
 
 
 class GoogleAuthRequest(BaseModel):
     """Request model for Google OAuth authentication."""
-    credential: str = Field(min_length=10, description="Google OAuth ID Token JWT")
+    credential: str = Field(min_length=10, max_length=16384, description="Google OAuth ID Token JWT")
 
 
 class SaveHistoryRequest(BaseModel):
@@ -423,7 +423,7 @@ async def _execute_verification(
             "request_id": result.get("request_id"),
             "generation": (result.get("base_llm") or {}).get("model"),
             "draft_response": result.get("draft_response") or result.get("llm_response"),
-            "final_response": result.get("final_response") or result.get("draft_response", result.get("llm_response")),
+            "final_response": result.get("final_response") or "No answer was released by the verification engine.",
             "terminal_status": result.get("terminal_status") or "human_review",
             "verification_status": derived_status,
             "total_latency_ms": _total_latency_ms(result),

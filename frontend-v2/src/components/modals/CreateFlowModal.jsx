@@ -41,39 +41,10 @@ function GmailIcon() {
 }
 
 const TEMPLATES = [
-  {
-    id: 'slack-linear',
-    title: 'Slack #bugs to Linear Issue',
-    icons: [<SlackIcon key="slack" />, <LinearIcon key="linear" />],
-    description: 'Automatically converts bug reports from Slack into trackable Linear issues',
-    category: 'integration',
-    prompt: 'Create a flow that listens to #bugs on Slack, summarizes the report with HalluciGuard verification, and opens a Linear ticket.',
-  },
-  {
-    id: 'linear-slack',
-    title: 'Linear Urgent Issue to Slack #oncall',
-    icons: [<LinearIcon key="linear" />, <SlackIcon key="slack" />],
-    description: 'Instantly alerts the on-call team when critical issues require immediate attention',
-    category: 'integration',
-    prompt: 'Set up an alert flow: when a Linear issue is marked Urgent, verify reproducibility and post an incident alert to Slack #oncall.',
-  },
-  {
-    id: 'linear-notion',
-    title: 'Linear Issue Closed to Notion Release Notes',
-    icons: [<LinearIcon key="linear" />, <NotionIcon key="notion" />],
-    description: 'Maintains up-to-date release notes by documenting completed features and fixes',
-    category: 'integration',
-    prompt: 'Build a release notes flow: when a Linear cycle or issue is closed, summarize changes and document them in Notion.',
-  },
-  {
-    id: 'email-research',
-    title: 'Email Invitation Research',
-    icons: [<NotionIcon key="notion" />, <SlackIcon key="slack" />, <GmailIcon key="gmail" />],
-    description: 'Automatically researches meeting attendees and provides context before important meetings',
-    category: 'integration',
-    prompt: 'Scan upcoming calendar invitations from Gmail, research participants across verified public records, and generate pre-meeting briefs.',
-  },
+  { id: 'history', title: 'Historical fact check', icons: [], category: 'verification', description: 'Generate an answer and trace its claims to retrieved evidence.', prompt: 'Who founded Microsoft?' },
+  { id: 'science', title: 'Science question', icons: [], category: 'verification', description: 'Check the claims in an answer using the verification engine.', prompt: 'Why does water boil at different temperatures at different altitudes?' },
 ]
+
 
 export function CreateFlowModal({ isOpen, onClose, onSelectTemplate, onSelectCreateFromChat }) {
   useEffect(() => {
@@ -93,7 +64,7 @@ export function CreateFlowModal({ isOpen, onClose, onSelectTemplate, onSelectCre
       <div className="flow-modal-card" onClick={(e) => e.stopPropagation()}>
         {/* Modal Header */}
         <div className="flow-modal-header">
-          <h2 id="flow-modal-title" className="flow-modal-heading">Create New Flow</h2>
+          <h2 id="flow-modal-title" className="flow-modal-heading">Start a verification</h2>
           <button
             type="button"
             className="flow-close-btn"
@@ -119,7 +90,7 @@ export function CreateFlowModal({ isOpen, onClose, onSelectTemplate, onSelectCre
             </div>
             <div className="chat-card-content">
               <h3 className="chat-card-title">Create from chat</h3>
-              <p className="chat-card-desc">Describe what you want your flow to do in natural language</p>
+              <p className="chat-card-desc">Ask a question and verify the generated answer against evidence</p>
             </div>
           </button>
 

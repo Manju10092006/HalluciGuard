@@ -36,25 +36,7 @@ export interface AuthContextValue {
   signOut: () => Promise<void>;
 }
 
-const AUTH_TOKEN_KEY = "hg.auth.jwt.v1";
-const AUTH_USER_KEY = "hg.auth.user.v1";
-
-function parseJwt(token: string): any {
-  try {
-    const base64Url = token.split(".")[1];
-    if (!base64Url) return null;
-    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonPayload = decodeURIComponent(
-      atob(base64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
-    return JSON.parse(jsonPayload);
-  } catch (e) {
-    return null;
-  }
-}
+import { backendRequest, AUTH_TOKEN_KEY, AUTH_USER_KEY } from "@/lib/backend";
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -63,126 +45,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
 
-  // Restore stored session on mount
-  useEffect(() => {
-    try {
-      const storedToken = localStorage.getItem(AUTH_TOKEN_KEY);
-      const storedUser = localStorage.getItem(AUTH_USER_KEY);
-
-      if (storedToken && storedUser) {
-        setToken(storedToken);
-        setUser(JSON.parse(storedUser));
-        setStatus("authenticated");
-        return;
-      }
-
-      if (storedToken) {
-        const payload = parseJwt(storedToken);
-        if (payload && (payload.sub || payload.email)) {
-          const restoredUser: AuthUser = {
-            id: payload.sub || "user-" + Date.now(),
-            sub: payload.sub || "user-" + Date.now(),
-            email: payload.email || "",
-            name: payload.name || payload.given_name || (payload.email ? payload.email.split("@")[0] : "User"),
-            picture: payload.picture,
-            created_at: new Date().toISOString(),
-          };
-          setToken(storedToken);
-          setUser(restoredUser);
-          localStorage.setItem(AUTH_USER_KEY, JSON.stringify(restoredUser));
-          setStatus("authenticated");
-          return;
-        }
-      }
-
-      setStatus("anonymous");
-    } catch {
-      setStatus("anonymous");
-    }
-  }, []);
-
-  const signInWithGoogle = useCallback(async (credential: string): Promise<AuthResult> => {
-    try {
-      if (!credential) {
-        return { ok: false, error: "Missing Google credential token" };
-      }
-
-      const payload = parseJwt(credential);
-      if (!payload || (!payload.sub && !payload.email)) {
-        return { ok: false, error: "Unable to parse Google authentication token" };
-      }
-
-      const authenticatedUser: AuthUser = {
-        id: payload.sub || "google-" + Date.now(),
-        sub: payload.sub || "google-" + Date.now(),
-        email: payload.email || "",
-        name: payload.name || payload.given_name || (payload.email ? payload.email.split("@")[0] : "Google User"),
-        picture: payload.picture,
-        created_at: new Date().toISOString(),
-      };
-
-      // Store in localStorage immediately (guaranteed client-side success)
-      localStorage.setItem(AUTH_TOKEN_KEY, credential);
-      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(authenticatedUser));
-
-      setToken(credential);
-      setUser(authenticatedUser);
-      setStatus("authenticated");
-
-      // Asynchronously attempt backend sync if available, ignoring failures
-      fetch("/auth/google", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential }),
-      }).catch(() => {});
-
-      return { ok: true };
-    } catch (err: any) {
-      return {
-        ok: false,
-        error: err?.message || "Google authentication failed",
-      };
-    }
-  }, []);
-
-  const signIn = useCallback(async (email: string, _password: string): Promise<AuthResult> => {
-    try {
-      const emailClean = email.trim().toLowerCase();
-      const mockUser: AuthUser = {
-        id: "usr-" + Date.now(),
-        sub: "usr-" + Date.now(),
-        email: emailClean,
-        name: emailClean.split("@")[0],
-        created_at: new Date().toISOString(),
-      };
-      const tokenVal = "demo-jwt-" + Date.now();
-      localStorage.setItem(AUTH_TOKEN_KEY, tokenVal);
-      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(mockUser));
-      setToken(tokenVal);
-      setUser(mockUser);
-      setStatus("authenticated");
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, error: err?.message || "Sign in failed" };
-    }
-  }, []);
-
-  const signUp = useCallback(
-    async (email: string, password: string, name?: string): Promise<AuthResult> => {
-      return signIn(email, password);
-    },
-    [signIn]
-  );
-
-  const signOut = useCallback(async () => {
-    try {
-      localStorage.removeItem(AUTH_TOKEN_KEY);
-      localStorage.removeItem(AUTH_USER_KEY);
-    } catch {}
+  const clearSession = useCallback(() => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
     setToken(null);
     setUser(null);
     setStatus("anonymous");
   }, []);
+
+  // Stored display data is never authentication. Validate the server JWT.
+  useEffect(() => {
+    let alive = true;
+    const storedToken = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!storedToken) { setStatus("anonymous"); return; }
+    backendRequest("/auth/me", { token: storedToken, timeout: 20000 })
+      .then((data: any) => {
+        if (!alive) return;
+        setToken(storedToken);
+        setUser(data.user);
+        setStatus("authenticated");
+      })
+      .catch(() => { if (alive) clearSession(); });
+    return () => { alive = false; };
+  }, [clearSession]);
+
+  const authenticate = useCallback(async (path: string, body: object): Promise<AuthResult> => {
+    try {
+      const data = await backendRequest(path, { method: "POST", body: JSON.stringify(body), timeout: 20000 });
+      if (!data.access_token || !data.user?.id) throw new Error("Invalid authentication response");
+      localStorage.setItem(AUTH_TOKEN_KEY, data.access_token);
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
+      setToken(data.access_token);
+      setUser(data.user);
+      setStatus("authenticated");
+      return { ok: true };
+    } catch (error: any) {
+      return { ok: false, error: error.message || "Authentication failed" };
+    }
+  }, []);
+
+  const signIn = useCallback((email: string, password: string) =>
+    authenticate("/auth/login", { email: email.trim(), password }), [authenticate]);
+  const signUp = useCallback((email: string, password: string, name?: string) =>
+    authenticate("/auth/register", { email: email.trim(), password, name }), [authenticate]);
+  const signInWithGoogle = useCallback((credential: string) =>
+    authenticate("/auth/google", { credential }), [authenticate]);
+  const signOut = useCallback(async () => { clearSession(); }, [clearSession]);
 
   const value: AuthContextValue = {
     enabled: true,

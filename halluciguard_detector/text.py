@@ -9,7 +9,7 @@ class Span:
     end: int
 
 
-_BOUNDARY = re.compile(r"(?<=[.!?])(?:[\"')\]]*)\s+(?=[\"'(\[]*[A-Z0-9])")
+_BOUNDARY = re.compile(r"(?<=[.!?])(?P<closers>[\"')\]]*)\s+(?=\S)")
 _TOKEN = re.compile(r"[A-Za-z0-9]+")
 _ENTITY = re.compile(r"\b(?:[A-Z][A-Za-z0-9'-]*)(?:\s+[A-Z][A-Za-z0-9'-]*)*\b")
 _ENTITY_STOP = {"The", "A", "An", "It", "This", "That", "In", "On", "At", "By"}
@@ -24,8 +24,13 @@ def sentence_spans(text: str) -> list[Span]:
     spans: list[Span] = []
     cursor = 0
     for match in _BOUNDARY.finditer(text):
-        end = match.start()
+        end = match.start() + len(match.group("closers"))
         raw = text[cursor:end]
+        last_token = raw.rsplit(maxsplit=1)[-1] if raw.strip() else ""
+        # Titles and initials can occur anywhere within a sentence. Closing
+        # quotation marks belong to the previous sentence and retain offsets.
+        if not match.group("closers") and _NON_TERMINAL.match(last_token) and not last_token[:-1].isdigit():
+            continue
         left = len(raw) - len(raw.lstrip())
         right = len(raw.rstrip())
         if right > left:

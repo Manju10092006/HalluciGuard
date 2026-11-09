@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 
 import torch
@@ -21,20 +22,26 @@ class Detector:
 
     def __init__(self, model_path: str | Path, device: str | None = None):
         model_path = Path(model_path)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_path, local_files_only=True)
+        # Read the checkpoint's class order instead of silently assuming it.
+        self.labels = [ClaimLabel(self.model.config.id2label[i]) for i in range(self.model.config.num_labels)]
+        if len(self.labels) != 3 or set(self.labels) != set(LABELS):
+            raise ValueError("Detector checkpoint must declare the three grounded labels")
         selected = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(selected)
         self.model.to(self.device).eval()
         calibration_path = model_path / "calibration.json"
-        calibration = (
-            json.loads(calibration_path.read_text(encoding="utf-8"))
-            if calibration_path.exists()
-            else {}
-        )
-        self.temperature = float(calibration.get("temperature", 1.0))
-        self.threshold = float(calibration.get("hallucination_threshold", 0.5))
-        self.max_length = int(calibration.get("max_length", 384))
+        calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+        self.temperature = float(calibration["temperature"])
+        self.threshold = float(calibration["hallucination_threshold"])
+        self.max_length = int(calibration["max_length"])
+        if not math.isfinite(self.temperature) or self.temperature <= 0:
+            raise ValueError("Detector calibration temperature must be finite and positive")
+        if not math.isfinite(self.threshold) or not 0 < self.threshold < 1:
+            raise ValueError("Detector threshold must be between zero and one")
+        if not 8 <= self.max_length <= self.model.config.max_position_embeddings:
+            raise ValueError("Detector max_length exceeds the checkpoint context window")
         self.version = model_path.name
 
     @torch.inference_mode()
@@ -46,25 +53,31 @@ class Detector:
             raise ValueError("draft_answer contains no detectable sentence")
         snippets = [lexical_evidence(s.text, evidence) for s in spans]
         contexts = [" ".join(parts) for parts in snippets]
-        encoded = self.tokenizer(
-            contexts,
-            [s.text for s in spans],
-            padding=True,
-            truncation="longest_first",
-            max_length=self.max_length,
-            return_tensors="pt",
-        ).to(self.device)
-        probabilities = apply_temperature(self.model(**encoded).logits, self.temperature).cpu()
+        # Bound peak memory on long answers. Preserve the claim; truncate only
+        # evidence rather than silently judging an incomplete claim.
+        batches = []
+        for start in range(0, len(spans), 8):
+            encoded = self.tokenizer(
+                contexts[start:start + 8],
+                [s.text for s in spans[start:start + 8]],
+                padding=True,
+                truncation="only_first",
+                max_length=self.max_length,
+                return_tensors="pt",
+            ).to(self.device)
+            probs = apply_temperature(self.model(**encoded).logits, self.temperature).cpu()
+            if not torch.isfinite(probs).all():
+                raise ValueError("Detector produced non-finite probabilities")
+            batches.append(probs)
+        probabilities = torch.cat(batches)
         results: list[SentenceResult] = []
         guard_fired = False
         for index, (span, probs, evidence_parts) in enumerate(zip(spans, probabilities, snippets)):
-            mapping = {label: float(probs[i]) for i, label in enumerate(LABELS)}
-            if has_entity_conflict(span.text, " ".join(evidence_parts)):
-                mapping = {
-                    ClaimLabel.SUPPORTED: 0.05,
-                    ClaimLabel.CONTRADICTED: 0.90,
-                    ClaimLabel.NOT_ENOUGH_INFO: 0.05,
-                }
+            mapping = {label: float(probs[i]) for i, label in enumerate(self.labels)}
+            entity_review_required = has_entity_conflict(span.text, " ".join(evidence_parts))
+            if entity_review_required:
+                # Different entities may express different relations. This is
+                # diagnostic only, never synthetic calibrated model probability.
                 guard_fired = True
             label = max(mapping, key=mapping.get)
             hallucination_probability = mapping[ClaimLabel.CONTRADICTED] + mapping[ClaimLabel.NOT_ENOUGH_INFO]
@@ -80,19 +93,20 @@ class Detector:
                     hallucination_probability=hallucination_probability,
                     risk=risk,
                     evidence_snippets=evidence_parts,
+                    entity_review_required=entity_review_required,
                 )
             )
         overall = max(item.hallucination_probability for item in results)
         warnings = []
         if guard_fired:
-            warnings.append("Named-entity conflict guard triggered for at least one sentence.")
+            warnings.append("Different named entities detected; model probabilities are unchanged and Verifier must assess the relation.")
         if all(item.label == ClaimLabel.NOT_ENOUGH_INFO for item in results):
             warnings.append("Evidence may be incomplete; NOT_ENOUGH_INFO is not proof of falsehood.")
         return DetectResponse(
-            label="HALLUCINATION" if overall >= self.threshold else "NO_HALLUCINATION",
+            label="HALLUCINATION" if overall >= self.threshold else "REVIEW_REQUIRED" if guard_fired else "NO_HALLUCINATION",
             probability=overall,
             risk=self._risk(overall),
-            requires_verification=overall >= self.threshold,
+            requires_verification=overall >= self.threshold or guard_fired,
             sentences=results,
             model_version=self.version,
             warnings=warnings,

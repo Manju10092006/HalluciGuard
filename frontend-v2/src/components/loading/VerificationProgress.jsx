@@ -1,22 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { ShieldCheck } from 'lucide-react'
 
-const STAGES = [
-  'Analyzing claim structure and boundaries...',
-  'Tracing primary evidence records...',
-  'Comparing source citations and entailment...',
-  'Checking contextual consistency and verdict...',
-]
 
 export function VerificationProgress() {
-  const [currentStep, setCurrentStep] = useState(0)
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentStep((prev) => (prev < STAGES.length - 1 ? prev + 1 : prev))
-    }, 950)
-    return () => clearInterval(timer)
-  }, [])
 
   return (
     <div className="verification-progress-card">
@@ -26,8 +12,8 @@ export function VerificationProgress() {
           <span className="beacon-ping" />
         </div>
         <div className="stage-text-container">
-          <span className="stage-label-fade" key={currentStep}>
-            {STAGES[currentStep]}
+          <span className="stage-label-fade" role="status">
+            Waiting for the verification engine…
           </span>
         </div>
       </div>
@@ -35,7 +21,7 @@ export function VerificationProgress() {
       <div className="progress-bar-track">
         <div
           className="progress-bar-fill"
-          style={{ width: `${((currentStep + 1) / STAGES.length) * 100}%` }}
+          style={{ width: "40%", animation: "beacon-ripple 1.6s ease-in-out infinite alternate" }}
         />
       </div>
 

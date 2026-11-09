@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
+import json
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -25,32 +27,24 @@ class ComponentCheckResult:
 
 
 def validate_openrouter_configuration() -> ComponentCheckResult:
-    """Validate OpenRouter API key and model configuration."""
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    model = os.environ.get("OPENROUTER_MODEL", "qwen/qwen3-14b")
-    base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-
-    if not api_key:
-        return ComponentCheckResult(
-            ok=False,
-            component="base_llm",
-            detail="OPENROUTER_API_KEY is not configured in the environment.",
-            metadata={
-                "provider": "openrouter",
-                "model": model,
-                "base_url": base_url,
-                "key_configured": False,
-            },
-        )
+    """Validate the configured provider router (legacy function name retained)."""
+    from services.llm_providers import build_provider_specs, resolve_provider_order
+    try:
+        order = resolve_provider_order()
+        specs = build_provider_specs()
+    except ValueError as exc:
+        return ComponentCheckResult(False, "base_llm", str(exc), {})
+    ready = [name for name in order if specs[name].has_key and specs[name].model]
     return ComponentCheckResult(
-        ok=True,
+        ok=bool(ready),
         component="base_llm",
-        detail="OpenRouter Base LLM configuration is ready.",
+        detail="LLM provider configuration is ready." if ready else "No configured LLM provider has a key and model.",
         metadata={
-            "provider": "openrouter",
-            "model": model,
-            "base_url": base_url,
-            "key_configured": True,
+            "provider": ready[0] if ready else None,
+            "order": order,
+            "providers": {name: specs[name].safe_summary() for name in order},
+            "key_configured": bool(ready),
+            "validation_scope": "configuration_only",
         },
     )
 
@@ -97,6 +91,24 @@ def validate_detector_model_reference() -> ComponentCheckResult:
             detail=f"Detector artifact directory is incomplete; missing: {', '.join(missing)}",
             metadata=metadata,
         )
+    try:
+        with (model_dir / "model.safetensors").open("rb") as weight:
+            if weight.read(128).startswith(b"version https://git-lfs.github.com/spec"):
+                raise ValueError("Model weights are a Git LFS pointer; run git lfs pull")
+        config = json.loads((model_dir / "config.json").read_text(encoding="utf-8"))
+        calibration = json.loads((model_dir / "calibration.json").read_text(encoding="utf-8"))
+        temperature = float(calibration["temperature"])
+        threshold = float(calibration["hallucination_threshold"])
+        max_length = int(calibration["max_length"])
+        if not math.isfinite(temperature) or temperature <= 0 or not math.isfinite(threshold) or not 0 < threshold < 1:
+            raise ValueError("Invalid detector calibration")
+        if not 8 <= max_length <= config["max_position_embeddings"]:
+            raise ValueError("Invalid detector context length")
+        if set(config["id2label"].values()) != {"SUPPORTED", "CONTRADICTED", "NOT_ENOUGH_INFO"}:
+            raise ValueError("Detector labels do not match the grounded contract")
+    except (ValueError, KeyError, OSError, TypeError) as exc:
+        return ComponentCheckResult(False, "detector", f"Invalid detector artifact: {exc}", metadata)
+    metadata["validation_scope"] = "local_files_and_configuration_only"
     return ComponentCheckResult(
         ok=True,
         component="detector",
@@ -218,6 +230,7 @@ def validate_orchestration_startup() -> Dict[str, Any]:
 
     return {
         "ok": all_ok,
+        "validation_scope": "configuration_only_not_inference_or_retrieval",
         "backend_status": "healthy" if all_ok else "degraded",
         "environment": os.environ.get("HALLUCIGUARD_ENV", "production"),
         "active_agents": active_agents,

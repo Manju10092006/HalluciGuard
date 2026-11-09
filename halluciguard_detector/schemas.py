@@ -39,6 +39,7 @@ class SentenceResult(BaseModel):
     hallucination_probability: float
     risk: RiskLevel
     evidence_snippets: list[str]
+    entity_review_required: bool = False
 
 
 class DetectResponse(BaseModel):

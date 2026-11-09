@@ -1,8 +1,8 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronRight, Cpu } from 'lucide-react'
-import { AGENT_PIPELINE } from '../../types/verification'
 
-export function AgentActivity() {
+
+export function AgentActivity({ pipeline = [] }) {
   const [isOpen, setIsOpen] = useState(false)
 
   return (
@@ -23,15 +23,16 @@ export function AgentActivity() {
       {isOpen && (
         <div className="pipeline-drawer">
           <div className="pipeline-steps">
-            {AGENT_PIPELINE.map((agent, index) => (
+            {pipeline.length === 0 && <span>No execution trace was returned.</span>}
+            {pipeline.map((agent, index) => (
               <div className="pipeline-step-item" key={agent.id}>
                 <div className="step-num-col">
                   <span className="step-index">0{index + 1}</span>
-                  {index < AGENT_PIPELINE.length - 1 && <div className="step-line" />}
+                  {index < pipeline.length - 1 && <div className="step-line" />}
                 </div>
                 <div className="step-body">
                   <span className="agent-title">{agent.name}</span>
-                  <span className="agent-role-desc">{agent.role}</span>
+                  <span className="agent-role-desc">{agent.detail}{agent.latency_ms != null ? ` · ${agent.latency_ms} ms` : ''}</span>
                 </div>
               </div>
             ))}

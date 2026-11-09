@@ -12,7 +12,7 @@ interface GoogleSignInButtonProps {
 
 const GOOGLE_CLIENT_ID =
   process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
-  "88154202029-lrr58hkhqmu7td24ln93i6t21jp8hki2.apps.googleusercontent.com";
+  "";
 
 export function GoogleSignInButton({ onSuccess, onError }: GoogleSignInButtonProps) {
   const { signInWithGoogle } = useAuth();
@@ -21,6 +21,7 @@ export function GoogleSignInButton({ onSuccess, onError }: GoogleSignInButtonPro
   const buttonContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
     if (typeof window !== "undefined" && (window as any).google?.accounts?.id) {
       setSdkReady(true);
       return;
@@ -95,6 +96,8 @@ export function GoogleSignInButton({ onSuccess, onError }: GoogleSignInButtonPro
       (window as any).google.accounts.id.prompt();
     }
   };
+
+  if (!GOOGLE_CLIENT_ID) return <p className="text-sm text-center">Use email to sign in.</p>;
 
   return (
     <div className="w-full flex flex-col items-center">

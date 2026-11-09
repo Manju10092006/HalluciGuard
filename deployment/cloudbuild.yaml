@@ -1,0 +1,18 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=deployment/Dockerfile.upgrade
+      - --build-arg=MODEL_RUNTIME=${_MODEL_RUNTIME}
+      - --tag=asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/halluciguard/halluciguard-detector:upgrade-${_RELEASE_SHA}
+      - .
+images:
+  - asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/halluciguard/halluciguard-detector:upgrade-${_RELEASE_SHA}
+substitutions:
+  _MODEL_RUNTIME: asia-south1-docker.pkg.dev/project-836457aa-3a05-4a11-8f8/cloud-run-source-deploy/halluciguard/halluciguard-staging-20261024@sha256:5f90336b2a39ba11742a249215b501fbd2f26ab15bb146658f09e70563fd4cb7
+  _RELEASE_SHA: local
+timeout: 1200s
+options:
+  machineType: E2_STANDARD_2
+  diskSizeGb: 100
+  logging: CLOUD_LOGGING_ONLY

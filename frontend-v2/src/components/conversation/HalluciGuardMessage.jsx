@@ -20,7 +20,7 @@ export function HalluciGuardMessage({ message, onOpenSource }) {
       <div className="message-body">
         {/* Priority 1: Answer text */}
         <div className="answer-text">
-          <p>{message.text}</p>
+          <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>
         </div>
 
         {/* Priority 2: Verification status */}
@@ -52,7 +52,7 @@ export function HalluciGuardMessage({ message, onOpenSource }) {
         )}
 
         {/* Priority 5: Agent activity pipeline disclosure */}
-        <AgentActivity />
+        <AgentActivity pipeline={message.pipeline} />
       </div>
 
       <style>{`

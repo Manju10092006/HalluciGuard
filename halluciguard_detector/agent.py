@@ -125,7 +125,8 @@ class DetectorAgent:
                         key.value: value for key, value in sentence.probabilities.items()
                     },
                     "risk_level": sentence.risk.value,
-                    "requires_verification": sentence.hallucination_probability >= detector.threshold,
+                    "requires_verification": sentence.hallucination_probability >= detector.threshold or getattr(sentence, "entity_review_required", False),
+                    "entity_review_required": getattr(sentence, "entity_review_required", False),
                     "evidence_snippets": sentence.evidence_snippets,
                 }
             )

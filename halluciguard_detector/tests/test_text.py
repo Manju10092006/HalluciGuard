@@ -12,6 +12,13 @@ def test_sentence_offsets_round_trip():
     assert all(text[span.start : span.end] == span.text for span in spans)
 
 
+def test_titles_quotes_and_lowercase_sentences_preserve_exact_spans():
+    text = 'I met Dr. Smith. "Paris is in France." another sentence follows.'
+    spans = sentence_spans(text)
+    assert [s.text for s in spans] == ['I met Dr. Smith.', '"Paris is in France."', 'another sentence follows.']
+    assert all(text[s.start:s.end] == s.text for s in spans)
+
+
 def test_annotation_mapping():
     conflict = [{"start": 5, "end": 10, "label_type": "Evident Conflict"}]
     baseless = [{"start": 5, "end": 10, "label_type": "Evident Baseless Info"}]

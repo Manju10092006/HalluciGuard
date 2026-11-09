@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
 import requests
+from .firestore_store import get_store
 
 # Path configuration
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -57,6 +58,8 @@ def _get_db_connection() -> sqlite3.Connection:
 
 def init_auth_db() -> None:
     """Initialize database tables for users and authenticated verification history."""
+    if get_store() is not None:
+        return
     conn = _get_db_connection()
     try:
         cursor = conn.cursor()
@@ -141,8 +144,14 @@ def decode_jwt_token(token: str) -> Dict[str, Any]:
         raise ValueError(f"Invalid token: {exc}")
 
 
+def _public_user(row):
+    return {"id": row["id"], "sub": row["id"], "email": row["email"], "name": row["name"], "picture": row.get("picture"), "created_at": row["created_at"]}
+
+
 def register_user(email: str, password: str, name: Optional[str] = None) -> Tuple[Dict[str, Any], str]:
     """Register a new user and return (user_dict, access_token)."""
+    # Do not commit an unusable account if token signing is misconfigured.
+    _jwt_secret()
     email_clean = email.strip().lower()
     if not email_clean or "@" not in email_clean:
         raise ValueError("Valid email address is required")
@@ -154,6 +163,12 @@ def register_user(email: str, password: str, name: Optional[str] = None) -> Tupl
     salt = secrets.token_hex(16)
     pwd_hash = _hash_password(password, salt)
     now = datetime.datetime.now(timezone.utc).isoformat()
+
+    store = get_store()
+    if store is not None:
+        row = {"id": user_id, "email": email_clean, "name": display_name, "password_salt": salt, "password_hash": pwd_hash, "created_at": now, "auth_provider": "local"}
+        store.create_user(row)
+        return _public_user(row), create_jwt_token(user_id, email_clean, display_name)
 
     conn = _get_db_connection()
     try:
@@ -189,6 +204,13 @@ def authenticate_user(email: str, password: str) -> Tuple[Dict[str, Any], str]:
     email_clean = email.strip().lower()
     if not email_clean or not password:
         raise ValueError("Email and password are required")
+
+    store = get_store()
+    if store is not None:
+        row = store.by_email(email_clean)
+        if not row or not hmac.compare_digest(_hash_password(password, row["password_salt"]), row["password_hash"]):
+            raise ValueError("Invalid email or password")
+        return _public_user(row), create_jwt_token(row["id"], row["email"], row["name"], picture=row.get("picture"))
 
     conn = _get_db_connection()
     try:
@@ -228,6 +250,7 @@ def authenticate_user(email: str, password: str) -> Tuple[Dict[str, Any], str]:
 
 def authenticate_google_user(credential: str) -> Tuple[Dict[str, Any], str]:
     """Validate Google OAuth ID token, sync or create user, and return (user_dict, access_token)."""
+    _jwt_secret()
     if not credential:
         raise ValueError("Google credential token is required")
 
@@ -269,6 +292,24 @@ def authenticate_google_user(credential: str) -> Tuple[Dict[str, Any], str]:
     name = (google_data.get("name") or google_data.get("given_name") or email.split("@")[0]).strip()
     picture = google_data.get("picture")
     now = datetime.datetime.now(timezone.utc).isoformat()
+
+    store = get_store()
+    if store is not None:
+        row = store.by_email(email)
+        if row is None:
+            salt = secrets.token_hex(16)
+            row = {"id": str(uuid.uuid4()), "email": email, "name": name, "picture": picture, "password_salt": salt, "password_hash": _hash_password(secrets.token_urlsafe(32), salt), "auth_provider": "google", "created_at": now}
+            try:
+                store.create_user(row)
+            except ValueError:
+                row = store.by_email(email)
+                if row is None:
+                    raise
+        store.update_profile(row["id"], name, picture)
+        row.update(name=name)
+        if picture:
+            row['picture'] = picture
+        return _public_user(row), create_jwt_token(row["id"], email, name, picture=row.get("picture"))
 
     conn = _get_db_connection()
     try:
@@ -322,6 +363,13 @@ def get_user_by_token(token: str) -> Dict[str, Any]:
     user_id = payload.get("sub")
     if not user_id:
         raise ValueError("Token missing subject identifier")
+
+    store = get_store()
+    if store is not None:
+        row = store.by_id(user_id)
+        if not row:
+            raise ValueError("Account no longer exists")
+        return _public_user(row)
 
     conn = _get_db_connection()
     try:
@@ -396,6 +444,12 @@ def save_user_history(
     )
     result_json = json.dumps(result_dict)
 
+    store = get_store()
+    if store is not None:
+        record = {"id": history_id, "user_id": user_id, "query": query, "verdict": verdict, "confidence": confidence, "created_at": now}
+        store.save_history(user_id, record, result_dict)
+        return record
+
     conn = _get_db_connection()
     try:
         cursor = conn.cursor()
@@ -422,6 +476,10 @@ def save_user_history(
 
 def get_user_history(user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     """Retrieve history records for a specific authenticated user."""
+    limit = max(1, min(limit, 200))
+    store = get_store()
+    if store is not None:
+        return store.list_history(user_id, limit)
     conn = _get_db_connection()
     try:
         cursor = conn.cursor()
@@ -459,6 +517,9 @@ def get_user_history(user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
 
 def clear_user_history(user_id: str, history_id: Optional[str] = None) -> bool:
     """Clear all history or a single history item for a user."""
+    store = get_store()
+    if store is not None:
+        return store.clear_history(user_id, history_id)
     conn = _get_db_connection()
     try:
         cursor = conn.cursor()
