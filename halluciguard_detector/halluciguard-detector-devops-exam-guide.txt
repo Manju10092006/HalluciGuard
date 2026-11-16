@@ -1,9 +1,9 @@
 ================================================================
-HALLUCIGUARD DETECTOR — NLP LAB DEVOPS EXAM GUIDE (OLTRS)
+HALLUCIGUARD DETECTOR — DEVOPS EXAM GUIDE (OLTRS)
 ================================================================
 What this is: the complete step-by-step execution guide for the
-NLP lab DevOps practical — Docker Compose, Jenkins, Minikube /
-Kubernetes, AWS EC2 — built around ma'am's OLTRS repository.
+DevOps practical — Docker Compose, Jenkins, Minikube /
+Kubernetes, AWS EC2 — built around the OLTRS project repository.
 
 HOW TO USE IT IN THE EXAM
 - Follow it TOP TO BOTTOM, in order. Do Step 1 first, then Step 2,
@@ -319,7 +319,6 @@ You do not need to memorise image IDs or download some mysterious
 image. You need the correct image name, a valid Dockerfile, and
 the ability to build and push your application image.
 
-Exam: NLP lab, Wed 18 Nov 2026. DevOps block: Docker Compose,
-Jenkins, minikube, Nagios, AWS + 9 deep-learning programs.
+DevOps practical: Docker Compose, Jenkins, Minikube, AWS EC2.
 Docker Hub username on record: sogalapallimanjunathreddy.
 Repository: https://github.com/archanareddyse/OLTRS.git
