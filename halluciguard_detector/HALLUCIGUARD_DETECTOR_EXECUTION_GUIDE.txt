@@ -1,0 +1,738 @@
+HALLUCIGUARD DETECTOR
+EXECUTION GUIDE
+================================================================
+
+PROJECT DETAILS
+GitHub project:
+https://github.com/Manju10092006/HalluciGuard
+
+OLTRS source repository used for the deployment workflow:
+https://github.com/archanareddyse/OLTRS.git
+
+Docker Hub username:
+sogalapallimanjunathreddy
+
+Docker Hub image:
+sogalapallimanjunathreddy/oltrs:v1
+
+Jenkins credentials ID:
+dockerhub-credentials
+
+Previously configured Jenkins Maven tool:
+MAVEN-HOME
+
+Previously used email address:
+manju.sogala@gmail.com
+
+Use these saved values consistently. Do not replace them with
+generic username placeholders. Only values that are genuinely
+unknown at execution time (such as a new EC2 public IP, private
+key filename, or current ngrok URL) remain to be supplied.
+
+================================================================
+1. INITIAL COMPUTER CHECKS
+================================================================
+
+Open PowerShell or CMD on Windows:
+
+    docker --version
+    docker compose version
+    git --version
+    java -version
+    mvn -version
+    kubectl version --client
+    minikube version
+    docker info
+
+If docker info cannot connect, start Docker Desktop and wait until
+the Docker engine is running.
+
+Windows file listing:
+
+    dir
+
+Git Bash / Linux file listing:
+
+    ls
+
+Do not reinstall software that is already configured.
+
+================================================================
+2. OLTRS SOURCE — CLONE AND BUILD
+================================================================
+
+Clone the source repository:
+
+    git clone https://github.com/archanareddyse/OLTRS.git
+    cd OLTRS
+    dir
+
+Inspect the Maven project:
+
+    dir pom.xml
+    type pom.xml
+
+Build and test:
+
+    mvn clean test package
+
+Check the generated output:
+
+    dir target
+
+The previously inspected project configuration specifies:
+- WAR packaging
+- Java 8
+- javax.servlet 4.0.1
+- Tomcat 9 compatibility
+- Expected output: target/ticket-reservation.war
+
+Always verify pom.xml and the actual target folder before building
+the container. If the repository has changed, use the real output
+filename and compatible runtime shown by the current project.
+
+================================================================
+3. CREATE THE DOCKERFILE
+================================================================
+
+The previously inspected OLTRS repository contained an empty
+Dockerfile. Open the file from the OLTRS project root:
+
+    notepad Dockerfile
+
+Save the file with the exact name Dockerfile (not Dockerfile.txt).
+
+For the inspected Java 8 / javax.servlet WAR application, paste:
+
+    FROM tomcat:9.0-jdk8
+    COPY target/ticket-reservation.war /usr/local/tomcat/webapps/ROOT.war
+    EXPOSE 8080
+    CMD ["catalina.sh", "run"]
+
+Why Tomcat 9:
+The inspected project uses javax.servlet. Tomcat 10 uses the
+jakarta namespace and is not a direct drop-in replacement for
+this application without migrating the code.
+
+Verify the file:
+
+    type Dockerfile
+
+Build the application image:
+
+    docker build -t sogalapallimanjunathreddy/oltrs:v1 .
+
+Verify:
+
+    docker images
+
+Login and push:
+
+    docker login
+    docker push sogalapallimanjunathreddy/oltrs:v1
+
+Use the Docker Hub access token/password when prompted. Never
+write the token into the Dockerfile, source code or Jenkinsfile.
+
+Optional local test:
+
+    docker run -d --name oltrs-test -p 8080:8080 sogalapallimanjunathreddy/oltrs:v1
+    docker ps
+    docker logs oltrs-test
+
+Open:
+
+    http://localhost:8080
+
+Cleanup:
+
+    docker stop oltrs-test
+    docker rm oltrs-test
+
+================================================================
+4. DOCKER COMPOSE WITH MYSQL
+================================================================
+
+Create a folder and Compose file:
+
+    mkdir ComposeMySQL
+    cd ComposeMySQL
+    notepad docker-compose.yml
+
+Use this structure. The exact web image and database environment
+variable names must match the web application being deployed.
+Those details are not established by the OLTRS image name alone.
+
+    services:
+      web:
+        image: WEB_IMAGE_SUPPLIED_FOR_THIS_DEPLOYMENT
+        container_name: web-app
+        ports:
+          - "8080:8080"
+        environment:
+          DB_HOST: mysql
+          DB_PORT: 3306
+          DB_NAME: oltrs_db
+          DB_USER: oltrs_user
+          DB_PASSWORD: oltrs_password
+        depends_on:
+          mysql:
+            condition: service_healthy
+        networks:
+          - app-network
+
+      mysql:
+        image: mysql:8.0
+        container_name: mysql-db
+        restart: always
+        environment:
+          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_DATABASE: oltrs_db
+          MYSQL_USER: oltrs_user
+          MYSQL_PASSWORD: oltrs_password
+        ports:
+          - "3307:3306"
+        volumes:
+          - mysql-data:/var/lib/mysql
+        healthcheck:
+          test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot_password"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+        networks:
+          - app-network
+
+    volumes:
+      mysql-data:
+
+    networks:
+      app-network:
+        driver: bridge
+
+Important:
+- Use mysql as DB_HOST from the web container, not localhost.
+- Host port 3307 maps to container port 3306.
+- Change web port mapping if the application listens elsewhere.
+- DB environment variable names above are examples; use the
+  names expected by the actual web application.
+- Replace WEB_IMAGE_SUPPLIED_FOR_THIS_DEPLOYMENT with the exact
+  image name provided for that Compose task.
+
+Validate and start:
+
+    docker compose config
+    docker compose pull
+    docker compose up -d
+
+Verify:
+
+    docker compose ps
+    docker ps
+    docker compose logs
+    docker compose logs web
+    docker compose logs mysql
+
+Open:
+
+    http://localhost:8080
+
+Useful commands:
+
+    docker compose stop
+    docker compose start
+    docker compose restart
+    docker compose down
+    docker compose down -v
+    docker compose up -d
+    docker compose up -d --build
+    docker compose exec mysql mysql -u oltrs_user -p oltrs_db
+
+Remember:
+docker compose down removes containers and the default network.
+Named volumes remain by default.
+docker compose down -v also removes named volumes and database data.
+
+================================================================
+5. JENKINS SCRIPTED PIPELINE — OLTRS
+================================================================
+
+Jenkins job setup:
+
+1. Open the Jenkins URL configured on the computer.
+   Local default, if Jenkins runs locally:
+
+       http://localhost:8080
+
+2. Check that Git and Pipeline plugins are installed.
+
+3. Manage Jenkins > Tools:
+   Configure JDK and Maven. The previously used Maven tool name is:
+
+       MAVEN-HOME
+
+   Use the exact installation name configured in Jenkins. The
+   pipeline below expects Maven and Docker CLI to be available
+   on the selected Jenkins agent's PATH.
+
+4. Manage Jenkins > Credentials > Global > Add Credentials:
+   Kind: Username with password
+   Username: sogalapallimanjunathreddy
+   Password: Docker Hub access token
+   ID: dockerhub-credentials
+
+5. Dashboard > New Item:
+   Name: HalluciGuard-OLTRS-CICD
+   Type: Pipeline
+
+6. In Build Triggers, enable:
+   GitHub hook trigger for GITScm polling
+
+7. In Pipeline, choose Pipeline script and paste the Scripted
+   Pipeline below.
+
+SCRIPTED PIPELINE — LINUX JENKINS AGENT
+
+    node {
+        def imageName = 'sogalapallimanjunathreddy/oltrs:v1'
+
+        try {
+            stage('Checkout') {
+                git branch: 'main',
+                    url: 'https://github.com/archanareddyse/OLTRS.git'
+            }
+
+            stage('Build and Test') {
+                sh 'mvn clean test package'
+            }
+
+            stage('Docker Build') {
+                sh "docker build -t ${imageName} ."
+            }
+
+            stage('Docker Login and Push') {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    sh '''
+                        echo "$DOCKER_PASS" | docker login                         -u "$DOCKER_USER" --password-stdin
+                    '''
+                    sh "docker push ${imageName}"
+                    sh 'docker logout'
+                }
+            }
+
+            stage('Success') {
+                echo 'OLTRS build, Docker image and push completed'
+            }
+
+        } catch (Exception e) {
+            echo "Pipeline failed: ${e}"
+
+            emailext(
+                subject: "HalluciGuard Detector - Build Failed: ${env.BUILD_NUMBER}",
+                body: "The OLTRS pipeline failed. Console output: ${env.BUILD_URL}",
+                to: 'manju.sogala@gmail.com'
+            )
+
+            throw e
+        }
+    }
+
+Pipeline behaviour:
+- Checkout retrieves the OLTRS main branch.
+- Build and Test runs Maven clean, tests and package.
+- Docker Build runs only after Maven succeeds.
+- Docker Login and Push uses Jenkins Credentials.
+- Success stage runs only if previous stages succeed.
+- If a stage fails, catch sends the failure email and rethrows
+  the error so Jenkins records the build as failed.
+
+Email requirement:
+The emailext step requires Email Extension plugin and working SMTP
+configuration in Jenkins. If SMTP is not configured, configure it
+before relying on failure notifications. If email is not required,
+remove only the emailext(...) block and keep throw e.
+
+WINDOWS JENKINS AGENT NOTE
+
+For Windows agents use bat instead of sh:
+
+    bat 'mvn clean test package'
+    bat "docker build -t IMAGE_NAME ."
+    bat "docker push IMAGE_NAME"
+
+Use Jenkins credential binding with a secure Windows-compatible
+Docker login command. Never hardcode the password in a bat command.
+
+================================================================
+6. GITHUB WEBHOOK FOR JENKINS
+================================================================
+
+GitHub must be able to reach the Jenkins server. A localhost URL
+alone is not publicly reachable.
+
+If Jenkins is running locally and ngrok is permitted:
+
+    ngrok http 8080
+
+Copy the current HTTPS forwarding URL printed by ngrok.
+
+In GitHub:
+1. Open the repository.
+2. Settings > Webhooks > Add webhook.
+3. Payload URL:
+
+       https://CURRENT_NGROK_HOST/github-webhook/
+
+4. Content type: application/json
+5. Select Just the push event.
+6. Add webhook.
+
+In Jenkins:
+Enable GitHub hook trigger for GITScm polling and save.
+
+Use the current ngrok URL; old tunnel addresses may expire.
+Only push a test commit to a repository/branch where you have
+permission to push.
+
+Git commands, when you are authorized to push:
+
+    git status
+    git add .
+    git commit -m "Update OLTRS application"
+    git push origin main
+
+================================================================
+7. MINIKUBE AND KUBERNETES
+================================================================
+
+Start Minikube:
+
+    minikube start --driver=docker
+    minikube status
+    kubectl cluster-info
+    kubectl get nodes
+
+Create deployment.yaml:
+
+    notepad deployment.yaml
+
+Paste:
+
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: oltrs-deployment
+    spec:
+      replicas: 4
+      selector:
+        matchLabels:
+          app: oltrs
+      template:
+        metadata:
+          labels:
+            app: oltrs
+        spec:
+          containers:
+            - name: oltrs-container
+              image: sogalapallimanjunathreddy/oltrs:v1
+              ports:
+                - containerPort: 8080
+
+Create service.yaml:
+
+    notepad service.yaml
+
+Paste:
+
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: oltrs-service
+    spec:
+      type: NodePort
+      selector:
+        app: oltrs
+      ports:
+        - port: 8080
+          targetPort: 8080
+          nodePort: 30080
+          protocol: TCP
+
+The Deployment image must exactly match the Docker Hub image pushed
+earlier. The containerPort and targetPort must match the real app
+port. Service selector and Pod label must both be app: oltrs.
+
+Apply:
+
+    kubectl apply -f deployment.yaml
+    kubectl apply -f service.yaml
+
+Verify:
+
+    kubectl get nodes
+    kubectl get deployments
+    kubectl get replicasets
+    kubectl get pods
+    kubectl get pods -o wide
+    kubectl get services
+    kubectl get endpoints oltrs-service
+    kubectl rollout status deployment/oltrs-deployment
+
+Scale:
+
+    kubectl scale deployment oltrs-deployment --replicas=4
+    kubectl get deployment oltrs-deployment
+    kubectl get pods
+
+Access:
+
+    minikube service oltrs-service --url
+
+Alternative:
+
+    kubectl port-forward service/oltrs-service 8081:8080
+
+Open:
+
+    http://localhost:8081
+
+Troubleshooting:
+
+    kubectl describe deployment oltrs-deployment
+    kubectl describe service oltrs-service
+    kubectl get pods --show-labels
+    kubectl get events --sort-by=.metadata.creationTimestamp
+    kubectl logs POD_NAME
+
+Replace POD_NAME with an actual Pod name.
+
+Cleanup:
+
+    kubectl delete deployment oltrs-deployment
+    kubectl delete service oltrs-service
+
+================================================================
+8. AWS EC2 DEPLOYMENT
+================================================================
+
+AWS Console steps:
+1. Open AWS Console and select the required Region.
+2. EC2 > Launch instance.
+3. Select required AMI and instance type.
+4. Create/select key pair and download the .pem file.
+5. Create/select Security Group.
+6. Launch instance and wait for Running + status checks passed.
+7. Copy Public IPv4 address / Public DNS.
+
+Security Group inbound:
+- SSH TCP 22: administrator public IP /32 only.
+- HTTP TCP 80: 0.0.0.0/0 if public HTTP is required.
+- Custom TCP 8080: 0.0.0.0/0 only if directly exposing port 8080.
+
+From Windows PowerShell, go to the key folder:
+
+    cd C:\Users\YOUR_WINDOWS_USERNAME\Downloads
+
+Connect:
+
+    ssh -i "your-key.pem" ubuntu@YOUR_EC2_PUBLIC_IP
+
+Replace only the key filename and public IP with the real values.
+
+For Git Bash / Linux, if required:
+
+    chmod 400 your-key.pem
+    ssh -i "your-key.pem" ubuntu@YOUR_EC2_PUBLIC_IP
+
+Inside Ubuntu:
+
+    sudo apt update
+    sudo apt install -y git docker.io maven
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    sudo systemctl status docker
+    sudo usermod -aG docker ubuntu
+
+Log out and reconnect for docker group membership to apply.
+Alternatively, prefix Docker commands with sudo.
+
+Check:
+
+    java -version
+    mvn -version
+    docker --version
+    git --version
+
+Clone and build:
+
+    git clone https://github.com/archanareddyse/OLTRS.git
+    cd OLTRS
+    mvn clean test package
+    ls target
+
+Create Dockerfile:
+
+    nano Dockerfile
+
+Paste the same compatible Dockerfile:
+
+    FROM tomcat:9.0-jdk8
+    COPY target/ticket-reservation.war /usr/local/tomcat/webapps/ROOT.war
+    EXPOSE 8080
+    CMD ["catalina.sh", "run"]
+
+Save nano:
+Ctrl+O, Enter, Ctrl+X.
+
+Build, run and verify:
+
+    sudo docker build -t oltrs-app:v1 .
+    sudo docker run -d --name oltrs-container -p 8080:8080 oltrs-app:v1
+    sudo docker ps
+    sudo docker logs oltrs-container
+    sudo docker inspect oltrs-container
+
+Open in browser:
+
+    http://YOUR_EC2_PUBLIC_IP:8080
+
+Allow inbound TCP 8080 in the EC2 Security Group for direct access.
+
+Troubleshooting:
+
+    sudo systemctl status docker
+    sudo systemctl restart docker
+    sudo ss -tulnp
+    sudo ufw status
+    sudo docker ps -a
+    sudo docker logs oltrs-container
+    sudo docker restart oltrs-container
+    sudo docker stop oltrs-container
+    sudo docker start oltrs-container
+
+================================================================
+9. SCENARIO QUICK ANSWERS
+================================================================
+
+DOCKER COMPOSE
+1. Stop all services: docker compose stop
+2. Start stopped services: docker compose start
+3. Remove containers/network: docker compose down
+4. Apply updated Compose file: docker compose up -d
+5. Stop only backend: docker compose stop backend
+
+JENKINS
+1. No webhook trigger: check URL, webhook delivery, job trigger,
+   repository, branch and Jenkins public reachability.
+2. Maven failure: pipeline stops before Docker stages; catch rethrows.
+3. Docker login failure: check dockerhub-credentials and token.
+4. Find error: Jenkins job > Build History > Console Output.
+5. Failure email: emailext in catch; SMTP must be configured.
+
+KUBERNETES
+1. Scale to four:
+   kubectl scale deployment oltrs-deployment --replicas=4
+2. App not reachable: check NodePort, targetPort, Service selector.
+3. Pods not running: describe Pod, inspect events and logs.
+4. No endpoints: match Service selector with Pod labels and readiness.
+5. Remove resources: delete Deployment and Service.
+
+AWS
+1. SSH failure: check IP, username, key, port 22 and network route.
+2. App not public: check port mapping, Security Group and firewall.
+3. No public IP: Elastic IP or public subnet + Internet Gateway.
+4. Persistent data: EBS volume + mount + persistent Docker storage.
+5. Public HTTP / restricted SSH: port 80 public, port 22 admin IP only.
+
+================================================================
+10. FINAL COMMAND REVISION
+================================================================
+
+INITIAL CHECKS:
+
+    docker --version
+    docker compose version
+    git --version
+    java -version
+    mvn -version
+    kubectl version --client
+    minikube version
+    docker info
+
+GIT AND MAVEN:
+
+    git clone https://github.com/archanareddyse/OLTRS.git
+    cd OLTRS
+    mvn clean test package
+    dir target
+
+DOCKERFILE BUILD AND PUSH:
+
+    notepad Dockerfile
+    docker build -t sogalapallimanjunathreddy/oltrs:v1 .
+    docker login
+    docker push sogalapallimanjunathreddy/oltrs:v1
+    docker images
+
+COMPOSE:
+
+    docker compose config
+    docker compose up -d
+    docker compose ps
+    docker compose logs
+    docker compose stop
+    docker compose start
+    docker compose down
+
+JENKINS ORDER:
+Checkout -> Build and Test -> Docker Build -> Docker Login -> Push
+
+KUBERNETES:
+
+    minikube start --driver=docker
+    kubectl get nodes
+    kubectl apply -f deployment.yaml
+    kubectl apply -f service.yaml
+    kubectl get deployments
+    kubectl get pods
+    kubectl get services
+    kubectl scale deployment oltrs-deployment --replicas=4
+    kubectl rollout status deployment/oltrs-deployment
+    minikube service oltrs-service --url
+
+AWS:
+
+    sudo apt update
+    sudo apt install -y git docker.io maven
+    sudo systemctl enable --now docker
+    git clone https://github.com/archanareddyse/OLTRS.git
+    cd OLTRS
+    mvn clean test package
+    sudo docker build -t oltrs-app:v1 .
+    sudo docker run -d --name oltrs-container -p 8080:8080 oltrs-app:v1
+    sudo docker ps
+    sudo docker logs oltrs-container
+
+================================================================
+IMPORTANT NOTES
+================================================================
+
+1. The Compose web image and its expected database environment
+   variable names must come from the specific application being
+   deployed. They are not inferable from the OLTRS Docker image.
+2. The OLTRS WAR filename and Tomcat compatibility reflect the
+   previously inspected repository state. Re-check pom.xml and
+   target output if the repository changes.
+3. Use the exact same Docker image name for build, push and
+   Kubernetes Deployment.
+4. Never commit Docker Hub tokens, passwords, AWS private keys or
+   Jenkins secrets.
+5. Verify each stage before moving to the next.
+
+HALLUCIGUARD DETECTOR
+END OF EXECUTION GUIDE
